@@ -25,118 +25,118 @@ This comprehensive lab series provides hands-on experience with Amazon Web Servi
 ---
 
 <details>
-  <summary>Lab Session 1: Provisioning and Securing EC2 in a Custom VPC</summary>
+  <summary>Lab Session 01: Provisioning and Securing EC2 in a Custom VPC</summary>
 
   Learn how to create, secure, and manage EC2 instances inside a custom Virtual Private Cloud (VPC).
 
   **Labs for this session:**
-  - [lab_1_a_ec2-vpc.md](session1/lab_1_a_ec2-vpc.md):  
+  - [lab_1_a_ec2-vpc.md](session01/lab_1_a_ec2-vpc.md):  
     *Launch and configure a Linux EC2 instance in a custom VPC.*
-  - [lab_1_b_dns-security.md](session1/lab_1_b_dns-security.md):  
+  - [lab_1_b_dns-security.md](session01/lab_1_b_dns-security.md):  
     *Secure web access using Security Groups, NACLs, and Route 53 DNS.*
 
 </details>
 
 <details>
-  <summary>Lab Session 2: Identity and Access Control with IAM</summary>
+  <summary>Lab Session 02: Identity and Access Control with IAM</summary>
 
   Master AWS Identity and Access Management (IAM) by applying least-privilege security and MFA.
 
   **Labs for this session:**
-  - [lab_2_a_iam-users-policies.md](session2/lab_2_a_iam-users-policies.md):  
+  - [lab_2_a_iam-users-policies.md](session02/lab_2_a_iam-users-policies.md):  
     *Create IAM users, groups, and custom policies for least privilege.*
-  - [lab_2_b_iam-roles-mfa.md](session2/lab_2_b_iam-roles-mfa.md):  
+  - [lab_2_b_iam-roles-mfa.md](session02/lab_2_b_iam-roles-mfa.md):  
     *Configure IAM roles and MFA for secure access to AWS services.*
 
 </details>
 
 <details>
-  <summary>Lab Session 3: Managing Object and Block Storage</summary>
+  <summary>Lab Session 03: Managing Object and Block Storage</summary>
 
   Explore storage management with Amazon S3 and EBS, including security and lifecycle automation.
 
   **Labs for this session:**
-  - [lab_3_a_s3-lifecycle.md](session3/lab_3_a_s3-lifecycle.md):  
+  - [lab_3_a_s3-lifecycle.md](session03/lab_3_a_s3-lifecycle.md):  
     *Manage S3 buckets with versioning, encryption, and lifecycle rules.*
-  - [lab_3_b_ebs-snapshots.md](session3/lab_3_b_ebs-snapshots.md):  
+  - [lab_3_b_ebs-snapshots.md](session03/lab_3_b_ebs-snapshots.md):  
     *Attach and manage EBS volumes and snapshots for EC2 instances.*
 
 </details>
 
 <details>
-  <summary>Lab Session 4: Deploying and Connecting AWS Databases</summary>
+  <summary>Lab Session 04: Deploying and Connecting AWS Databases</summary>
 
   Learn to launch, connect, and manage relational and NoSQL databases in AWS.
 
   **Labs for this session:**
-  - [lab_4_a_rds-mysql-private.md](session4/lab_4_a_rds-mysql-private.md):  
+  - [lab_4_a_rds-mysql-private.md](session04/lab_4_a_rds-mysql-private.md):  
     *Provision and connect to an RDS MySQL database in a private subnet.*
-  - [lab_4_b_dynamodb-cli.md](session4/lab_4_b_dynamodb-cli.md):  
+  - [lab_4_b_dynamodb-cli.md](session04/lab_4_b_dynamodb-cli.md):  
     *Build and query a DynamoDB table using AWS CLI and SDK.*
 
 </details>
 
 <details>
-  <summary>Lab Session 5: Application Load Balancing and Auto Scaling</summary>
+  <summary>Lab Session 05: Application Load Balancing and Auto Scaling</summary>
 
   Implement high availability and elasticity using Load Balancers and Auto Scaling Groups.
 
   **Labs for this session:**
-  - [lab_5_a_alb-deployment.md](session5/lab_5_a_alb-deployment.md):  
+  - [lab_5_a_alb-deployment.md](session05/lab_5_a_alb-deployment.md):  
     *Deploy a web application behind an Application Load Balancer (ALB).*
-  - [lab_5_b_autoscaling-cloudwatch.md](session5/lab_5_b_autoscaling-cloudwatch.md):  
+  - [lab_5_b_autoscaling-cloudwatch.md](session05/lab_5_b_autoscaling-cloudwatch.md):  
     *Configure Auto Scaling policies and CloudWatch alarms for EC2.*
 
 </details>
 
 <details>
-  <summary>Lab Session 6: Containerizing Applications with ECS (Fargate)</summary>
+  <summary>Lab Session 06: Containerizing Applications with ECS (Fargate)</summary>
 
   Package and deploy containerized applications with Amazon ECS and ECR.
 
   **Labs for this session:**
-  - [lab_6_a_ecr-docker-push.md](session6/lab_6_a_ecr-docker-push.md):  
+  - [lab_6_a_ecr-docker-push.md](session06/lab_6_a_ecr-docker-push.md):  
     *Build and push Docker images to Amazon Elastic Container Registry (ECR).*
-  - [lab_6_b_ecs-fargate-deploy.md](session6/lab_6_b_ecs-fargate-deploy.md):  
+  - [lab_6_b_ecs-fargate-deploy.md](session06/lab_6_b_ecs-fargate-deploy.md):  
     *Deploy a containerized app on Amazon ECS using Fargate.*
 
 </details>
 
 <details>
-  <summary>Lab Session 7: Serverless Application with Lambda and API Gateway</summary>
+  <summary>Lab Session 07: Serverless Application with Lambda and API Gateway</summary>
 
   Build and test serverless REST APIs and background processing flows.
 
   **Labs for this session:**
-  - [lab_7_a_lambda-api-gateway.md](session7/lab_7_a_lambda-api-gateway.md):  
+  - [lab_7_a_lambda-api-gateway.md](session07/lab_7_a_lambda-api-gateway.md):  
     *Build a REST API using API Gateway integrated with Lambda.*
-  - [lab_7_b_s3-lambda-trigger.md](session7/lab_7_b_s3-lambda-trigger.md):  
+  - [lab_7_b_s3-lambda-trigger.md](session07/lab_7_b_s3-lambda-trigger.md):  
     *Implement data processing pipelines triggered by S3 and Lambda.*
 
 </details>
 
 <details>
-  <summary>Lab Session 8: Event-Driven Messaging with SQS, SNS, and EventBridge</summary>
+  <summary>Lab Session 08: Event-Driven Messaging with SQS, SNS, and EventBridge</summary>
 
   Integrate messaging and automation across AWS services for distributed workflows.
 
   **Labs for this session:**
-  - [lab_8_a_sqs-lambda-integration.md](session8/lab_8_a_sqs-lambda-integration.md):  
+  - [lab_8_a_sqs-lambda-integration.md](session08/lab_8_a_sqs-lambda-integration.md):  
     *Create an event-driven workflow using SQS and Lambda consumers.*
-  - [lab_8_b_sns-eventbridge-alerts.md](session8/lab_8_b_sns-eventbridge-alerts.md):  
+  - [lab_8_b_sns-eventbridge-alerts.md](session08/lab_8_b_sns-eventbridge-alerts.md):  
     *Send multi-channel notifications using SNS and EventBridge rules.*
 
 </details>
 
 <details>
-  <summary>Lab Session 9: Monitoring and Logging Operations</summary>
+  <summary>Lab Session 09: Monitoring and Logging Operations</summary>
 
   Monitor, audit, and analyze your AWS environment using native observability tools.
 
   **Labs for this session:**
-  - [lab_9_a_cloudwatch-dashboard.md](session9/lab_9_a_cloudwatch-dashboard.md):  
+  - [lab_9_a_cloudwatch-dashboard.md](session09/lab_9_a_cloudwatch-dashboard.md):  
     *Configure CloudWatch dashboards, metrics, and alarms.*
-  - [lab_9_b_cloudtrail-logs.md](session9/lab_9_b_cloudtrail-logs.md):  
+  - [lab_9_b_cloudtrail-logs.md](session09/lab_9_b_cloudtrail-logs.md):  
     *Track and audit API calls using CloudTrail and Log Insights.*
 
 </details>
