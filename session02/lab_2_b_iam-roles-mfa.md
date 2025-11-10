@@ -1,163 +1,164 @@
-# Lab 2.A: Launching and Managing EC2 Instances
+# Lab 2.B: Configure IAM roles and MFA for secure access to AWS services
 
 ## Overview
-This lab introduces Amazon Elastic Compute Cloud (EC2), AWS's primary compute service. You'll learn how to launch, configure, and manage virtual servers in the cloud. This hands-on experience covers instance types, storage options, security groups, and basic instance management operations.
+This lab shows how to create and configure IAM roles for cross-account or service access, require MFA for privileged operations, and validate role assumption and MFA enforcement using the AWS CLI and console.
 
 ## Objectives
-- Launch EC2 instances using the AWS Console
-- Select appropriate instance types and AMIs
-- Configure security groups for network access
-- Connect to instances using SSH/RDP
-- Monitor instance metrics and logs
-- Understand EC2 pricing models
+- Create IAM roles with proper trust policies (EC2, cross-account, federated)
+- Attach least-privilege managed or customer-managed policies to roles
+- Require and enforce MFA for sensitive actions using IAM policies
+- Use sts:AssumeRole and sts:GetSessionToken with MFA
+- Test and validate role-based and MFA-protected access
+- Clean up IAM artifacts
 
-## Requirements
-- AWS account with EC2 permissions
-- SSH client (Terminal for Mac/Linux, PuTTY for Windows)
-- Basic understanding of Linux command line
-- Completed IAM labs or equivalent knowledge
-- Key pair for SSH access
+## Prerequisites
+- AWS CLI v2 configured with an admin-capable profile (ADMIN_PROFILE)
+- jq (optional) for JSON handling
+- Browser access for console MFA setup
 
-## Steps
+---
 
-### Step 1: Create a Key Pair
-1. Navigate to EC2 Dashboard
-2. Click on "Key Pairs" under "Network & Security"
-3. Click "Create key pair"
-4. Configure:
-   - Name: `my-lab-keypair`
-   - Key pair type: RSA
-   - Private key file format: .pem (for Mac/Linux) or .ppk (for Windows/PuTTY)
-5. Download and save the key pair securely
-6. Set appropriate permissions (Mac/Linux):
-   ```bash
-   chmod 400 my-lab-keypair.pem
-   ```
+## Key concepts (brief)
+- Role = identity you can assume (has policies + trust policy)
+- Trust policy = which principals can assume the role
+- Permission boundary = maximum permissions a principal can obtain
+- MFA enforcement = require an MFA device/session for sensitive actions
 
-### Step 2: Create a Security Group
-1. In EC2 Dashboard, click "Security Groups"
-2. Click "Create security group"
-3. Configure:
-   - Name: `web-server-sg`
-   - Description: "Security group for web server lab"
-   - VPC: Default VPC
-4. Add inbound rules:
-   - Type: SSH, Port: 22, Source: My IP
-   - Type: HTTP, Port: 80, Source: Anywhere (0.0.0.0/0)
-   - Type: HTTPS, Port: 443, Source: Anywhere (0.0.0.0/0)
-5. Keep default outbound rules (allow all)
-6. Create security group
+---
 
-### Step 3: Launch an EC2 Instance
-1. Click "Launch instance" on EC2 Dashboard
-2. Configure instance:
-   - Name: `web-server-lab`
-   - AMI: Amazon Linux 2023 AMI (Free tier eligible)
-   - Instance type: t2.micro (Free tier eligible)
-   - Key pair: Select `my-lab-keypair`
-   - Network settings: Select `web-server-sg` security group
-   - Configure storage: 8 GB gp3 (default)
-3. Expand "Advanced details" and add user data:
-   ```bash
-   #!/bin/bash
-   yum update -y
-   yum install -y httpd
-   systemctl start httpd
-   systemctl enable httpd
-   echo "<h1>Hello from AWS EC2!</h1>" > /var/www/html/index.html
-   ```
-4. Review and launch the instance
+## Steps (CLI examples)
 
-### Step 4: Connect to Your Instance
-1. Wait for instance state to show "Running"
-2. Select the instance and click "Connect"
-3. Choose connection method:
+Replace placeholders: ADMIN_PROFILE, YOUR_ACCOUNT_ID, TRUSTED_ACCOUNT_ID, ALLOWED_S3_BUCKET, MFA_SERIAL (e.g., arn:aws:iam::YOUR_ACCOUNT_ID:mfa/your-user).
 
-**For SSH (Linux/Mac):**
-```bash
-ssh -i "my-lab-keypair.pem" ec2-user@<public-ip-address>
+### 1. Create an IAM role for EC2 (trusting EC2 service)
+trust-ec2.json:
+```json
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Effect": "Allow",
+      "Principal": { "Service": "ec2.amazonaws.com" },
+      "Action": "sts:AssumeRole"
+    }
+  ]
+}
 ```
 
-**For Session Manager (browser-based):**
-- Ensure IAM role is attached (may require modification)
-- Click "Connect" using Session Manager
+Create role and attach policy (example: S3 read-only):
+```bash
+aws iam create-role --role-name lab-ec2-role --assume-role-policy-document file://trust-ec2.json --profile ADMIN_PROFILE
+aws iam attach-role-policy --role-name lab-ec2-role --policy-arn arn:aws:iam::aws:policy/AmazonS3ReadOnlyAccess --profile ADMIN_PROFILE
+aws iam create-instance-profile --instance-profile-name lab-ec2-instance-profile --profile ADMIN_PROFILE
+aws iam add-role-to-instance-profile --instance-profile-name lab-ec2-instance-profile --role-name lab-ec2-role --profile ADMIN_PROFILE
+```
 
-4. Once connected, verify the web server:
-   ```bash
-   sudo systemctl status httpd
-   curl localhost
-   ```
+### 2. Create a cross-account role (trusted account can assume)
+cross-trust.json (replace TRUSTED_ACCOUNT_ID):
+```json
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Effect": "Allow",
+      "Principal": { "AWS": "arn:aws:iam::TRUSTED_ACCOUNT_ID:root" },
+      "Action": "sts:AssumeRole",
+      "Condition": {}
+    }
+  ]
+}
+```
+Create role and attach policy:
+```bash
+aws iam create-role --role-name cross-account-readonly --assume-role-policy-document file://cross-trust.json --profile ADMIN_PROFILE
+aws iam attach-role-policy --role-name cross-account-readonly --policy-arn arn:aws:iam::aws:policy/ReadOnlyAccess --profile ADMIN_PROFILE
+```
 
-### Step 5: Test the Web Server
-1. Copy the public IP address from instance details
-2. Open a browser and navigate to: `http://<public-ip-address>`
-3. You should see "Hello from AWS EC2!"
-4. Verify security group rules are working correctly
+### 3. Require MFA for sensitive operations (example policy)
+This policy denies s3:DeleteObject unless MFA is present in the session:
+mfa-required-delete.json:
+```json
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "DenyS3DeleteWithoutMFA",
+      "Effect": "Deny",
+      "Action": "s3:DeleteObject",
+      "Resource": "arn:aws:s3:::ALLOWED_S3_BUCKET/*",
+      "Condition": {
+        "Bool": { "aws:MultiFactorAuthPresent": "false" }
+      }
+    }
+  ]
+}
+```
+Attach as a customer-managed policy to the privileged group or role:
+```bash
+aws iam create-policy --policy-name RequireMFAForS3Delete --policy-document file://mfa-required-delete.json --profile ADMIN_PROFILE
+aws iam attach-role-policy --role-name lab-ec2-role --policy-arn arn:aws:iam::YOUR_ACCOUNT_ID:policy/RequireMFAForS3Delete --profile ADMIN_PROFILE
+```
 
-### Step 6: Monitor Instance Metrics
-1. Select your instance in EC2 console
-2. Click on "Monitoring" tab
-3. Review CloudWatch metrics:
-   - CPU Utilization
-   - Network In/Out
-   - Disk Read/Write
-4. Enable detailed monitoring (note: additional charges apply)
+### 4. Setup MFA for a user (Console recommended)
+- Console: IAM → Users → Select user → Security credentials → Manage MFA device → Assign virtual MFA (e.g., Authenticator app).
+- Note the MFA ARN (MFA_SERIAL) for CLI use.
 
-### Step 7: Create an AMI
-1. Select your instance
-2. Click "Actions" → "Image and templates" → "Create image"
-3. Configure:
-   - Name: `web-server-image`
-   - Description: "Custom AMI with Apache installed"
-4. Create image
-5. Monitor AMI creation status under "AMIs" in left navigation
+### 5. Obtain MFA session credentials and test actions
+Get session token with MFA:
+```bash
+aws sts get-session-token --serial-number MFA_SERIAL --token-code 123456 --duration-seconds 3600 --profile ADMIN_PROFILE
+# Use returned AccessKeyId/SecretAccessKey/SessionToken in environment or a temporary profile to test MFA enforced actions
+```
 
-### Step 8: Instance Management Operations
-1. **Stop the instance:**
-   - Actions → Instance state → Stop instance
-   - Wait for state to change to "Stopped"
-   - Note: Public IP may change when restarted
+Assume a role with MFA requirement (if trust policy + condition require MFA):
+```bash
+aws sts assume-role --role-arn arn:aws:iam::YOUR_ACCOUNT_ID:role/cross-account-readonly --role-session-name test --serial-number MFA_SERIAL --token-code 123456 --profile ADMIN_PROFILE
+```
 
-2. **Start the instance:**
-   - Actions → Instance state → Start instance
-   - Verify new public IP address
+Validate you cannot perform denied actions without MFA, and can after obtaining MFA session credentials.
 
-3. **Reboot the instance:**
-   - Actions → Instance state → Reboot instance
+### 6. Example: Enforce MFA-only for Console Sign-in to AWS Management Console
+Attach this managed policy to a group or user to require MFA for console actions (example snippet):
+```json
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "RequireMFAForConsole",
+      "Effect": "Deny",
+      "Action": "aws-portal:*",
+      "Resource": "*",
+      "Condition": { "Bool": { "aws:MultiFactorAuthPresent": "false" } }
+    }
+  ]
+}
+```
+Apply carefully — test with a separate admin to avoid lockout.
 
-## Validation
-- [ ] EC2 instance launched successfully
-- [ ] Security group configured with correct rules
-- [ ] Successfully connected to instance via SSH
-- [ ] Web server accessible from browser
-- [ ] CloudWatch metrics visible in console
-- [ ] AMI created from running instance
-- [ ] Instance stop/start operations completed
+---
+
+## Validation Checklist
+- [ ] EC2 role created and instance profile attached
+- [ ] Cross-account role created with correct trust policy
+- [ ] MFA device configured for user(s)
+- [ ] MFA-enforcement policy attached and validated (denies without MFA)
+- [ ] sts:GetSessionToken and sts:AssumeRole workflows tested successfully
+- [ ] Permission boundaries and least privilege verified
 
 ## Cleanup
-1. Terminate the EC2 instance:
-   - Select instance
-   - Actions → Instance state → Terminate instance
-   - Confirm termination
-2. Delete the security group `web-server-sg`
-3. Deregister the AMI:
-   - Navigate to AMIs
-   - Select `web-server-image`
-   - Actions → Deregister AMI
-4. Delete associated snapshot:
-   - Navigate to Snapshots
-   - Find and delete the snapshot
-5. Delete key pair `my-lab-keypair`
-6. Verify all resources are removed
+```bash
+# Detach and delete policies and roles (replace names/arns)
+aws iam remove-role-from-instance-profile --instance-profile-name lab-ec2-instance-profile --role-name lab-ec2-role --profile ADMIN_PROFILE || true
+aws iam delete-instance-profile --instance-profile-name lab-ec2-instance-profile --profile ADMIN_PROFILE || true
+aws iam detach-role-policy --role-name lab-ec2-role --policy-arn arn:aws:iam::aws:policy/AmazonS3ReadOnlyAccess --profile ADMIN_PROFILE || true
+aws iam delete-role --role-name lab-ec2-role --profile ADMIN_PROFILE || true
+
+aws iam detach-role-policy --role-name cross-account-readonly --policy-arn arn:aws:iam::aws:policy/ReadOnlyAccess --profile ADMIN_PROFILE || true
+aws iam delete-role --role-name cross-account-readonly --profile ADMIN_PROFILE || true
+
+# Delete custom policies
+aws iam delete-policy --policy-arn arn:aws:iam::YOUR_ACCOUNT_ID:policy/RequireMFAForS3Delete --profile ADMIN_PROFILE || true
+```
 
 ## Summary
-In this lab, you gained hands-on experience with Amazon EC2, launching and managing virtual servers in the cloud. You configured security groups for network access control, connected to instances using SSH, and deployed a simple web server using user data scripts. You also learned about instance monitoring, AMI creation, and basic instance lifecycle management.
-
-**Key Takeaways:**
-- EC2 provides resizable compute capacity in the cloud
-- Security groups act as virtual firewalls for instances
-- User data allows automated instance configuration at launch
-- AMIs enable rapid deployment of pre-configured instances
-- Always terminate instances when not in use to avoid charges
-- Instance states affect billing (running = charged, stopped = storage only)
-- Public IPs may change unless using Elastic IPs
+This lab configures roles and MFA to enforce secure, role-based access patterns. Use least privilege, test MFA enforcement thoroughly, and avoid policies that risk locking out administrators

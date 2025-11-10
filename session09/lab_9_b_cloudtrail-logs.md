@@ -1,529 +1,225 @@
-# Lab 9.A: AWS CloudFormation Fundamentals and Infrastructure as Code
+# Lab 9.B: Track and audit API calls using CloudTrail and Log Insights
 
 ## Overview
-This lab introduces AWS CloudFormation, a service that enables Infrastructure as Code (IaC) for AWS resources. You'll learn how to create templates, deploy stacks, manage stack updates, and use CloudFormation to automate infrastructure provisioning. This approach ensures consistent, repeatable deployments across environments.
+Enable AWS CloudTrail to capture account activity (management & data events), deliver logs to an encrypted S3 bucket and CloudWatch Logs, and use CloudWatch Logs Insights / CloudTrail Lake to analyze and alert on sensitive API calls. Validate auditability, log file integrity, and create queries & alarms for suspicious activity.
 
 ## Objectives
-- Understand CloudFormation concepts and template structure
-- Create CloudFormation templates in YAML and JSON
-- Deploy and manage CloudFormation stacks
-- Use parameters, mappings, and outputs
-- Implement intrinsic functions and pseudo parameters
-- Handle stack updates and drift detection
-- Use CloudFormation StackSets for multi-account deployment
-- Implement cross-stack references
-- Debug CloudFormation deployment issues
+- Create a CloudTrail (multi-region) and enable log file validation
+- Deliver CloudTrail events to an encrypted S3 bucket and to CloudWatch Logs
+- Capture management events and data events (S3 object-level, Lambda)
+- Use CloudWatch Logs Insights and CloudTrail Lake for queries and investigations
+- Create metric filters / alarms or EventBridge rules to notify on critical events
+- Verify log integrity and perform cleanup
 
-## Requirements
-- AWS account with CloudFormation permissions
-- Text editor or IDE with YAML support
-- AWS CLI installed
-- Understanding of AWS services (VPC, EC2, S3, RDS)
-- Basic programming concepts
+## Prerequisites
+- AWS CLI v2 configured
+- jq (optional) for JSON parsing
+- IAM permissions: cloudtrail:*, s3:*, logs:*, events:*, sns:*, kms:*, iam:*
+- Region: REGION variable set
 
-## Steps
+---
 
-### Step 1: Create Your First CloudFormation Template
-1. Create a simple S3 bucket template:
-   ```yaml
-   # simple-s3.yaml
-   AWSTemplateFormatVersion: '2010-09-09'
-   Description: 'Simple S3 bucket template'
-   
-   Resources:
-     MyS3Bucket:
-       Type: AWS::S3::Bucket
-       Properties:
-         BucketName: !Sub 'my-cf-bucket-${AWS::AccountId}'
-         VersioningConfiguration:
-           Status: Enabled
-         PublicAccessBlockConfiguration:
-           BlockPublicAcls: true
-           BlockPublicPolicy: true
-           IgnorePublicAcls: true
-           RestrictPublicBuckets: true
-         Tags:
-           - Key: Environment
-             Value: Lab
-           - Key: ManagedBy
-             Value: CloudFormation
-   
-   Outputs:
-     BucketName:
-       Description: 'Name of the S3 bucket'
-       Value: !Ref MyS3Bucket
-     BucketArn:
-       Description: 'ARN of the S3 bucket'
-       Value: !GetAtt MyS3Bucket.Arn
-   ```
+## Variables (replace before running)
+- REGION=us-east-1
+- ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
+- TRAIL_NAME=lab-cloudtrail
+- BUCKET_NAME=lab-cloudtrail-logs-${ACCOUNT_ID}-${REGION}
+- LOG_GROUP_NAME=/aws/cloudtrail/lab-logs
+- SNS_TOPIC_NAME=lab-cloudtrail-alerts
+- ROLE_NAME=lab-cloudtrail-logs-role
 
-2. Deploy via AWS Console:
-   - Navigate to CloudFormation
-   - Create stack → With new resources
-   - Upload template file
-   - Stack name: `simple-s3-stack`
-   - Create stack
+---
 
-3. Deploy via AWS CLI:
-   ```bash
-   aws cloudformation create-stack \
-     --stack-name simple-s3-stack \
-     --template-body file://simple-s3.yaml
-   
-   # Check status
-   aws cloudformation describe-stacks \
-     --stack-name simple-s3-stack
-   
-   # Wait for completion
-   aws cloudformation wait stack-create-complete \
-     --stack-name simple-s3-stack
-   ```
+## Steps (CLI)
 
-### Step 2: Use Parameters for Flexibility
-1. Create template with parameters:
-   ```yaml
-   # parameterized-ec2.yaml
-   AWSTemplateFormatVersion: '2010-09-09'
-   Description: 'EC2 instance with parameters'
-   
-   Parameters:
-     InstanceType:
-       Description: 'EC2 instance type'
-       Type: String
-       Default: t2.micro
-       AllowedValues:
-         - t2.micro
-         - t2.small
-         - t2.medium
-       ConstraintDescription: 'Must be a valid EC2 instance type'
-     
-     KeyName:
-       Description: 'EC2 Key Pair for SSH access'
-       Type: AWS::EC2::KeyPair::KeyName
-     
-     SSHLocation:
-       Description: 'IP address range for SSH access'
-       Type: String
-       Default: '0.0.0.0/0'
-       AllowedPattern: '^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})/(\d{1,2})$'
-   
-   Resources:
-     EC2Instance:
-       Type: AWS::EC2::Instance
-       Properties:
-         InstanceType: !Ref InstanceType
-         KeyName: !Ref KeyName
-         ImageId: !Sub '{{resolve:ssm:/aws/service/ami-amazon-linux-latest/amzn2-ami-hvm-x86_64-gp2}}'
-         SecurityGroups:
-           - !Ref InstanceSecurityGroup
-         Tags:
-           - Key: Name
-             Value: !Sub '${AWS::StackName}-instance'
-     
-     InstanceSecurityGroup:
-       Type: AWS::EC2::SecurityGroup
-       Properties:
-         GroupDescription: 'Enable SSH access'
-         SecurityGroupIngress:
-           - IpProtocol: tcp
-             FromPort: 22
-             ToPort: 22
-             CidrIp: !Ref SSHLocation
-   
-   Outputs:
-     InstanceId:
-       Description: 'Instance ID'
-       Value: !Ref EC2Instance
-     PublicIP:
-       Description: 'Public IP address'
-       Value: !GetAtt EC2Instance.PublicIp
-     PublicDNS:
-       Description: 'Public DNS name'
-       Value: !GetAtt EC2Instance.PublicDnsName
-   ```
+### 1. Create an encrypted S3 bucket for CloudTrail logs
+```bash
+aws s3api create-bucket --bucket $BUCKET_NAME --region $REGION \
+  $( [ "$REGION" = "us-east-1" ] || echo "--create-bucket-configuration LocationConstraint=$REGION" )
 
-2. Deploy with parameters:
-   ```bash
-   aws cloudformation create-stack \
-     --stack-name ec2-stack \
-     --template-body file://parameterized-ec2.yaml \
-     --parameters \
-       ParameterKey=InstanceType,ParameterValue=t2.micro \
-       ParameterKey=KeyName,ParameterValue=my-key-pair \
-       ParameterKey=SSHLocation,ParameterValue=10.0.0.0/16
-   ```
+aws s3api put-public-access-block --bucket $BUCKET_NAME --public-access-block-configuration '{
+  "BlockPublicAcls": true,
+  "IgnorePublicAcls": true,
+  "BlockPublicPolicy": true,
+  "RestrictPublicBuckets": true
+}' --region $REGION
 
-### Step 3: Use Mappings for Region-Specific Values
-1. Create template with mappings:
-   ```yaml
-   Mappings:
-     RegionMap:
-       us-east-1:
-         AMI: ami-0c55b159cbfafe1f0
-       us-west-2:
-         AMI: ami-0d1cd67c26f5fca19
-       eu-west-1:
-         AMI: ami-09ead922c1dad67e4
-     
-     EnvironmentMap:
-       dev:
-         InstanceType: t2.micro
-       prod:
-         InstanceType: t2.medium
-   
-   Parameters:
-     Environment:
-       Type: String
-       Default: dev
-       AllowedValues: [dev, prod]
-   
-   Resources:
-     EC2Instance:
-       Type: AWS::EC2::Instance
-       Properties:
-         InstanceType: !FindInMap [EnvironmentMap, !Ref Environment, InstanceType]
-         ImageId: !FindInMap [RegionMap, !Ref 'AWS::Region', AMI]
-   ```
+# Optional: enable default encryption (SSE-S3)
+aws s3api put-bucket-encryption --bucket $BUCKET_NAME --server-side-encryption-configuration '{
+  "Rules":[{"ApplyServerSideEncryptionByDefault":{"SSEAlgorithm":"AES256"}}]
+}' --region $REGION
+```
 
-### Step 4: Create VPC Infrastructure Template
-1. Create comprehensive VPC template:
-   ```yaml
-   # vpc-infrastructure.yaml
-   AWSTemplateFormatVersion: '2010-09-09'
-   Description: 'VPC with public and private subnets'
-   
-   Parameters:
-     VpcCIDR:
-       Type: String
-       Default: '10.0.0.0/16'
-     
-     PublicSubnet1CIDR:
-       Type: String
-       Default: '10.0.1.0/24'
-     
-     PublicSubnet2CIDR:
-       Type: String
-       Default: '10.0.2.0/24'
-     
-     PrivateSubnet1CIDR:
-       Type: String
-       Default: '10.0.10.0/24'
-     
-     PrivateSubnet2CIDR:
-       Type: String
-       Default: '10.0.11.0/24'
-   
-   Resources:
-     VPC:
-       Type: AWS::EC2::VPC
-       Properties:
-         CidrBlock: !Ref VpcCIDR
-         EnableDnsHostnames: true
-         EnableDnsSupport: true
-         Tags:
-           - Key: Name
-             Value: !Sub '${AWS::StackName}-VPC'
-     
-     InternetGateway:
-       Type: AWS::EC2::InternetGateway
-       Properties:
-         Tags:
-           - Key: Name
-             Value: !Sub '${AWS::StackName}-IGW'
-     
-     AttachGateway:
-       Type: AWS::EC2::VPCGatewayAttachment
-       Properties:
-         VpcId: !Ref VPC
-         InternetGatewayId: !Ref InternetGateway
-     
-     PublicSubnet1:
-       Type: AWS::EC2::Subnet
-       Properties:
-         VpcId: !Ref VPC
-         CidrBlock: !Ref PublicSubnet1CIDR
-         AvailabilityZone: !Select [0, !GetAZs '']
-         MapPublicIpOnLaunch: true
-         Tags:
-           - Key: Name
-             Value: !Sub '${AWS::StackName}-Public-1'
-     
-     PublicSubnet2:
-       Type: AWS::EC2::Subnet
-       Properties:
-         VpcId: !Ref VPC
-         CidrBlock: !Ref PublicSubnet2CIDR
-         AvailabilityZone: !Select [1, !GetAZs '']
-         MapPublicIpOnLaunch: true
-         Tags:
-           - Key: Name
-             Value: !Sub '${AWS::StackName}-Public-2'
-     
-     PrivateSubnet1:
-       Type: AWS::EC2::Subnet
-       Properties:
-         VpcId: !Ref VPC
-         CidrBlock: !Ref PrivateSubnet1CIDR
-         AvailabilityZone: !Select [0, !GetAZs '']
-         Tags:
-           - Key: Name
-             Value: !Sub '${AWS::StackName}-Private-1'
-     
-     PrivateSubnet2:
-       Type: AWS::EC2::Subnet
-       Properties:
-         VpcId: !Ref VPC
-         CidrBlock: !Ref PrivateSubnet2CIDR
-         AvailabilityZone: !Select [1, !GetAZs '']
-         Tags:
-           - Key: Name
-             Value: !Sub '${AWS::StackName}-Private-2'
-     
-     PublicRouteTable:
-       Type: AWS::EC2::RouteTable
-       Properties:
-         VpcId: !Ref VPC
-         Tags:
-           - Key: Name
-             Value: !Sub '${AWS::StackName}-Public-RT'
-     
-     PublicRoute:
-       Type: AWS::EC2::Route
-       DependsOn: AttachGateway
-       Properties:
-         RouteTableId: !Ref PublicRouteTable
-         DestinationCidrBlock: '0.0.0.0/0'
-         GatewayId: !Ref InternetGateway
-     
-     PublicSubnet1RouteTableAssociation:
-       Type: AWS::EC2::SubnetRouteTableAssociation
-       Properties:
-         SubnetId: !Ref PublicSubnet1
-         RouteTableId: !Ref PublicRouteTable
-     
-     PublicSubnet2RouteTableAssociation:
-       Type: AWS::EC2::SubnetRouteTableAssociation
-       Properties:
-         SubnetId: !Ref PublicSubnet2
-         RouteTableId: !Ref PublicRouteTable
-   
-   Outputs:
-     VPCId:
-       Description: 'VPC ID'
-       Value: !Ref VPC
-       Export:
-         Name: !Sub '${AWS::StackName}-VPC-ID'
-     
-     PublicSubnets:
-       Description: 'Public subnets'
-       Value: !Join [',', [!Ref PublicSubnet1, !Ref PublicSubnet2]]
-       Export:
-         Name: !Sub '${AWS::StackName}-Public-Subnets'
-     
-     PrivateSubnets:
-       Description: 'Private subnets'
-       Value: !Join [',', [!Ref PrivateSubnet1, !Ref PrivateSubnet2]]
-       Export:
-         Name: !Sub '${AWS::StackName}-Private-Subnets'
-   ```
+### 2. Create CloudWatch Logs group and IAM role for CloudTrail -> Logs
+```bash
+aws logs create-log-group --log-group-name $LOG_GROUP_NAME --region $REGION
 
-2. Deploy VPC stack:
-   ```bash
-   aws cloudformation create-stack \
-     --stack-name vpc-infrastructure \
-     --template-body file://vpc-infrastructure.yaml
-   ```
+# Create role trust policy for CloudTrail to write to CloudWatch Logs
+cat > trust-logs.json <<'EOF'
+{
+  "Version":"2012-10-17",
+  "Statement":[{"Effect":"Allow","Principal":{"Service":"cloudtrail.amazonaws.com"},"Action":"sts:AssumeRole"}]
+}
+EOF
 
-### Step 5: Use Cross-Stack References
-1. Create application stack referencing VPC stack:
-   ```yaml
-   # app-stack.yaml
-   Resources:
-     AppLoadBalancer:
-       Type: AWS::ElasticLoadBalancingV2::LoadBalancer
-       Properties:
-         Subnets: !Split
-           - ','
-           - !ImportValue vpc-infrastructure-Public-Subnets
-         SecurityGroups:
-           - !Ref ALBSecurityGroup
-     
-     ALBSecurityGroup:
-       Type: AWS::EC2::SecurityGroup
-       Properties:
-         GroupDescription: 'ALB Security Group'
-         VpcId: !ImportValue vpc-infrastructure-VPC-ID
-         SecurityGroupIngress:
-           - IpProtocol: tcp
-             FromPort: 80
-             ToPort: 80
-             CidrIp: '0.0.0.0/0'
-   ```
+aws iam create-role --role-name $ROLE_NAME --assume-role-policy-document file://trust-logs.json --region $REGION || true
 
-### Step 6: Implement Stack Updates
-1. Modify existing template:
-   ```yaml
-   # Add to simple-s3.yaml
-   Resources:
-     MyS3Bucket:
-       Properties:
-         LifecycleConfiguration:
-           Rules:
-             - Id: DeleteOldVersions
-               Status: Enabled
-               NoncurrentVersionExpirationInDays: 30
-   ```
+# Attach inline policy allowing PutLogEvents / CreateLogStream
+cat > cw-policy.json <<'EOF'
+{
+  "Version":"2012-10-17",
+  "Statement":[
+    {"Effect":"Allow","Action":["logs:CreateLogStream","logs:PutLogEvents","logs:DescribeLogStreams"],"Resource":"arn:aws:logs:*:*:log-group:$LOG_GROUP_NAME:*"}
+  ]
+}
+EOF
 
-2. Update stack:
-   ```bash
-   aws cloudformation update-stack \
-     --stack-name simple-s3-stack \
-     --template-body file://simple-s3.yaml
-   
-   # View change set before applying
-   aws cloudformation create-change-set \
-     --stack-name simple-s3-stack \
-     --change-set-name my-changes \
-     --template-body file://simple-s3.yaml
-   
-   aws cloudformation describe-change-set \
-     --change-set-name my-changes \
-     --stack-name simple-s3-stack
-   
-   # Execute change set
-   aws cloudformation execute-change-set \
-     --change-set-name my-changes \
-     --stack-name simple-s3-stack
-   ```
+aws iam put-role-policy --role-name $ROLE_NAME --policy-name CloudTrailPutLogs --policy-document file://cw-policy.json --region $REGION
 
-### Step 7: Use Conditions for Conditional Resource Creation
-1. Template with conditions:
-   ```yaml
-   Parameters:
-     CreateProdResources:
-       Type: String
-       Default: 'false'
-       AllowedValues: ['true', 'false']
-   
-   Conditions:
-     IsProduction: !Equals [!Ref CreateProdResources, 'true']
-   
-   Resources:
-     DevInstance:
-       Type: AWS::EC2::Instance
-       Condition: !Not [!Condition IsProduction]
-       Properties:
-         InstanceType: t2.micro
-         ImageId: ami-12345678
-     
-     ProdInstance:
-       Type: AWS::EC2::Instance
-       Condition: IsProduction
-       Properties:
-         InstanceType: t2.large
-         ImageId: ami-12345678
-   ```
+ROLE_ARN=$(aws iam get-role --role-name $ROLE_NAME --region $REGION --query Role.Arn --output text)
+```
 
-### Step 8: Detect and Remediate Stack Drift
-1. Detect drift:
-   ```bash
-   # Start drift detection
-   aws cloudformation detect-stack-drift \
-     --stack-name simple-s3-stack
-   
-   # Check drift status
-   aws cloudformation describe-stack-drift-detection-status \
-     --stack-drift-detection-id <detection-id>
-   
-   # View drift details
-   aws cloudformation describe-stack-resource-drifts \
-     --stack-name simple-s3-stack
-   ```
+### 3. Create the CloudTrail (multi-region) and enable log delivery + validation + CloudWatch Logs
+```bash
+aws cloudtrail create-trail \
+  --name $TRAIL_NAME \
+  --s3-bucket-name $BUCKET_NAME \
+  --is-multi-region-trail true \
+  --enable-log-file-validation true \
+  --cloud-watch-logs-log-group-arn arn:aws:logs:$REGION:$ACCOUNT_ID:log-group:$LOG_GROUP_NAME \
+  --cloud-watch-logs-role-arn $ROLE_ARN \
+  --region $REGION
 
-2. Remediate drift:
-   - Option 1: Update stack to match current state
-   - Option 2: Restore resources to template-defined state
+aws cloudtrail start-logging --name $TRAIL_NAME --region $REGION
+```
 
-### Step 9: Use Nested Stacks
-1. Create parent stack:
-   ```yaml
-   # parent-stack.yaml
-   Resources:
-     NetworkStack:
-       Type: AWS::CloudFormation::Stack
-       Properties:
-         TemplateURL: https://s3.amazonaws.com/my-bucket/network.yaml
-         Parameters:
-           VpcCIDR: '10.0.0.0/16'
-     
-     ApplicationStack:
-       Type: AWS::CloudFormation::Stack
-       DependsOn: NetworkStack
-       Properties:
-         TemplateURL: https://s3.amazonaws.com/my-bucket/application.yaml
-         Parameters:
-           VPCId: !GetAtt NetworkStack.Outputs.VPCId
-   ```
+### 4. Enable data events (S3 object-level, Lambda) for specific resources
+Data events are not enabled by default; add advanced event selectors:
+```bash
+aws cloudtrail put-event-selectors --trail-name $TRAIL_NAME --region $REGION \
+  --event-selectors '[
+    {
+      "ReadWriteType":"All",
+      "IncludeManagementEvents":true,
+      "DataResources":[
+        {"Type":"AWS::S3::Object","Values":["arn:aws:s3:::'"$BUCKET_NAME"'/*"]},
+        {"Type":"AWS::Lambda::Function","Values":["arn:aws:lambda:'"$REGION"':'"$ACCOUNT_ID"':function:*"]}
+      ]
+    }
+  ]'
+```
 
-### Step 10: Implement Stack Deletion Policy
-1. Protect resources from deletion:
-   ```yaml
-   Resources:
-     MyDatabase:
-       Type: AWS::RDS::DBInstance
-       DeletionPolicy: Snapshot
-       UpdateReplacePolicy: Snapshot
-       Properties:
-         # DB configuration
-     
-     MyBackupBucket:
-       Type: AWS::S3::Bucket
-       DeletionPolicy: Retain
-       Properties:
-         # Bucket configuration
-   ```
+### 5. Create SNS topic for alerts and subscribe an email
+```bash
+SNS_ARN=$(aws sns create-topic --name $SNS_TOPIC_NAME --region $REGION --query TopicArn --output text)
+aws sns subscribe --topic-arn $SNS_ARN --protocol email --notification-endpoint you@example.com --region $REGION
+```
 
-2. Delete stack (protected resources retained):
-   ```bash
-   aws cloudformation delete-stack \
-     --stack-name my-stack
-   ```
+### 6. Create EventBridge rule to detect critical API calls and notify via SNS
+Example: detect ConsoleLogin failures and root usage (management events)
+```bash
+aws events put-rule --name lab-cloudtrail-alarms --event-pattern '{
+  "source":["aws.signin","aws.cloudtrail"],
+  "detail-type":["AWS Console Sign In via CloudTrail","AWS API Call via CloudTrail"],
+  "detail": {
+    "eventName": ["ConsoleLogin","ConsoleLoginFailed","RootLogin","DeleteTrail"],
+    "errorCode": [{"exists": true}]
+  }
+}' --region $REGION
 
-## Validation
-- [ ] CloudFormation template created successfully
-- [ ] Stack deployed via console and CLI
-- [ ] Parameters working correctly
-- [ ] Mappings returning correct values
-- [ ] Outputs displayed properly
-- [ ] Cross-stack references working
-- [ ] Stack updates completed successfully
-- [ ] Change sets created and executed
-- [ ] Drift detection completed
-- [ ] Nested stacks deployed
-- [ ] Deletion policies tested
+aws events put-targets --rule lab-cloudtrail-alarms --targets "Id"="1","Arn"="$SNS_ARN" --region $REGION
+```
+
+(Adjust event-pattern to your monitoring needs; use CloudTrail eventName values like AssumeRole, CreateUser, DeleteBucket.)
+
+### 7. Query CloudTrail logs using CloudWatch Logs Insights
+Sample queries to investigate events (select correct log group name):
+
+- Failed ConsoleLogins:
+```sql
+fields @timestamp, eventName, userIdentity.principalId, sourceIPAddress, errorMessage
+| filter eventName = "ConsoleLogin" and responseElements.ConsoleLogin = "Failure"
+| sort @timestamp desc
+| limit 50
+```
+
+- API calls by a principal (examples via aws logs insights CLI):
+```bash
+aws logs start-query --log-group-name $LOG_GROUP_NAME --start-time $(($(date +%s)-3600)) --end-time $(date +%s) --query-string '
+fields @timestamp, eventName, userIdentity.userName, sourceIPAddress, awsRegion
+| filter userIdentity.userName = "alice"
+| sort @timestamp desc
+| limit 50
+' --region $REGION
+```
+
+- Find AssumeRole events:
+```sql
+fields @timestamp, eventName, userIdentity.sessionContext.sessionIssuer.userName, requestParameters, sourceIPAddress
+| filter eventName = "AssumeRole"
+| sort @timestamp desc
+| limit 100
+```
+
+### 8. Use CloudTrail Lake (optional) for SQL-style queries across events
+Create a saved query in CloudTrail Lake or run ad-hoc queries to search across historical events (use console or aws cloudtrail-data CLI). Example:
+```bash
+aws cloudtrail-data start-query --query "SELECT eventTime, eventName, userIdentity, sourceIPAddress FROM $AWS::CloudTrail.Event WHERE eventName = 'ConsoleLogin' ORDER BY eventTime DESC LIMIT 50"
+```
+(Use CloudTrail Lake documentation for proper syntax and permissions.)
+
+### 9. Create metric filter & alarm for sensitive API usage
+Create a metric filter on CloudWatch Logs to count DeleteBucket or DeleteTrail events and alarm on >0 occurrences:
+```bash
+aws logs put-metric-filter --log-group-name $LOG_GROUP_NAME --filter-name DeleteTrailFilter \
+  --filter-pattern '{ $.eventName = "DeleteTrail" }' \
+  --metric-transformations metricName=DeleteTrailCount,metricNamespace=Lab/CloudTrail,metricValue=1 --region $REGION
+
+aws cloudwatch put-metric-alarm --alarm-name Lab-DeleteTrail-Alarm --metric-name DeleteTrailCount --namespace Lab/CloudTrail \
+  --statistic Sum --period 300 --evaluation-periods 1 --threshold 0.5 --comparison-operator GreaterThanThreshold \
+  --alarm-actions $SNS_ARN --region $REGION
+```
+
+### 10. Verify log file integrity and validation
+CloudTrail log file validation creates digest files and signature verification; verify log-file-validation status:
+```bash
+aws cloudtrail get-trail-status --name $TRAIL_NAME --region $REGION
+```
+
+---
+
+## Validation checklist
+- [ ] Multi-region CloudTrail created and logging
+- [ ] Logs delivered to encrypted S3 bucket and CloudWatch Logs
+- [ ] Data events enabled for S3/Lambda as required
+- [ ] EventBridge rule / SNS notifications configured and tested
+- [ ] CloudWatch Logs Insights queries return expected audit events
+- [ ] Metric filters and alarms trigger on sensitive API activity
+- [ ] Log file validation enabled and status OK
 
 ## Cleanup
-1. Delete all stacks (in reverse dependency order):
-   ```bash
-   aws cloudformation delete-stack --stack-name app-stack
-   aws cloudformation delete-stack --stack-name vpc-infrastructure
-   aws cloudformation delete-stack --stack-name ec2-stack
-   aws cloudformation delete-stack --stack-name simple-s3-stack
-   ```
-2. Verify stacks deleted in console
-3. Delete retained resources manually if needed
+```bash
+aws cloudtrail stop-logging --name $TRAIL_NAME --region $REGION
+aws cloudtrail delete-trail --name $TRAIL_NAME --region $REGION
+
+aws logs delete-log-group --log-group-name $LOG_GROUP_NAME --region $REGION || true
+aws sns delete-topic --topic-arn $SNS_ARN --region $REGION || true
+
+# Remove bucket contents then delete bucket
+aws s3 rm s3://$BUCKET_NAME --recursive --region $REGION || true
+aws s3api delete-bucket --bucket $BUCKET_NAME --region $REGION || true
+
+aws iam delete-role-policy --role-name $ROLE_NAME --policy-name CloudTrailPutLogs --region $REGION || true
+aws iam delete-role --role-name $ROLE_NAME --region $REGION || true
+```
+
+## Notes & best practices
+- Enable multi-region trails to ensure all API activity is captured.
+- Turn on log file validation to detect tampering.
+- Enable data events selectively (S3, Lambda) due to cost.
+- Use KMS to encrypt S3 logs for added protection.
+- Integrate alerts with incident response tools (PagerDuty, Slack).
+- Retain logs per compliance requirements and restrict S3 access via bucket policies.
 
 ## Summary
-In this lab, you mastered AWS CloudFormation for Infrastructure as Code. You created templates, deployed stacks, used parameters and mappings, implemented cross-stack references, and managed stack updates. CloudFormation enables version-controlled, repeatable infrastructure deployments, reducing manual errors and improving consistency across environments.
-
-**Key Takeaways:**
-- CloudFormation templates define infrastructure as code
-- Parameters enable template reusability
-- Mappings provide region and environment-specific values
-- Outputs enable cross-stack references
-- Change sets preview infrastructure changes
-- Drift detection identifies manual modifications
-- Deletion policies protect critical resources
-- Nested stacks organize complex infrastructures
-- Conditions enable conditional resource creation
-- StackSets deploy across multiple accounts/regions
+This lab configures CloudTrail for comprehensive API auditing, routes logs to S3 and CloudWatch Logs, demonstrates Log Insights and CloudTrail Lake queries, and builds alerting for sensitive API activity. Use these patterns to maintain auditability and detect suspicious account activity.

@@ -1,4 +1,4 @@
-# Lab 9.B: Advanced CloudFormation and Infrastructure Automation
+# Lab 9.A: Configure CloudWatch dashboards, metrics, and alarms
 
 ## Overview
 This lab explores advanced CloudFormation features including custom resources with Lambda, CloudFormation macros, StackSets for multi-account deployment, and integrating CloudFormation with CI/CD pipelines. You'll learn production-grade patterns for automating complex infrastructure deployments at scale.

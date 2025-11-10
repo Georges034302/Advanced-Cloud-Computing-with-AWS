@@ -1,154 +1,172 @@
-# Lab 1.B: IAM Groups, Roles, and Policy Management
+# Lab 1.A: Deploy a Linux EC2 instance in a custom VPC
 
 ## Overview
-This lab builds upon IAM fundamentals by exploring IAM Groups and Roles. You'll learn how to organize users efficiently, create roles for AWS services, and understand policy evaluation logic. This is essential for managing permissions at scale in production environments.
+This lab walks through creating a custom VPC, subnets, internet gateway, route table, security group, key pair, and launching a Linux EC2 instance. You will verify networking and SSH access and deploy a simple web server.
 
 ## Objectives
-- Create and manage IAM Groups
-- Assign users to groups for efficient permission management
-- Create IAM Roles for AWS service access
-- Understand policy types (managed vs. inline)
-- Learn policy evaluation logic and permission boundaries
+- Create a custom VPC with public subnet
+- Configure Internet Gateway and route table for public access
+- Create a security group allowing SSH and HTTP
+- Launch a Linux EC2 instance with an EC2 role (optional)
+- Verify SSH connectivity and serve a simple web page
+- Clean up resources
 
-## Requirements
-- Completed Lab 1.A or equivalent IAM knowledge
-- AWS account with administrative access
-- Understanding of JSON syntax basics
-- Familiarity with AWS services (EC2, S3)
+## Prerequisites
+- AWS CLI configured (aws configure) or AWS Console access
+- AWS account with permissions to create VPC, EC2, IAM resources
+- Local SSH client
 
-## Steps
+## Architecture (high level)
+- VPC (CIDR): 10.0.0.0/16
+- Public subnet (CIDR): 10.0.1.0/24
+- Internet Gateway attached to VPC
+- Route table with 0.0.0.0/0 -> IGW for public subnet
+- EC2 instance in public subnet with public IPv4
 
-### Step 1: Create IAM Groups
-1. Navigate to IAM service in AWS Console
-2. Click on "User groups" in the left navigation
-3. Click "Create group"
-4. Create three groups with the following configurations:
+---
 
-**Group 1: Developers**
-- Group name: `Developers`
-- Attach policies: `AmazonS3FullAccess`, `AmazonEC2ReadOnlyAccess`
+## Steps (Console & CLI examples)
 
-**Group 2: Admins**
-- Group name: `Admins`
-- Attach policies: `AdministratorAccess`
+### 1. Create VPC and public subnet (CLI)
+Replace placeholders where applicable.
 
-**Group 3: ReadOnly**
-- Group name: `ReadOnly`
-- Attach policies: `ReadOnlyAccess`
+```bash
+# create VPC
+VPC_ID=$(aws ec2 create-vpc --cidr-block 10.0.0.0/16 --query 'Vpc.VpcId' --output text)
+aws ec2 create-tags --resources $VPC_ID --tags Key=Name,Value=lab-vpc
 
-### Step 2: Create IAM Users and Assign to Groups
-1. Create three new IAM users:
-   - `dev-user-1` (assign to Developers group)
-   - `admin-user-1` (assign to Admins group)
-   - `auditor-user-1` (assign to ReadOnly group)
-2. For each user:
-   - Enable console access
-   - Set a temporary password
-   - Require password reset at first login
-3. Verify group membership in the user's summary page
+# create public subnet
+SUBNET_ID=$(aws ec2 create-subnet --vpc-id $VPC_ID --cidr-block 10.0.1.0/24 --availability-zone $(aws ec2 describe-availability-zones --query 'AvailabilityZones[0].ZoneName' --output text) --query 'Subnet.SubnetId' --output text)
+aws ec2 modify-subnet-attribute --subnet-id $SUBNET_ID --map-public-ip-on-launch
 
-### Step 3: Create an IAM Role for EC2
-1. Navigate to "Roles" in IAM
-2. Click "Create role"
-3. Select trusted entity type: "AWS service"
-4. Choose use case: "EC2"
-5. Attach permissions policies:
-   - `AmazonS3ReadOnlyAccess`
-6. Add tags:
-   - Key: `Purpose`, Value: `Lab-EC2-S3-Access`
-7. Role name: `EC2-S3-ReadOnly-Role`
-8. Review and create the role
+# create internet gateway and attach
+IGW_ID=$(aws ec2 create-internet-gateway --query 'InternetGateway.InternetGatewayId' --output text)
+aws ec2 attach-internet-gateway --internet-gateway-id $IGW_ID --vpc-id $VPC_ID
 
-### Step 4: Create a Cross-Account Role (Simulation)
-1. Create another role
-2. Select trusted entity: "AWS account"
-3. Enter your account ID (for simulation)
-4. Attach policy: `ViewOnlyAccess`
-5. Role name: `CrossAccount-ReadOnly-Role`
-6. Review the trust policy JSON
-7. Create the role
+# create route table and route
+RTB_ID=$(aws ec2 create-route-table --vpc-id $VPC_ID --query 'RouteTable.RouteTableId' --output text)
+aws ec2 create-route --route-table-id $RTB_ID --destination-cidr-block 0.0.0.0/0 --gateway-id $IGW_ID
+aws ec2 associate-route-table --route-table-id $RTB_ID --subnet-id $SUBNET_ID
+```
 
-### Step 5: Understand Policy Evaluation
-1. Navigate to IAM Policy Simulator:
-   - Search for "Policy Simulator" or access via: https://policysim.aws.amazon.com
-2. Select one of your users (e.g., `dev-user-1`)
-3. Test different actions:
-   - Service: S3, Action: PutObject → Should be allowed
-   - Service: EC2, Action: TerminateInstances → Should be denied
-4. Review the evaluation logic explanation
+Console alternative:
+- VPC > Create VPC (10.0.0.0/16) > Create subnet (10.0.1.0/24) and enable "Auto-assign Public IPv4".
+- Create Internet Gateway > Attach to VPC.
+- Route Tables > create or edit route table for VPC, add route 0.0.0.0/0 -> IGW, associate with public subnet.
 
-### Step 6: Create an Inline Policy
-1. Select the `Developers` group
-2. Click on the "Permissions" tab
-3. Click "Add permissions" → "Create inline policy"
-4. Use JSON editor to create a policy that denies EC2 instance termination:
-   ```json
-   {
-     "Version": "2012-10-17",
-     "Statement": [
-       {
-         "Effect": "Deny",
-         "Action": [
-           "ec2:TerminateInstances"
-         ],
-         "Resource": "*"
-       }
-     ]
-   }
-   ```
-5. Name the policy: `DenyEC2Termination`
-6. Create the policy
+### 2. Create a key pair (CLI)
+```bash
+aws ec2 create-key-pair --key-name lab-key --query 'KeyMaterial' --output text > lab-key.pem
+chmod 600 lab-key.pem
+```
+Or use Console: EC2 > Key Pairs > Create key pair and download PEM.
 
-### Step 7: Test Permission Boundaries
-1. Create a new managed policy called `BoundaryPolicy`:
-   ```json
-   {
-     "Version": "2012-10-17",
-     "Statement": [
-       {
-         "Effect": "Allow",
-         "Action": [
-           "s3:*",
-           "ec2:Describe*"
-         ],
-         "Resource": "*"
-       }
-     ]
-   }
-   ```
-2. Create a new user: `boundary-test-user`
-3. Attach `AdministratorAccess` policy to the user
-4. Set `BoundaryPolicy` as the permissions boundary
-5. Use Policy Simulator to verify the user can only perform S3 and EC2 Describe actions
+### 3. Create Security Group allowing SSH and HTTP
+CLI:
+```bash
+SG_ID=$(aws ec2 create-security-group --group-name lab-sg --description "SSH+HTTP" --vpc-id $VPC_ID --query 'GroupId' --output text)
+aws ec2 authorize-security-group-ingress --group-id $SG_ID --protocol tcp --port 22 --cidr 0.0.0.0/0
+aws ec2 authorize-security-group-ingress --group-id $SG_ID --protocol tcp --port 80 --cidr 0.0.0.0/0
+```
+Console: EC2 > Security Groups > Create security group in your VPC, add inbound rules for SSH (22) and HTTP (80).
 
-## Validation
-- [ ] Three IAM groups created with appropriate policies
-- [ ] Multiple users created and assigned to groups
-- [ ] EC2 service role created successfully
-- [ ] Cross-account role created with proper trust policy
-- [ ] Policy Simulator successfully tested permission evaluation
-- [ ] Inline policy created and attached to a group
-- [ ] Permission boundary applied and tested
+### 4. (Optional) Create an IAM role for EC2
+If the instance needs AWS access (e.g., S3), create an instance profile role:
+- Console: IAM > Roles > Create role > AWS service > EC2 > Attach policy (e.g., AmazonS3ReadOnlyAccess) > Name it lab-ec2-role
+- Or use iam-create-role and instance-profile CLI flows.
 
-## Cleanup
-1. Delete all test users:
-   - `dev-user-1`, `admin-user-1`, `auditor-user-1`, `boundary-test-user`
-2. Delete IAM groups:
-   - `Developers`, `Admins`, `ReadOnly`
-3. Delete IAM roles:
-   - `EC2-S3-ReadOnly-Role`, `CrossAccount-ReadOnly-Role`
-4. Delete custom policies:
-   - `BoundaryPolicy`
-5. Verify all resources are deleted in IAM Dashboard
+### 5. Launch EC2 instance
+Choose an Amazon Linux 2 AMI (or preferred distro). CLI example:
+
+```bash
+AMI_ID=$(aws ec2 describe-images --filters "Name=name,Values=amzn2-ami-hvm-*-x86_64-gp2" "Name=state,Values=available" --owners amazon --query 'Images | sort_by(@, &CreationDate) | [-1].ImageId' --output text)
+
+INSTANCE_ID=$(aws ec2 run-instances \
+  --image-id $AMI_ID \
+  --instance-type t3.micro \
+  --key-name lab-key \
+  --security-group-ids $SG_ID \
+  --subnet-id $SUBNET_ID \
+  --associate-public-ip-address \
+  --count 1 \
+  --tag-specifications "ResourceType=instance,Tags=[{Key=Name,Value=lab-ec2}]" \
+  --query 'Instances[0].InstanceId' --output text)
+
+# optional: attach instance profile
+# aws ec2 associate-iam-instance-profile --instance-id $INSTANCE_ID --iam-instance-profile Name=lab-ec2-role
+```
+
+Wait until instance is running:
+```bash
+aws ec2 wait instance-running --instance-ids $INSTANCE_ID
+PUBLIC_IP=$(aws ec2 describe-instances --instance-ids $INSTANCE_ID --query 'Reservations[0].Instances[0].PublicIpAddress' --output text)
+echo "Instance public IP: $PUBLIC_IP"
+```
+
+### 6. Bootstrap web server via user data (optional)
+When launching, you can add user-data to install and start a web server:
+```bash
+USER_DATA='#!/bin/bash
+yum update -y
+yum install -y httpd
+systemctl enable httpd
+systemctl start httpd
+echo "Hello from Lab 1.A - EC2 in VPC" > /var/www/html/index.html
+'
+# pass --user-data "$(echo "$USER_DATA" | base64 --wrap=0)" or use --user-data file://user-data.txt in run-instances
+```
+
+### 7. SSH and verify HTTP
+SSH:
+```bash
+ssh -i lab-key.pem ec2-user@$PUBLIC_IP
+# inside instance: curl http://localhost or exit to check from your machine:
+curl http://$PUBLIC_IP
+```
+You should see the sample page content.
+
+### 8. Validation Checklist
+- [ ] VPC 10.0.0.0/16 created
+- [ ] Public subnet 10.0.1.0/24 created and auto-assign public IP enabled
+- [ ] Internet Gateway attached and route table has 0.0.0.0/0 -> IGW
+- [ ] Security group allows SSH (22) and HTTP (80)
+- [ ] EC2 instance launched and reachable via SSH
+- [ ] Web server responding on HTTP
+
+### 9. Cleanup
+Remove resources to avoid charges.
+
+```bash
+# terminate instance
+aws ec2 terminate-instances --instance-ids $INSTANCE_ID
+aws ec2 wait instance-terminated --instance-ids $INSTANCE_ID
+
+# delete key pair (local file and EC2 key metadata)
+rm -f lab-key.pem
+aws ec2 delete-key-pair --key-name lab-key
+
+# delete security group
+aws ec2 delete-security-group --group-id $SG_ID
+
+# delete route table association (if needed), route table, and internet gateway
+# Note: adjust association and IDs as necessary
+RTB_ASSOC_IDS=$(aws ec2 describe-route-tables --filters "Name=vpc-id,Values=$VPC_ID" --query 'RouteTables[].Associations[].RouteTableAssociationId' --output text)
+for a in $RTB_ASSOC_IDS; do
+  aws ec2 disassociate-route-table --association-id $a || true
+done
+aws ec2 delete-route-table --route-table-id $RTB_ID || true
+aws ec2 detach-internet-gateway --internet-gateway-id $IGW_ID --vpc-id $VPC_ID || true
+aws ec2 delete-internet-gateway --internet-gateway-id $IGW_ID || true
+
+# delete subnet and VPC
+aws ec2 delete-subnet --subnet-id $SUBNET_ID
+aws ec2 delete-vpc --vpc-id $VPC_ID
+```
+
+Notes:
+- Replace resource IDs and variables if you used different names.
+- If you used Console, delete resources via the AWS Console for simplicity.
+- Verify billing implications and ensure you terminate/delete all resources.
 
 ## Summary
-In this lab, you learned advanced IAM concepts including groups, roles, and policy management. You explored how to organize users with groups for efficient permission management, created service roles for AWS resources, and understood complex policy evaluation logic including permission boundaries. These skills are crucial for implementing secure, scalable access control in production AWS environments.
-
-**Key Takeaways:**
-- Use groups to manage permissions for multiple users efficiently
-- IAM roles enable AWS services to interact with other services securely
-- Policy evaluation follows a specific logic: explicit deny > explicit allow > implicit deny
-- Permission boundaries set maximum permissions a user can have
-- Inline policies are attached directly to a single user, group, or role
-- Managed policies can be reused across multiple entities
-- Always test policies with Policy Simulator before production deployment
+This lab demonstrates how to create networking primitives and launch a publicly accessible EC2 Linux instance inside a custom VPC, including securing access via security groups and optionally bootstrapping a web server.

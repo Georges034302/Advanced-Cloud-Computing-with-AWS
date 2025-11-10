@@ -1,251 +1,184 @@
-# Lab 5.A: Amazon RDS - Relational Database Setup and Management
+# Lab 5.B: Configure Auto Scaling policies and CloudWatch alarms for EC2
 
 ## Overview
-This lab introduces Amazon Relational Database Service (RDS), a managed database service that simplifies database administration. You'll learn how to launch RDS instances, configure security, perform backups, and implement high availability with Multi-AZ deployments. RDS supports multiple database engines including MySQL, PostgreSQL, Oracle, and SQL Server.
+This lab teaches how to create an Auto Scaling Group (ASG) for EC2, configure scaling policies (target-tracking, step, scheduled), and create CloudWatch alarms and metrics to drive scaling decisions. You will validate autoscaling behavior and observe CloudWatch metrics and alarms.
 
 ## Objectives
-- Launch and configure RDS database instances
-- Implement security best practices for database access
-- Configure automated backups and snapshots
-- Set up Multi-AZ deployments for high availability
-- Monitor database performance with CloudWatch
-- Connect to RDS from EC2 instances
-- Understand RDS pricing and cost optimization
+- Create a Launch Template or Launch Configuration
+- Create an Auto Scaling Group across multiple AZs
+- Configure scaling policies: target-tracking, step-scaling, and scheduled scaling
+- Create CloudWatch alarms and custom metrics to trigger policies
+- Test scale-out and scale-in behavior and observe cooldown/health checks
+- Cleanup resources
 
-## Requirements
-- AWS account with RDS and EC2 permissions
-- Completed VPC labs (Lab 3.A recommended)
-- Basic SQL knowledge
-- MySQL or PostgreSQL client software
-- Understanding of relational database concepts
+## Prerequisites
+- AWS CLI v2 configured
+- IAM permissions: ec2, autoscaling, cloudwatch
+- VPC with subnets across ≥2 AZs
+- AMI with a simple web service or user-data to bootstrap
 
-## Steps
+---
 
-### Step 1: Create DB Subnet Group
-1. Navigate to RDS console
-2. Click "Subnet groups" → Create DB subnet group
-3. Configure:
-   - Name: `lab-db-subnet-group`
-   - Description: "Subnet group for RDS lab"
-   - VPC: Select your VPC (or default)
-   - Add subnets: Select at least 2 subnets in different AZs
-4. Create subnet group
+## Variables (replace before running)
+- REGION=us-east-1
+- VPC_ID=vpc-xxxx
+- SUBNETS="subnet-aaa subnet-bbb subnet-ccc"
+- KEY_NAME=lab-key
+- SECURITY_GROUP_ID=sg-xxxx
+- LAUNCH_TEMPLATE_NAME=lab-launch-template
+- ASG_NAME=lab-asg
+- TARGET_GROUP_ARN=<optional-target-group-arn>
+- AMI_ID=ami-xxxxxxxx
+- INSTANCE_TYPE=t3.micro
+- MIN_SIZE=1
+- MAX_SIZE=4
+- DESIRED_CAPACITY=1
 
-### Step 2: Create Security Group for RDS
-1. Navigate to EC2 → Security Groups
-2. Create security group:
-   - Name: `rds-mysql-sg`
-   - Description: "Security group for MySQL RDS"
-   - VPC: Same as DB subnet group
-3. Inbound rules:
-   - Type: MySQL/Aurora (3306)
-   - Source: Security group of EC2 instances (or VPC CIDR)
-4. Create security group
+---
 
-### Step 3: Launch RDS MySQL Instance
-1. Navigate to RDS → Databases
-2. Click "Create database"
-3. Choose database creation method: Standard create
-4. Engine options:
-   - Engine type: MySQL
-   - Version: Latest MySQL 8.0
-5. Templates: Free tier (for learning)
-6. Settings:
-   - DB instance identifier: `lab-mysql-db`
-   - Master username: `admin`
-   - Master password: Create strong password (save securely)
-7. DB instance class: db.t3.micro (Free tier)
-8. Storage:
-   - Storage type: General Purpose SSD (gp3)
-   - Allocated storage: 20 GB
-   - Enable storage autoscaling: Yes
-   - Maximum storage threshold: 100 GB
-9. Connectivity:
-   - VPC: Your VPC
-   - DB subnet group: `lab-db-subnet-group`
-   - Public access: No
-   - VPC security group: `rds-mysql-sg`
-   - Availability Zone: No preference
-10. Database authentication: Password authentication
-11. Additional configuration:
-    - Initial database name: `labdb`
-    - Backup retention: 7 days
-    - Enable automatic backups
-    - Backup window: Choose time
-    - Enable encryption: Yes (default KMS key)
-    - Enable Enhanced Monitoring: Optional
-12. Create database
-13. Wait for status to show "Available" (5-10 minutes)
+## Steps (CLI examples)
 
-### Step 4: Launch EC2 Instance for Database Access
-1. Launch EC2 instance:
-   - AMI: Amazon Linux 2023
-   - Instance type: t2.micro
-   - Network: Same VPC as RDS
-   - Subnet: Public subnet
-   - Auto-assign public IP: Enable
-   - Security group: Allow SSH from My IP
-2. Connect to instance via SSH
+### 1. Create a Launch Template (user-data bootstraps web service)
+```bash
+cat > user-data.sh <<'EOF'
+#!/bin/bash
+yum update -y
+yum install -y httpd
+systemctl enable --now httpd
+echo "ASG instance $(hostname) $(date)" > /var/www/html/index.html
+EOF
 
-### Step 5: Install MySQL Client and Connect
-1. Install MySQL client on EC2:
-   ```bash
-   sudo yum update -y
-   sudo yum install mysql -y
-   ```
+aws ec2 create-launch-template \
+  --launch-template-name $LAUNCH_TEMPLATE_NAME \
+  --version-description "v1" \
+  --launch-template-data "{
+    \"ImageId\":\"$AMI_ID\",
+    \"InstanceType\":\"$INSTANCE_TYPE\",
+    \"KeyName\":\"$KEY_NAME\",
+    \"SecurityGroupIds\":[\"$SECURITY_GROUP_ID\"],
+    \"UserData\":\"$(base64 -w0 user-data.sh)\"
+  }" --region $REGION
+```
 
-2. Get RDS endpoint from console:
-   - Navigate to RDS → Databases → `lab-mysql-db`
-   - Copy endpoint address (e.g., `lab-mysql-db.xxxxxx.region.rds.amazonaws.com`)
+### 2. Create the Auto Scaling Group
+```bash
+aws autoscaling create-auto-scaling-group \
+  --auto-scaling-group-name $ASG_NAME \
+  --launch-template LaunchTemplateName=$LAUNCH_TEMPLATE_NAME,Version=1 \
+  --min-size $MIN_SIZE --max-size $MAX_SIZE --desired-capacity $DESIRED_CAPACITY \
+  --vpc-zone-identifier "$SUBNETS" \
+  --target-group-arns $TARGET_GROUP_ARN \
+  --region $REGION
+```
 
-3. Connect to RDS instance:
-   ```bash
-   mysql -h lab-mysql-db.xxxxxx.region.rds.amazonaws.com \
-         -u admin -p
-   ```
-   - Enter master password when prompted
+### 3. Target-tracking scaling policy (e.g., keep average CPU at 40%)
+```bash
+aws autoscaling put-scaling-policy \
+  --auto-scaling-group-name $ASG_NAME \
+  --policy-name cpu-target-tracking \
+  --policy-type TargetTrackingScaling \
+  --target-tracking-configuration '{"PredefinedMetricSpecification":{"PredefinedMetricType":"ASGAverageCPUUtilization"},"TargetValue":40.0}' \
+  --region $REGION
+```
 
-4. Verify connection and explore:
-   ```sql
-   SHOW DATABASES;
-   USE labdb;
-   CREATE TABLE users (
-     id INT AUTO_INCREMENT PRIMARY KEY,
-     username VARCHAR(50),
-     email VARCHAR(100),
-     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-   );
-   INSERT INTO users (username, email) VALUES ('testuser', 'test@example.com');
-   SELECT * FROM users;
-   ```
+### 4. Step-scaling policy (scale more aggressively on spikes)
+Create CloudWatch alarm that triggers a step-scaling action:
+```bash
+# create alarm (high CPU)
+aws cloudwatch put-metric-alarm \
+  --alarm-name ${ASG_NAME}-HighCPU \
+  --metric-name CPUUtilization --namespace AWS/EC2 --statistic Average \
+  --period 60 --evaluation-periods 2 --threshold 70 --comparison-operator GreaterThanThreshold \
+  --dimensions Name=AutoScalingGroupName,Value=$ASG_NAME \
+  --alarm-actions <step-scaling-policy-arn> \
+  --region $REGION
+```
+Define step-scaling policy with adjustments for thresholds via autoscaling put-scaling-policy (StepScaling type).
 
-### Step 6: Configure Automated Backups
-1. Navigate to RDS instance → Maintenance & backups
-2. Review automated backup settings:
-   - Backup retention period: 7 days
-   - Backup window: Configured during creation
-3. Modify backup retention if needed:
-   - Select instance → Modify
-   - Change backup retention period
-   - Apply immediately or during maintenance window
+### 5. Scheduled scaling (increase capacity during predictable load)
+```bash
+aws autoscaling put-scheduled-update-group-action \
+  --auto-scaling-group-name $ASG_NAME \
+  --scheduled-action-name scale-up-morning \
+  --start-time "2025-11-11T08:00:00Z" \
+  --min-size 2 --desired-capacity 2 --max-size $MAX_SIZE \
+  --region $REGION
+```
 
-### Step 7: Create Manual Snapshot
-1. Select RDS instance
-2. Actions → Take snapshot
-3. Configure:
-   - Snapshot name: `lab-mysql-snapshot-manual`
-4. Create snapshot
-5. Monitor snapshot progress in Snapshots section
-6. Once available, practice restoring:
-   - Select snapshot → Actions → Restore snapshot
-   - Review settings (don't actually restore unless needed)
-   - Cancel to avoid creating duplicate instance
+### 6. Configure lifecycle hooks and health checks
+Lifecycle hook example:
+```bash
+aws autoscaling put-lifecycle-hook \
+  --lifecycle-hook-name pause-before-terminate \
+  --auto-scaling-group-name $ASG_NAME \
+  --lifecycle-transition autoscaling:EC2_INSTANCE_TERMINATING \
+  --heartbeat-timeout 300 \
+  --default-result CONTINUE \
+  --region $REGION
+```
+Set ASG health check type & grace period:
+```bash
+aws autoscaling update-auto-scaling-group --auto-scaling-group-name $ASG_NAME --health-check-type ELB --health-check-grace-period 60 --region $REGION
+```
 
-### Step 8: Enable Multi-AZ Deployment
-1. Select RDS instance → Modify
-2. Find "Availability & durability" section
-3. Change to Multi-AZ deployment:
-   - Create a standby instance: Yes
-4. Continue through modification wizard
-5. Apply: During next maintenance window (or immediately for testing)
-6. Wait for modification to complete
-7. Verify Multi-AZ status in instance details
+### 7. Custom metrics and CloudWatch
+Publish a custom metric from an instance (example using AWS CLI or CloudWatch agent). Example (push from local CLI for testing):
+```bash
+aws cloudwatch put-metric-data --metric-name RequestsPerMinute --namespace Lab/ASG --value 120 --dimensions AutoScalingGroupName=$ASG_NAME --region $REGION
+```
+Create CloudWatch alarm on custom metric and attach to scaling policy.
 
-### Step 9: Monitor Database Performance
-1. Navigate to RDS instance → Monitoring tab
-2. Review CloudWatch metrics:
-   - CPU Utilization
-   - Database Connections
-   - Read/Write IOPS
-   - Free Storage Space
-   - Read/Write Latency
-3. Create CloudWatch alarm:
-   - Navigate to CloudWatch → Alarms
-   - Create alarm for high CPU:
-     - Metric: RDS → Per-Database Metrics → CPUUtilization
-     - Threshold: Greater than 80%
-     - Actions: SNS notification (optional)
+### 8. Test scaling behavior
+- Generate load (e.g., curl loop against ALB or instance IP) to raise CPU or custom metric.
+- Observe CloudWatch metrics and alarms.
+- Verify ASG scales out/in per configured policies and respects cooldowns and health checks.
+- Check instance lifecycle events (launch/terminate) in ASG and EC2 console.
 
-### Step 10: Test Database Performance
-1. From EC2 instance, run load test:
-   ```bash
-   mysql -h lab-mysql-db.xxxxxx.region.rds.amazonaws.com -u admin -p
-   ```
+### 9. Monitor and verify
+Useful commands:
+```bash
+aws autoscaling describe-auto-scaling-groups --auto-scaling-group-names $ASG_NAME --region $REGION
+aws cloudwatch describe-alarms --alarm-name-prefix ${ASG_NAME} --region $REGION
+aws autoscaling describe-scaling-activities --auto-scaling-group-name $ASG_NAME --region $REGION
+```
 
-2. Create test data:
-   ```sql
-   USE labdb;
-   CREATE TABLE load_test (
-     id INT AUTO_INCREMENT PRIMARY KEY,
-     data VARCHAR(1000)
-   );
-   
-   DELIMITER $$
-   CREATE PROCEDURE insert_test_data()
-   BEGIN
-     DECLARE i INT DEFAULT 0;
-     WHILE i < 10000 DO
-       INSERT INTO load_test (data) VALUES (MD5(RAND()));
-       SET i = i + 1;
-     END WHILE;
-   END$$
-   DELIMITER ;
-   
-   CALL insert_test_data();
-   ```
+---
 
-3. Monitor metrics in RDS console
-
-### Step 11: Configure Read Replica (Optional)
-1. Select RDS instance
-2. Actions → Create read replica
-3. Configure:
-   - DB instance identifier: `lab-mysql-read-replica`
-   - Region: Same region or different
-   - Instance class: Can be smaller than primary
-4. Create read replica
-5. Test read operations from replica endpoint
-
-## Validation
-- [ ] RDS MySQL instance created and running
-- [ ] DB subnet group configured across multiple AZs
-- [ ] Security group properly configured
-- [ ] Successfully connected to database from EC2
-- [ ] Created database tables and inserted data
-- [ ] Automated backups configured
-- [ ] Manual snapshot created successfully
-- [ ] Multi-AZ deployment enabled
-- [ ] CloudWatch metrics visible and monitoring
-- [ ] Read replica created (optional)
+## Validation Checklist
+- [ ] Launch Template created with user-data
+- [ ] ASG spans multiple AZs and correct subnets
+- [ ] Target-tracking policy active and maintaining target metric
+- [ ] Step-scaling or alarm-backed scaling configured
+- [ ] Scheduled scaling action created
+- [ ] CloudWatch alarms firing as expected under load
+- [ ] Lifecycle hooks and health checks configured and tested
+- [ ] Instances launch, register with target group (if used), and terminate cleanly
 
 ## Cleanup
-1. Delete read replica (if created):
-   - Select replica → Actions → Delete
-   - Skip final snapshot for lab
-2. Delete RDS instance:
-   - Select `lab-mysql-db` → Actions → Delete
-   - Uncheck "Create final snapshot" (lab only)
-   - Acknowledge deletion
-   - Type "delete me" to confirm
-3. Delete manual snapshots:
-   - Navigate to Snapshots
-   - Select and delete
-4. Delete automated backups:
-   - May be deleted automatically after retention period
-5. Terminate EC2 instance
-6. Delete security groups and DB subnet group
-7. Verify all resources removed
+```bash
+# delete scheduled actions
+aws autoscaling delete-scheduled-action --auto-scaling-group-name $ASG_NAME --scheduled-action-name scale-up-morning --region $REGION || true
+
+# delete scaling policies (use policy ARNs)
+aws autoscaling delete-policy --auto-scaling-group-name $ASG_NAME --policy-name cpu-target-tracking --region $REGION || true
+
+# remove lifecycle hooks
+aws autoscaling delete-lifecycle-hook --lifecycle-hook-name pause-before-terminate --auto-scaling-group-name $ASG_NAME --region $REGION || true
+
+# delete ASG (set desired capacity to 0 first)
+aws autoscaling update-auto-scaling-group --auto-scaling-group-name $ASG_NAME --min-size 0 --desired-capacity 0 --region $REGION
+aws autoscaling delete-auto-scaling-group --auto-scaling-group-name $ASG_NAME --force-delete --region $REGION
+
+# delete launch template
+aws ec2 delete-launch-template --launch-template-name $LAUNCH_TEMPLATE_NAME --region $REGION
+```
+
+## Best practices
+- Use target-tracking for common metrics (CPU, ALB request count).
+- Use warm-up and grace periods to avoid flapping.
+- Prefer application-level or ALB request-based metrics for more stable autoscaling.
+- Test policies under controlled load before production.
+- Use CloudWatch Logs/Events for auditing scaling activities.
 
 ## Summary
-In this lab, you learned how to deploy and manage relational databases using Amazon RDS. You configured automated backups, implemented Multi-AZ deployments for high availability, monitored performance metrics, and connected applications to your database. RDS eliminates the operational burden of database management while providing enterprise-grade reliability and performance.
-
-**Key Takeaways:**
-- RDS automates backups, patching, and maintenance
-- Multi-AZ provides automatic failover for high availability
-- Never expose RDS publicly; use private subnets
-- Security groups control database network access
-- Automated backups enable point-in-time recovery
-- Read replicas improve read scalability
-- Always encrypt databases for sensitive data
-- Monitor performance metrics to optimize costs
-- Choose appropriate instance class based on workload
+This lab configures ASG scaling policies driven by CloudWatch alarms and metrics, covering target-tracking, step, and scheduled scaling, lifecycle hooks, and validation steps to ensure reliable autoscaling behavior.

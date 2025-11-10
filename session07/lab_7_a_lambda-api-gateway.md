@@ -1,537 +1,139 @@
-# Lab 7.B: Advanced Lambda Patterns and Serverless Applications
+# Lab 7.A: Build a REST API using API Gateway integrated with Lambda
 
 ## Overview
-This lab explores advanced Lambda patterns including function orchestration with Step Functions, serverless applications with SAM, Lambda@Edge for CloudFront, and building complete serverless APIs. You'll learn production-ready patterns for building complex serverless architectures.
+Build a simple REST API backed by AWS Lambda and API Gateway. This lab covers designing HTTP endpoints, creating Lambda functions, wiring API Gateway (HTTP API or REST API) integrations, enabling CORS, deploying stages, testing, and cleaning up. Examples use AWS CLI and AWS SAM for convenience.
 
 ## Objectives
-- Build serverless applications with SAM (Serverless Application Model)
-- Orchestrate Lambda functions with AWS Step Functions
-- Implement Lambda@Edge for CloudFront
-- Create serverless REST APIs with Lambda and API Gateway
-- Use Lambda Destinations for async invocation handling
-- Implement function versioning and aliases
-- Configure provisioned concurrency for consistent performance
-- Build event-driven workflows
+- Design REST endpoints and methods
+- Create Lambda functions and minimal IAM execution role
+- Integrate Lambda with API Gateway (HTTP API and REST API examples)
+- Configure CORS, request/response mapping, and stage deployment
+- Test endpoints (local and deployed)
+- Clean up resources
 
-## Requirements
-- Completed Lab 7.A or equivalent Lambda knowledge
-- AWS SAM CLI installed
-- Understanding of state machines and workflows
-- Docker installed (for SAM local testing)
-- Node.js or Python development environment
+## Prerequisites
+- AWS CLI v2 configured
+- Python 3 or Node.js for Lambda code
+- (Optional) AWS SAM CLI and Docker for local testing
 
-## Steps
+---
 
-### Step 1: Install and Configure AWS SAM CLI
-1. Install SAM CLI:
-   ```bash
-   # macOS
-   brew install aws-sam-cli
-   
-   # Linux
-   pip install aws-sam-cli
-   
-   # Verify installation
-   sam --version
-   ```
+## Minimal architecture
+- Lambda function(s) implement handlers for API operations
+- API Gateway routes HTTP methods/paths to Lambda
+- IAM role for Lambda execution (logs + basic permissions)
+- Stage (e.g., dev) provides a public invoke endpoint
 
-2. Initialize SAM project:
-   ```bash
-   sam init
-   # Choose: AWS Quick Start Templates
-   # Runtime: Python 3.12
-   # Project name: serverless-app
-   # Template: Hello World Example
-   ```
+---
 
-3. Explore project structure:
-   ```bash
-   cd serverless-app
-   ls -la
-   # template.yaml (SAM template)
-   # hello_world/ (function code)
-   # events/ (test events)
-   ```
+## Quick design: Example endpoints
+- GET /items         — list items
+- GET /items/{id}    — get single item
+- POST /items        — create item
+- PUT /items/{id}    — update item
+- DELETE /items/{id} — delete item
 
-### Step 2: Build and Deploy SAM Application
-1. Review `template.yaml`:
-   ```yaml
-   AWSTemplateFormatVersion: '2010-09-09'
-   Transform: AWS::Serverless-2016-10-31
-   
-   Resources:
-     HelloWorldFunction:
-       Type: AWS::Serverless::Function
-       Properties:
-         CodeUri: hello_world/
-         Handler: app.lambda_handler
-         Runtime: python3.12
-         Events:
-           HelloWorld:
-             Type: Api
-             Properties:
-               Path: /hello
-               Method: get
-   ```
+---
 
-2. Build the application:
-   ```bash
-   sam build
-   ```
+## Steps (CLI examples)
 
-3. Test locally:
-   ```bash
-   sam local invoke HelloWorldFunction -e events/event.json
-   
-   # Start local API
-   sam local start-api
-   # Test: curl http://localhost:3000/hello
-   ```
+### 1. Create Lambda execution role (trust policy + basic policy)
+```bash
+cat > trust.json <<'EOF'
+{
+  "Version":"2012-10-17",
+  "Statement":[
+    { "Effect":"Allow","Principal":{"Service":"lambda.amazonaws.com"},"Action":"sts:AssumeRole" }
+  ]
+}
+EOF
 
-4. Deploy to AWS:
-   ```bash
-   sam deploy --guided
-   # Stack name: serverless-app-stack
-   # Region: your-region
-   # Confirm changes: Y
-   # Allow SAM CLI IAM role creation: Y
-   # Save arguments to config: Y
-   ```
+aws iam create-role --role-name lab-lambda-exec --assume-role-policy-document file://trust.json
+aws iam attach-role-policy --role-name lab-lambda-exec --policy-arn arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+```
 
-5. Test deployed API:
-   ```bash
-   # Get API endpoint from outputs
-   curl https://your-api-id.execute-api.region.amazonaws.com/Prod/hello
-   ```
+### 2. Create a simple Lambda function (Python example)
+```bash
+mkdir -p session07/function
+cat > session07/function/app.py <<'PY'
+import json
 
-### Step 3: Create Multi-Function Serverless API
-1. Add more functions to `template.yaml`:
-   ```yaml
-   Resources:
-     UsersFunction:
-       Type: AWS::Serverless::Function
-       Properties:
-         CodeUri: users/
-         Handler: app.lambda_handler
-         Runtime: python3.12
-         Environment:
-           Variables:
-             TABLE_NAME: !Ref UsersTable
-         Policies:
-           - DynamoDBCrudPolicy:
-               TableName: !Ref UsersTable
-         Events:
-           GetUsers:
-             Type: Api
-             Properties:
-               Path: /users
-               Method: get
-           CreateUser:
-             Type: Api
-             Properties:
-               Path: /users
-               Method: post
-           GetUser:
-             Type: Api
-             Properties:
-               Path: /users/{id}
-               Method: get
-     
-     UsersTable:
-       Type: AWS::DynamoDB::Table
-       Properties:
-         AttributeDefinitions:
-           - AttributeName: userId
-             AttributeType: S
-         KeySchema:
-           - AttributeName: userId
-             KeyType: HASH
-         BillingMode: PAY_PER_REQUEST
-   ```
+def lambda_handler(event, context):
+    path = event.get('rawPath') or event.get('path', '/')
+    method = event.get('requestContext', {}).get('http', {}).get('method') or event.get('httpMethod')
+    # simple router
+    if method == "GET" and path == "/items":
+        return {"statusCode":200,"body":json.dumps([{"id":"1","name":"item1"}])}
+    return {"statusCode":404,"body":json.dumps({"message":"Not found"})}
+PY
 
-2. Create users function:
-   ```python
-   # users/app.py
-   import json
-   import boto3
-   import os
-   from uuid import uuid4
-   
-   dynamodb = boto3.resource('dynamodb')
-   table = dynamodb.Table(os.environ['TABLE_NAME'])
-   
-   def lambda_handler(event, context):
-       http_method = event['httpMethod']
-       
-       if http_method == 'GET':
-           if 'pathParameters' in event and event['pathParameters']:
-               # Get single user
-               user_id = event['pathParameters']['id']
-               response = table.get_item(Key={'userId': user_id})
-               item = response.get('Item', {})
-               return {
-                   'statusCode': 200 if item else 404,
-                   'body': json.dumps(item)
-               }
-           else:
-               # Get all users
-               response = table.scan()
-               return {
-                   'statusCode': 200,
-                   'body': json.dumps(response['Items'])
-               }
-       
-       elif http_method == 'POST':
-           # Create user
-           body = json.loads(event['body'])
-           user_id = str(uuid4())
-           item = {
-               'userId': user_id,
-               'username': body['username'],
-               'email': body['email']
-           }
-           table.put_item(Item=item)
-           return {
-               'statusCode': 201,
-               'body': json.dumps(item)
-           }
-   ```
+zip -j function.zip session07/function/app.py
+aws lambda create-function --function-name lab-api-handler \
+  --runtime python3.12 --handler app.lambda_handler --zip-file fileb://function.zip \
+  --role arn:aws:iam::$(aws sts get-caller-identity --query Account --output text):role/lab-lambda-exec
+```
 
-3. Deploy updated application:
-   ```bash
-   sam build && sam deploy
-   ```
+### 3. Create an API Gateway HTTP API and integrate with Lambda (simpler, lower latency)
+```bash
+API_ID=$(aws apigatewayv2 create-api --name lab-http-api --protocol-type HTTP --target arn:aws:lambda:$(aws configure get region):$(aws sts get-caller-identity --query Account --output text):function:lab-api-handler --query ApiId --output text)
+# Grant invoke permission to API Gateway
+aws lambda add-permission --function-name lab-api-handler --statement-id apigw-invoke --action lambda:InvokeFunction --principal apigateway.amazonaws.com --source-arn "arn:aws:execute-api:$(aws configure get region):$(aws sts get-caller-identity --query Account --output text):$API_ID/*/*/*"
+# Create a route and integration (for path /items and method GET)
+INTEGRATION_ARN=$(aws apigatewayv2 create-integration --api-id $API_ID --integration-type AWS_PROXY --integration-uri arn:aws:lambda:$(aws configure get region):$(aws sts get-caller-identity --query Account --output text):function:lab-api-handler --payload-format-version "2.0" --query IntegrationId --output text)
+aws apigatewayv2 create-route --api-id $API_ID --route-key "GET /items" --target "integrations/$INTEGRATION_ARN"
+aws apigatewayv2 create-deployment --api-id $API_ID --query DeploymentId --output text
+aws apigatewayv2 create-stage --api-id $API_ID --stage-name dev
+API_ENDPOINT=$(aws apigatewayv2 get-stage --api-id $API_ID --stage-name dev --query 'StageVariables' --output json; aws apigatewayv2 get-api --api-id $API_ID --query "ApiEndpoint" --output text)
+echo "API endpoint: https://$API_ID.execute-api.$(aws configure get region).amazonaws.com/dev"
+```
 
-### Step 4: Create Step Functions State Machine
-1. Add Step Functions to SAM template:
-   ```yaml
-   OrderProcessingStateMachine:
-     Type: AWS::Serverless::StateMachine
-     Properties:
-       DefinitionUri: statemachine/order_processing.asl.json
-       Role: !GetAtt StepFunctionsRole.Arn
-       Events:
-         ApiEvent:
-           Type: Api
-           Properties:
-             Path: /orders
-             Method: post
-   
-   ValidateOrderFunction:
-     Type: AWS::Serverless::Function
-     Properties:
-       CodeUri: functions/validate_order/
-       Handler: app.lambda_handler
-       Runtime: python3.12
-   
-   ProcessPaymentFunction:
-     Type: AWS::Serverless::Function
-     Properties:
-       CodeUri: functions/process_payment/
-       Handler: app.lambda_handler
-       Runtime: python3.12
-   
-   FulfillOrderFunction:
-     Type: AWS::Serverless::Function
-     Properties:
-       CodeUri: functions/fulfill_order/
-       Handler: app.lambda_handler
-       Runtime: python3.12
-   ```
+### 4. (Alternative) Create a REST API with method/request mapping (if you need advanced mapping)
+- Use aws apigateway import-rest-api or console to define resources/methods, set Lambda integration URI, enable mapping templates for request/response.
+- Deploy using create-deployment and create-stage.
 
-2. Create state machine definition:
-   ```json
-   {
-     "Comment": "Order Processing Workflow",
-     "StartAt": "ValidateOrder",
-     "States": {
-       "ValidateOrder": {
-         "Type": "Task",
-         "Resource": "${ValidateOrderFunctionArn}",
-         "Next": "ProcessPayment",
-         "Catch": [{
-           "ErrorEquals": ["ValidationError"],
-           "Next": "OrderFailed"
-         }]
-       },
-       "ProcessPayment": {
-         "Type": "Task",
-         "Resource": "${ProcessPaymentFunctionArn}",
-         "Next": "FulfillOrder",
-         "Retry": [{
-           "ErrorEquals": ["PaymentError"],
-           "IntervalSeconds": 2,
-           "MaxAttempts": 3,
-           "BackoffRate": 2
-         }],
-         "Catch": [{
-           "ErrorEquals": ["States.ALL"],
-           "Next": "PaymentFailed"
-         }]
-       },
-       "FulfillOrder": {
-         "Type": "Task",
-         "Resource": "${FulfillOrderFunctionArn}",
-         "End": true
-       },
-       "PaymentFailed": {
-         "Type": "Fail",
-         "Error": "PaymentFailed",
-         "Cause": "Payment processing failed after retries"
-       },
-       "OrderFailed": {
-         "Type": "Fail",
-         "Error": "OrderValidationFailed",
-         "Cause": "Order validation failed"
-       }
-     }
-   }
-   ```
+### 5. Enable CORS (HTTP API)
+```bash
+# For HTTP API you can set CORS directly:
+aws apigatewayv2 update-api --api-id $API_ID --cors-configuration AllowOrigins='["*"]' AllowMethods='["GET","POST","PUT","DELETE","OPTIONS"]' AllowHeaders='["Content-Type","Authorization"]'
+```
 
-3. Implement Lambda functions for each step
-4. Deploy and test the workflow
+### 6. Test the endpoint
+```bash
+curl -v "https://$API_ID.execute-api.$(aws configure get region).amazonaws.com/dev/items"
+```
 
-### Step 5: Implement Function Versions and Aliases
-1. Publish function version:
-   ```bash
-   aws lambda publish-version \
-     --function-name HelloWorldFunction \
-     --description "Production release v1.0"
-   ```
+### 7. Use SAM for local development & deployment (optional)
+- sam init -> add function, sam build, sam local start-api (test locally)
+- sam deploy --guided to deploy stack (creates Lambda and API Gateway and outputs endpoint)
 
-2. Create alias for version:
-   ```bash
-   # Create 'prod' alias pointing to version 1
-   aws lambda create-alias \
-     --function-name HelloWorldFunction \
-     --name prod \
-     --function-version 1
-   
-   # Create 'dev' alias pointing to $LATEST
-   aws lambda create-alias \
-     --function-name HelloWorldFunction \
-     --name dev \
-     --function-version \$LATEST
-   ```
+---
 
-3. Update alias to new version (deployment):
-   ```bash
-   # Publish new version
-   aws lambda publish-version \
-     --function-name HelloWorldFunction \
-     --description "Production release v1.1"
-   
-   # Update prod alias to version 2
-   aws lambda update-alias \
-     --function-name HelloWorldFunction \
-     --name prod \
-     --function-version 2
-   ```
+## Logging, monitoring & security
+- Lambda logs: CloudWatch Logs (/aws/lambda/<function-name>)
+- Capture request/response metrics with API Gateway access logs and CloudWatch
+- Apply IAM authorizers or JWT (Cognito/OIDC) for auth
+- Use WAF to protect against common web attacks (optional)
 
-4. Invoke specific alias:
-   ```bash
-   aws lambda invoke \
-     --function-name HelloWorldFunction:prod \
-     output.json
-   ```
+---
 
-### Step 6: Configure Provisioned Concurrency
-1. Set provisioned concurrency for alias:
-   ```bash
-   aws lambda put-provisioned-concurrency-config \
-     --function-name HelloWorldFunction \
-     --qualifier prod \
-     --provisioned-concurrent-executions 5
-   ```
+## Validation Checklist
+- [ ] Lambda function created and running
+- [ ] API Gateway route integrated to Lambda
+- [ ] CORS configured for browser clients
+- [ ] Endpoint responds to GET/POST as designed
+- [ ] Logs available in CloudWatch for function and API
+- [ ] Authentication/authorization applied if required
 
-2. Monitor provisioned concurrency metrics:
-   - CloudWatch → Lambda → Metrics
-   - ProvisionedConcurrencyInvocations
-   - ProvisionedConcurrencyUtilization
-
-3. Configure auto-scaling:
-   ```bash
-   aws application-autoscaling register-scalable-target \
-     --service-namespace lambda \
-     --resource-id function:HelloWorldFunction:prod \
-     --scalable-dimension lambda:function:ProvisionedConcurrentExecutions \
-     --min-capacity 1 \
-     --max-capacity 10
-   ```
-
-### Step 7: Implement Lambda Destinations
-1. Create Lambda function with destinations:
-   ```python
-   # async_processor.py
-   import json
-   import random
-   
-   def lambda_handler(event, context):
-       # Simulate processing
-       if random.random() < 0.3:
-           raise Exception("Processing failed!")
-       
-       result = {
-           'status': 'success',
-           'data': event
-       }
-       return result
-   ```
-
-2. Configure destinations:
-   ```bash
-   # Create SNS topics for success/failure
-   aws sns create-topic --name lambda-success
-   aws sns create-topic --name lambda-failure
-   
-   # Configure destinations
-   aws lambda put-function-event-invoke-config \
-     --function-name async_processor \
-     --destination-config '{
-       "OnSuccess": {
-         "Destination": "arn:aws:sns:region:account:lambda-success"
-       },
-       "OnFailure": {
-         "Destination": "arn:aws:sns:region:account:lambda-failure"
-       }
-     }'
-   ```
-
-3. Test destinations:
-   ```bash
-   aws lambda invoke \
-     --function-name async_processor \
-     --invocation-type Event \
-     --payload '{"test": "data"}' \
-     response.json
-   ```
-
-### Step 8: Create Lambda@Edge Function
-1. Create Lambda function for CloudFront:
-   ```python
-   # viewer_request.py
-   def lambda_handler(event, context):
-       request = event['Records'][0]['cf']['request']
-       headers = request['headers']
-       
-       # Add security headers
-       headers['strict-transport-security'] = [{
-           'key': 'Strict-Transport-Security',
-           'value': 'max-age=63072000; includeSubdomains; preload'
-       }]
-       
-       # Redirect www to non-www
-       host = headers.get('host', [{}])[0].get('value', '')
-       if host.startswith('www.'):
-           return {
-               'status': '301',
-               'statusDescription': 'Moved Permanently',
-               'headers': {
-                   'location': [{
-                       'key': 'Location',
-                       'value': f'https://{host[4:]}{request["uri"]}'
-                   }]
-               }
-           }
-       
-       return request
-   ```
-
-2. Publish Lambda@Edge function (must be in us-east-1)
-3. Associate with CloudFront distribution:
-   - CloudFront → Distribution → Behaviors
-   - Edit behavior
-   - Lambda Function Associations
-   - Event type: Viewer Request
-   - Function ARN: Lambda@Edge function ARN
-
-### Step 9: Implement Canary Deployments
-1. Configure weighted alias routing:
-   ```bash
-   # 90% to version 1, 10% to version 2
-   aws lambda update-alias \
-     --function-name HelloWorldFunction \
-     --name prod \
-     --routing-config '{
-       "AdditionalVersionWeights": {
-         "2": 0.1
-       }
-     }'
-   ```
-
-2. Monitor canary metrics:
-   - Compare error rates between versions
-   - Gradually increase traffic to new version
-
-3. Complete rollout:
-   ```bash
-   # Move 100% traffic to version 2
-   aws lambda update-alias \
-     --function-name HelloWorldFunction \
-     --name prod \
-     --function-version 2 \
-     --routing-config '{}'
-   ```
-
-### Step 10: Monitor and Optimize Performance
-1. **Enable X-Ray tracing:**
-   - Function configuration → Monitoring tools
-   - Enable active tracing
-   - View service map and traces
-
-2. **Analyze cold start duration:**
-   - CloudWatch Logs Insights query:
-     ```
-     filter @type = "REPORT"
-     | stats avg(@initDuration), max(@initDuration), count(@initDuration) by bin(5m)
-     ```
-
-3. **Optimize function package size:**
-   - Remove unnecessary dependencies
-   - Use Lambda layers for common libraries
-   - Minimize deployment package
-
-4. **Use Lambda Power Tuning:**
-   - Deploy AWS Lambda Power Tuning tool
-   - Run performance tests at different memory settings
-   - Find optimal cost/performance ratio
-
-## Validation
-- [ ] SAM application built and deployed
-- [ ] Multi-function API working correctly
-- [ ] Step Functions workflow orchestrating Lambda
-- [ ] Function versions and aliases configured
-- [ ] Provisioned concurrency set up
-- [ ] Lambda Destinations configured
-- [ ] Lambda@Edge function deployed
-- [ ] Canary deployment tested
-- [ ] X-Ray tracing enabled
-- [ ] Performance optimized
+---
 
 ## Cleanup
-1. Delete SAM stack:
-   ```bash
-   sam delete --stack-name serverless-app-stack
-   ```
-2. Delete Step Functions state machine
-3. Delete Lambda@Edge functions
-4. Delete CloudFront distributions
-5. Delete SNS topics
-6. Delete provisioned concurrency configs
-7. Delete function versions and aliases
-8. Verify all resources removed
+```bash
+aws lambda delete-function --function-name lab-api-handler || true
+aws apigatewayv2 delete-api --api-id $API_ID || true
+aws iam detach-role-policy --role-name lab-lambda-exec --policy-arn arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole || true
+aws iam delete-role --role-name lab-lambda-exec || true
+rm -f function.zip
+```
 
 ## Summary
-In this lab, you mastered advanced Lambda patterns including SAM for infrastructure as code, Step Functions for workflow orchestration, Lambda@Edge for edge computing, and production deployment strategies. These patterns enable building sophisticated, production-grade serverless applications that scale automatically and minimize operational overhead.
-
-**Key Takeaways:**
-- SAM simplifies serverless application development and deployment
-- Step Functions orchestrate complex workflows with error handling
-- Versions and aliases enable safe deployment strategies
-- Provisioned concurrency eliminates cold starts for critical functions
-- Lambda Destinations handle async success/failure scenarios
-- Lambda@Edge runs code at CloudFront edge locations
-- Canary deployments minimize risk during updates
-- X-Ray provides distributed tracing for debugging
-- Optimize memory settings for cost/performance balance
-- Infrastructure as code enables repeatable deployments
+This lab provides a focused, hands-on walkthrough to build a REST API using API Gateway integrated with Lambda, covering function creation, API wiring, CORS, testing, and cleanup. Use SAM for faster local iteration and apply auth and observability for production readiness

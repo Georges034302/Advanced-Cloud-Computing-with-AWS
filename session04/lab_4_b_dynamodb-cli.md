@@ -1,230 +1,192 @@
-# Lab 4.A: Amazon S3 Fundamentals and Storage Management
+# Lab 4.B: Build and query a DynamoDB table using AWS CLI and SDK
 
 ## Overview
-This lab introduces Amazon Simple Storage Service (S3), AWS's object storage service. You'll learn how to create and manage S3 buckets, upload and organize objects, configure access permissions, and implement versioning and lifecycle policies. S3 is fundamental to many AWS architectures for data storage, backup, and static website hosting.
+Hands-on lab to design, create, populate, and query an Amazon DynamoDB table using the AWS CLI and SDK (boto3). You will practice schema design (partition & sort keys), efficient queries, secondary indexes, pagination, TTL, backups, and basic IAM permissions.
 
 ## Objectives
-- Create and configure S3 buckets
-- Upload, download, and manage objects
-- Organize data with folders and prefixes
-- Configure bucket and object permissions
-- Enable versioning for data protection
-- Implement lifecycle policies for cost optimization
-- Host a static website on S3
+- Design a DynamoDB table schema for read/write patterns
+- Create a table with CLI and SDK
+- Insert items (PutItem, BatchWriteItem)
+- Query and scan efficiently, use pagination
+- Add a Global Secondary Index (GSI) and query it
+- Use TTL, on-demand backups, and point-in-time recovery (PITR)
+- Clean up resources
 
-## Requirements
-- AWS account with S3 permissions
-- AWS CLI installed and configured (optional)
-- Sample files for upload (images, documents)
-- Basic understanding of storage concepts
-- Web browser for testing static website
+## Prerequisites
+- AWS CLI v2 configured (aws configure)
+- Python 3 with boto3 installed (pip install boto3) for SDK examples
+- IAM permissions for dynamodb:* for lab account (or scoped as shown below)
 
-## Steps
+---
 
-### Step 1: Create an S3 Bucket
-1. Navigate to S3 console
-2. Click "Create bucket"
-3. Configure:
-   - Bucket name: `my-lab-bucket-[unique-id]` (must be globally unique)
-   - AWS Region: Choose your preferred region
-   - Object Ownership: ACLs disabled (recommended)
-   - Block Public Access: Keep all settings enabled (for now)
-   - Bucket Versioning: Disabled (will enable later)
-   - Default encryption: Enable with SSE-S3
-   - Tags: Add `Environment=Lab`
-4. Create bucket
+## Table design notes
+- Choose a partition key (hash) for even distribution; add a sort key for query filtering.
+- Reserve GSIs for alternate access patterns.
+- Keep item size small and avoid hot keys under high write traffic.
 
-### Step 2: Upload Objects to S3
-1. Select your bucket
-2. Click "Upload"
-3. Add files:
-   - Click "Add files" and select multiple files
-   - Or drag and drop files
-4. Configure properties (keep defaults):
-   - Storage class: Standard
-   - Server-side encryption: Default
-5. Upload files
-6. Verify upload in bucket contents view
+Example model for a simple event store:
+- Table name: LabEvents
+- Partition key: pk (string) — e.g., USER#123
+- Sort key: sk (string) — e.g., EVENT#2025-11-10T12:00:00Z
+- GSI: GSI1 with partition gsi1pk and sort gsi1sk for querying by event type or status
 
-### Step 3: Organize with Folders and Prefixes
-1. Create folder structure:
-   - Click "Create folder"
-   - Name: `documents/`
-   - Create another: `images/`
-   - Create another: `backups/`
-2. Move/upload files to appropriate folders:
-   - Upload documents to `documents/`
-   - Upload images to `images/`
-3. Note: S3 doesn't have true folders, uses prefixes
+---
 
-### Step 4: Configure Bucket Permissions
-1. **Bucket Policy - Public Read Access:**
-   - Select bucket → Permissions tab
-   - Edit Block Public Access settings
-   - Uncheck "Block all public access"
-   - Confirm changes
-   - Add bucket policy:
-   ```json
-   {
-     "Version": "2012-10-17",
-     "Statement": [
-       {
-         "Sid": "PublicReadGetObject",
-         "Effect": "Allow",
-         "Principal": "*",
-         "Action": "s3:GetObject",
-         "Resource": "arn:aws:s3:::my-lab-bucket-[unique-id]/images/*"
-       }
-     ]
-   }
-   ```
-   - This makes only objects in `images/` public
+## CLI: Create table (on-demand or provisioned capacity)
+Replace REGION, ACCOUNT, TABLE_NAME as needed.
 
-2. **Pre-signed URLs for Temporary Access:**
-   - Select an object in `documents/`
-   - Actions → Share with a presigned URL
-   - Expiration: 5 minutes
-   - Generate URL
-   - Test URL in browser
-
-### Step 5: Enable and Test Versioning
-1. Select bucket → Properties
-2. Find "Bucket Versioning" → Edit
-3. Enable versioning
-4. Save changes
-5. Test versioning:
-   - Create a text file locally: `test.txt` with content "Version 1"
-   - Upload to bucket
-   - Modify file locally: change content to "Version 2"
-   - Upload again with same name
-   - Modify once more: "Version 3" and upload
-6. View all versions:
-   - Toggle "Show versions" in bucket view
-   - Observe multiple versions of `test.txt`
-   - Download different versions to verify content
-
-### Step 6: Configure Lifecycle Policies
-1. Select bucket → Management tab
-2. Create lifecycle rule:
-   - Name: `optimize-storage-costs`
-   - Choose scope: Apply to all objects
-3. Lifecycle rule actions:
-   - Transition current versions:
-     - Days after object creation: 30
-     - Storage class: Standard-IA
-   - Transition current versions:
-     - Days after object creation: 90
-     - Storage class: Glacier Flexible Retrieval
-   - Delete previous versions:
-     - Days after becoming noncurrent: 30
-4. Create rule
-5. Review rule in Management tab
-
-### Step 7: Host a Static Website
-1. Create simple HTML files locally:
-
-**index.html:**
-```html
-<!DOCTYPE html>
-<html>
-<head><title>My S3 Website</title></head>
-<body>
-    <h1>Welcome to My S3 Static Website</h1>
-    <p>This site is hosted on Amazon S3!</p>
-    <a href="page2.html">Go to Page 2</a>
-</body>
-</html>
+On-demand (simpler for labs):
+```bash
+aws dynamodb create-table \
+  --table-name LabEvents \
+  --attribute-definitions AttributeName=pk,AttributeType=S AttributeName=sk,AttributeType=S AttributeName=gsi1pk,AttributeType=S \
+  --key-schema AttributeName=pk,KeyType=HASH AttributeName=sk,KeyType=RANGE \
+  --billing-mode PAY_PER_REQUEST \
+  --global-secondary-indexes '[{"IndexName":"GSI1","KeySchema":[{"AttributeName":"gsi1pk","KeyType":"HASH"},{"AttributeName":"gsi1sk","KeyType":"RANGE"}],"Projection":{"ProjectionType":"ALL"}}]' \
+  --region us-east-1
 ```
 
-**error.html:**
-```html
-<!DOCTYPE html>
-<html>
-<head><title>Error</title></head>
-<body><h1>404 - Page Not Found</h1></body>
-</html>
+Wait for table:
+```bash
+aws dynamodb wait table-exists --table-name LabEvents --region us-east-1
 ```
 
-2. Upload both files to bucket root
-3. Configure static website hosting:
-   - Properties → Static website hosting → Edit
-   - Enable static website hosting
-   - Hosting type: Host a static website
-   - Index document: `index.html`
-   - Error document: `error.html`
-   - Save changes
-4. Note the website endpoint URL
-5. Update bucket policy for website access:
-   ```json
-   {
-     "Version": "2012-10-17",
-     "Statement": [
-       {
-         "Sid": "PublicReadGetObject",
-         "Effect": "Allow",
-         "Principal": "*",
-         "Action": "s3:GetObject",
-         "Resource": "arn:aws:s3:::my-lab-bucket-[unique-id]/*"
-       }
-     ]
-   }
-   ```
-6. Access website using endpoint URL
+## CLI: Insert items
+Single item:
+```bash
+aws dynamodb put-item --table-name LabEvents --item '{"pk":{"S":"USER#123"},"sk":{"S":"EVENT#2025-11-10T12:00:00Z"},"type":{"S":"login"},"payload":{"S":"{\"ip\":\"1.2.3.4\"}"}}' --region us-east-1
+```
 
-### Step 8: Use AWS CLI (Optional)
-1. Configure AWS CLI if not already:
-   ```bash
-   aws configure
-   ```
-2. List buckets:
-   ```bash
-   aws s3 ls
-   ```
-3. Upload file:
-   ```bash
-   aws s3 cp myfile.txt s3://my-lab-bucket-[unique-id]/
-   ```
-4. Sync directory:
-   ```bash
-   aws s3 sync ./local-folder s3://my-lab-bucket-[unique-id]/synced/
-   ```
-5. Download file:
-   ```bash
-   aws s3 cp s3://my-lab-bucket-[unique-id]/myfile.txt ./
-   ```
+Batch write (up to 25 items per request):
+```bash
+aws dynamodb batch-write-item --request-items file://batch-items.json --region us-east-1
+```
 
-## Validation
-- [ ] S3 bucket created with unique name
-- [ ] Objects uploaded successfully
-- [ ] Folder structure created and organized
-- [ ] Bucket policy configured for public access
-- [ ] Versioning enabled and tested
-- [ ] Lifecycle policy created and active
-- [ ] Static website hosted and accessible
-- [ ] Pre-signed URL generated and tested
-- [ ] AWS CLI commands executed successfully (if applicable)
+## CLI: Query and Scan
+Query by pk and range on sk:
+```bash
+aws dynamodb query --table-name LabEvents --key-condition-expression "pk = :p and begins_with(sk, :s)" --expression-attribute-values '{":p":{"S":"USER#123"},":s":{"S":"EVENT#2025-11"}}' --region us-east-1
+```
+
+Query GSI:
+```bash
+aws dynamodb query --table-name LabEvents --index-name GSI1 --key-condition-expression "gsi1pk = :g" --expression-attribute-values '{":g":{"S":"EVENTTYPE#login"}}' --region us-east-1
+```
+
+Scan with pagination (use sparingly):
+```bash
+aws dynamodb scan --table-name LabEvents --max-items 100 --region us-east-1
+```
+
+## TTL, Backups, and PITR
+Enable TTL on attribute "expiresAt" (epoch seconds):
+```bash
+aws dynamodb update-time-to-live --table-name LabEvents --time-to-live-specification "Enabled=true,AttributeName=expiresAt" --region us-east-1
+```
+
+Create on-demand backup:
+```bash
+aws dynamodb create-backup --table-name LabEvents --backup-name LabEvents-backup-$(date -u +%Y%m%d) --region us-east-1
+```
+
+Enable PITR:
+```bash
+aws dynamodb update-continuous-backups --table-name LabEvents --point-in-time-recovery-specification PointInTimeRecoveryEnabled=true --region us-east-1
+```
+
+## SDK examples (Python / boto3)
+
+Create table (boto3):
+```python
+# filepath: examples/dynamodb_create_table.py
+import boto3
+
+dynamodb = boto3.client('dynamodb', region_name='us-east-1')
+dynamodb.create_table(
+    TableName='LabEvents',
+    AttributeDefinitions=[
+        {'AttributeName': 'pk', 'AttributeType': 'S'},
+        {'AttributeName': 'sk', 'AttributeType': 'S'},
+        {'AttributeName': 'gsi1pk', 'AttributeType': 'S'}
+    ],
+    KeySchema=[
+        {'AttributeName': 'pk', 'KeyType': 'HASH'},
+        {'AttributeName': 'sk', 'KeyType': 'RANGE'}
+    ],
+    BillingMode='PAY_PER_REQUEST',
+    GlobalSecondaryIndexes=[{
+        'IndexName':'GSI1',
+        'KeySchema':[{'AttributeName':'gsi1pk','KeyType':'HASH'}],
+        'Projection':{'ProjectionType':'ALL'}
+    }]
+)
+```
+
+Put item and query (boto3):
+```python
+# filepath: examples/dynamodb_put_query.py
+import boto3
+from boto3.dynamodb.conditions import Key
+
+d = boto3.resource('dynamodb', region_name='us-east-1')
+t = d.Table('LabEvents')
+
+t.put_item(Item={'pk':'USER#123','sk':'EVENT#2025-11-10T12:00:00Z','type':'login','payload':'{"ip":"1.2.3.4"}'})
+
+resp = t.query(KeyConditionExpression=Key('pk').eq('USER#123') & Key('sk').begins_with('EVENT#2025'))
+print(resp.get('Items', []))
+```
+
+## IAM policy example (scoped)
+Grant minimal privileges for the lab (replace resource ARNs):
+```json
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Effect": "Allow",
+      "Action": [
+        "dynamodb:CreateTable",
+        "dynamodb:DescribeTable",
+        "dynamodb:PutItem",
+        "dynamodb:BatchWriteItem",
+        "dynamodb:Query",
+        "dynamodb:Scan",
+        "dynamodb:UpdateTable",
+        "dynamodb:DeleteTable",
+        "dynamodb:CreateBackup",
+        "dynamodb:UpdateContinuousBackups",
+        "dynamodb:UpdateTimeToLive"
+      ],
+      "Resource": "arn:aws:dynamodb:REGION:ACCOUNT_ID:table/LabEvents"
+    }
+  ]
+}
+```
+
+## Validation checklist
+- [ ] Table created and active
+- [ ] Items inserted via CLI and SDK
+- [ ] Query by PK+SK returns expected items
+- [ ] GSI created and queried successfully
+- [ ] Pagination handled for large results
+- [ ] TTL and backups configured (on-demand backup + PITR)
+- [ ] IAM permissions scoped and working
 
 ## Cleanup
-1. Delete all objects in bucket:
-   - Enable "Show versions" toggle
-   - Select all objects and versions
-   - Delete permanently
-2. Disable static website hosting
-3. Delete lifecycle rules
-4. Empty bucket completely
-5. Delete bucket
-6. Verify bucket is removed from S3 console
+Delete table when done:
+```bash
+aws dynamodb delete-table --table-name LabEvents --region us-east-1
+aws dynamodb wait table-not-exists --table-name LabEvents --region us-east-1
+```
+Remove example backup(s) and any on-demand snapshots if created.
+
+## Notes & best practices
+- Prefer queries over scans; design keys for access patterns.
+- Use on-demand billing for unpredictable workloads during labs.
+- Monitor for hot keys and uneven traffic distribution.
+- Use GSIs sparingly and evaluate capacity/cost.
+- Use encryption at rest (default) and IAM roles for SDK access.
 
 ## Summary
-In this lab, you mastered Amazon S3 fundamentals including bucket creation, object management, access control, versioning, and lifecycle policies. You also learned how to host static websites on S3, a cost-effective solution for web content. S3's durability, scalability, and integration with other AWS services make it essential for modern cloud applications.
-
-**Key Takeaways:**
-- S3 bucket names must be globally unique
-- S3 provides 11 nines (99.999999999%) of durability
-- Versioning protects against accidental deletion and overwrites
-- Lifecycle policies automate storage class transitions for cost savings
-- Static website hosting is simple and cost-effective on S3
-- Bucket policies control access at bucket and object level
-- Pre-signed URLs provide temporary access without credentials
-- Different storage classes optimize costs for different access patterns
-- Always enable encryption for sensitive data
+This lab covers practical DynamoDB operations using CLI and SDK, focusing on schema design, efficient querying, indexes, TTL, backups, and cleanup — all essential for scalable serverless data stores.

@@ -1,479 +1,179 @@
-# Lab 8.B: ECS Service Discovery and Multi-Container Applications
+# Lab 8.A: Create an event-driven workflow using SQS and Lambda consumers
 
 ## Overview
-This lab explores advanced ECS features including AWS Cloud Map for service discovery, multi-container task definitions, ECS Exec for debugging, and deploying microservices architectures. You'll learn how to build interconnected containerized services that communicate seamlessly within your ECS environment.
+Build a resilient event-driven workflow using Amazon SQS queues and AWS Lambda consumers. This lab covers standard and FIFO queues, Dead-Letter Queues (DLQs), Lambda event source mappings, batch processing, visibility timeout tuning, idempotency, retries/DLQs, monitoring, and cleanup.
 
 ## Objectives
-- Configure AWS Cloud Map for service discovery
-- Create multi-container task definitions
-- Implement microservices communication patterns
-- Use ECS Exec for container debugging
-- Configure service mesh with App Mesh (overview)
-- Implement secrets management with Secrets Manager
-- Deploy sidecar patterns
-- Monitor distributed container applications
+- Create SQS queues (standard and DLQ)
+- Create a Lambda consumer with least-privilege IAM role
+- Configure event source mapping (batch size, bisect on error)
+- Implement idempotent processing and error handling patterns
+- Validate retry and DLQ behavior
+- Monitor with CloudWatch and clean up resources
 
-## Requirements
-- Completed Lab 8.A or equivalent ECS knowledge
-- Understanding of microservices architecture
-- Docker and containerization experience
-- VPC and networking knowledge
-- AWS CLI configured
+## Prerequisites
+- AWS CLI v2 configured
+- Python 3.12 or Node.js for Lambda code
+- jq (optional) for JSON parsing
+- IAM permissions to create SQS, Lambda, IAM resources
 
-## Steps
+---
 
-### Step 1: Create Cloud Map Namespace
-1. Navigate to AWS Cloud Map console
-2. Click "Create namespace"
-3. Configure:
-   - Namespace type: API calls and DNS queries in VPCs
-   - Namespace name: `local`
-   - VPC: Select your VPC
-   - Description: "Service discovery for ECS"
-4. Create namespace
-5. Note the namespace ID
+## Variables (replace as needed)
+- REGION=us-east-1
+- QUEUE_NAME=lab-queue
+- DLQ_NAME=lab-queue-dlq
+- LAMBDA_NAME=lab-sqs-consumer
+- ROLE_NAME=lab-lambda-sqs-role
 
-### Step 2: Create Backend API Service
-1. Create backend application:
-   ```python
-   # backend/app.py
-   from flask import Flask, jsonify
-   import random
-   
-   app = Flask(__name__)
-   
-   @app.route('/api/data')
-   def get_data():
-       return jsonify({
-           'data': random.randint(1, 100),
-           'service': 'backend'
-       })
-   
-   @app.route('/health')
-   def health():
-       return jsonify({'status': 'healthy'})
-   
-   if __name__ == '__main__':
-       app.run(host='0.0.0.0', port=8080)
-   ```
+---
 
-2. Create Dockerfile:
-   ```dockerfile
-   FROM python:3.12-slim
-   WORKDIR /app
-   COPY requirements.txt .
-   RUN pip install --no-cache-dir -r requirements.txt
-   COPY app.py .
-   EXPOSE 8080
-   CMD ["gunicorn", "--bind", "0.0.0.0:8080", "app:app"]
-   ```
+## Steps (CLI examples)
 
-3. Build and push to ECR:
-   ```bash
-   docker build -t backend-api:v1 backend/
-   docker tag backend-api:v1 <account>.dkr.ecr.<region>.amazonaws.com/backend-api:v1
-   docker push <account>.dkr.ecr.<region>.amazonaws.com/backend-api:v1
-   ```
+### 1. Create DLQ and main queue
+```bash
+# create DLQ
+DLQ_URL=$(aws sqs create-queue --queue-name $DLQ_NAME --region $REGION --query QueueUrl --output text)
+DLQ_ARN=$(aws sqs get-queue-attributes --queue-url $DLQ_URL --attribute-names QueueArn --region $REGION --query Attributes.QueueArn --output text)
 
-### Step 3: Create Frontend Service
-1. Create frontend application:
-   ```python
-   # frontend/app.py
-   from flask import Flask, jsonify
-   import requests
-   import os
-   
-   app = Flask(__name__)
-   BACKEND_URL = os.environ.get('BACKEND_URL', 'http://backend.local:8080')
-   
-   @app.route('/')
-   def home():
-       try:
-           # Call backend service via service discovery
-           response = requests.get(f'{BACKEND_URL}/api/data', timeout=5)
-           backend_data = response.json()
-           
-           return jsonify({
-               'message': 'Frontend service',
-               'backend_response': backend_data
-           })
-       except Exception as e:
-           return jsonify({
-               'message': 'Frontend service',
-               'error': str(e)
-           }), 500
-   
-   @app.route('/health')
-   def health():
-       return jsonify({'status': 'healthy'})
-   
-   if __name__ == '__main__':
-       app.run(host='0.0.0.0', port=5000)
-   ```
+# create main queue with RedrivePolicy to DLQ (standard queue example)
+aws sqs create-queue --queue-name $QUEUE_NAME --region $REGION --attributes \
+  RedrivePolicy='{"maxReceiveCount":"5","deadLetterTargetArn":"'"$DLQ_ARN"'"}'
+QUEUE_URL=$(aws sqs get-queue-url --queue-name $QUEUE_NAME --region $REGION --query QueueUrl --output text)
+QUEUE_ARN=$(aws sqs get-queue-attributes --queue-url $QUEUE_URL --attribute-names QueueArn --region $REGION --query Attributes.QueueArn --output text)
+```
 
-2. Add requests to requirements:
-   ```text
-   Flask==3.0.0
-   gunicorn==21.2.0
-   requests==2.31.0
-   ```
+Notes:
+- For FIFO queue append .fifo to name and set FifoQueue=true and ContentBasedDeduplication as needed.
 
-3. Build and push to ECR
+### 2. Create Lambda execution role (least-privilege)
+```bash
+cat > trust.json <<'EOF'
+{
+  "Version":"2012-10-17",
+  "Statement":[{"Effect":"Allow","Principal":{"Service":"lambda.amazonaws.com"},"Action":"sts:AssumeRole"}]
+}
+EOF
 
-### Step 4: Create Backend Task Definition with Service Discovery
-1. Create task definition for backend:
-   - Family: `backend-api-task`
-   - Launch type: Fargate
-   - CPU: 0.25 vCPU
-   - Memory: 0.5 GB
-   - Container:
-     - Name: `backend`
-     - Image: Backend ECR image
-     - Port: 8080
-     - Health check: `/health`
+aws iam create-role --role-name $ROLE_NAME --assume-role-policy-document file://trust.json --region $REGION || true
 
-2. Create backend service with Cloud Map:
-   - Service name: `backend-service`
-   - Task definition: `backend-api-task`
-   - Desired count: 2
-   - Service discovery:
-     - Enable service discovery: Yes
-     - Namespace: `local`
-     - Service discovery name: `backend`
-     - DNS record type: A
-     - TTL: 60 seconds
-   - Health check grace period: 60 seconds
+cat > policy.json <<'EOF'
+{
+  "Version":"2012-10-17",
+  "Statement":[
+    {"Effect":"Allow","Action":["logs:CreateLogGroup","logs:CreateLogStream","logs:PutLogEvents"],"Resource":"arn:aws:logs:*:*:*"},
+    {"Effect":"Allow","Action":["sqs:ChangeMessageVisibility","sqs:DeleteMessage","sqs:ReceiveMessage","sqs:GetQueueAttributes"],"Resource":"'"$QUEUE_ARN"'"}
+  ]
+}
+EOF
 
-3. Verify service discovery:
-   ```bash
-   # From within VPC (using EC2 instance)
-   nslookup backend.local
-   # Should resolve to task IP addresses
-   ```
+aws iam put-role-policy --role-name $ROLE_NAME --policy-name LambdaSqsPolicy --policy-document file://policy.json --region $REGION
+aws iam attach-role-policy --role-name $ROLE_NAME --policy-arn arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole --region $REGION
+ROLE_ARN=$(aws iam get-role --role-name $ROLE_NAME --region $REGION --query Role.Arn --output text)
+```
 
-### Step 5: Create Frontend Service
-1. Create frontend task definition:
-   - Family: `frontend-task`
-   - Container:
-     - Name: `frontend`
-     - Image: Frontend ECR image
-     - Port: 5000
-     - Environment variables:
-       - `BACKEND_URL`: `http://backend.local:8080`
+### 3. Create Lambda function (Python example)
+Create simple idempotent consumer that uses messageId to avoid reprocessing (store processed IDs in DynamoDB for production; here it logs and deletes message).
 
-2. Create frontend service:
-   - Task definition: `frontend-task`
-   - Desired count: 2
-   - Load balancer: Attach to ALB
-   - Service discovery: Optional
+```bash
+mkdir -p session08 && cat > session08/consumer.py <<'PY'
+import json
+import boto3
+import os
 
-3. Test microservices communication:
-   ```bash
-   curl http://<alb-dns-name>/
-   # Should show frontend calling backend via service discovery
-   ```
+def lambda_handler(event, context):
+    for record in event.get('Records', []):
+        body = record.get('body')
+        message_id = record.get('messageId')
+        print(f"Processing message {message_id}: {body}")
+        # TODO: implement idempotent store/check (e.g., DynamoDB)
+    return {"status": "ok"}
+PY
 
-### Step 6: Create Multi-Container Task Definition
-1. Create multi-container application:
-   ```json
-   {
-     "family": "multi-container-task",
-     "networkMode": "awsvpc",
-     "requiresCompatibilities": ["FARGATE"],
-     "cpu": "512",
-     "memory": "1024",
-     "containerDefinitions": [
-       {
-         "name": "app",
-         "image": "<account>.dkr.ecr.<region>.amazonaws.com/app:v1",
-         "portMappings": [{
-           "containerPort": 80,
-           "protocol": "tcp"
-         }],
-         "dependsOn": [{
-           "containerName": "init-container",
-           "condition": "SUCCESS"
-         }],
-         "environment": [{
-           "name": "LOG_LEVEL",
-           "value": "info"
-         }]
-       },
-       {
-         "name": "init-container",
-         "image": "busybox:latest",
-         "essential": false,
-         "command": [
-           "sh", "-c",
-           "echo 'Initialization complete' && sleep 5"
-         ]
-       },
-       {
-         "name": "log-router",
-         "image": "amazon/aws-for-fluent-bit:latest",
-         "essential": true,
-         "firelensConfiguration": {
-           "type": "fluentbit"
-         },
-         "logConfiguration": {
-           "logDriver": "awslogs",
-           "options": {
-             "awslogs-group": "/ecs/firelens",
-             "awslogs-region": "us-east-1",
-             "awslogs-stream-prefix": "firelens"
-           }
-         }
-       }
-     ]
-   }
-   ```
+zip -j consumer.zip session08/consumer.py
 
-2. Register task definition:
-   ```bash
-   aws ecs register-task-definition \
-     --cli-input-json file://multi-container-task.json
-   ```
+aws lambda create-function --function-name $LAMBDA_NAME \
+  --runtime python3.12 --handler consumer.lambda_handler \
+  --zip-file fileb://consumer.zip --role $ROLE_ARN --timeout 30 --memory-size 256 --region $REGION
+```
 
-### Step 7: Implement Secrets Management
-1. Create secrets in AWS Secrets Manager:
-   ```bash
-   aws secretsmanager create-secret \
-     --name db-password \
-     --secret-string "MySecurePassword123!"
-   
-   aws secretsmanager create-secret \
-     --name api-key \
-     --secret-string "api-key-12345"
-   ```
+### 4. Grant SQS permission to invoke Lambda (not required for event source mapping) and create event source mapping
+Event source mapping polls SQS; Lambda does not need Lambda add-permission for SQS mapping.
 
-2. Update task definition to use secrets:
-   ```json
-   {
-     "containerDefinitions": [{
-       "name": "app",
-       "secrets": [
-         {
-           "name": "DB_PASSWORD",
-           "valueFrom": "arn:aws:secretsmanager:region:account:secret:db-password"
-         },
-         {
-           "name": "API_KEY",
-           "valueFrom": "arn:aws:secretsmanager:region:account:secret:api-key"
-         }
-       ]
-     }]
-   }
-   ```
+```bash
+aws lambda create-event-source-mapping \
+  --function-name $LAMBDA_NAME \
+  --batch-size 10 \
+  --maximum-batching-window-in-seconds 10 \
+  --event-source-arn $QUEUE_ARN \
+  --enabled \
+  --bisect-on-function-error \
+  --maximum-record-age-in-seconds 3600 \
+  --maximum-retry-attempts 2 \
+  --region $REGION
+```
 
-3. Update task execution role policy:
-   ```json
-   {
-     "Version": "2012-10-17",
-     "Statement": [{
-       "Effect": "Allow",
-       "Action": [
-         "secretsmanager:GetSecretValue"
-       ],
-       "Resource": [
-         "arn:aws:secretsmanager:region:account:secret:db-password*",
-         "arn:aws:secretsmanager:region:account:secret:api-key*"
-       ]
-     }]
-   }
-   ```
+Settings explained:
+- batch-size: number of messages per Lambda invocation
+- bisect-on-function-error: splits batch on failure to isolate bad messages
+- maximum-retry-attempts + DLQ: controls retries before message returns to queue and hits DLQ via RedrivePolicy
 
-### Step 8: Enable and Use ECS Exec
-1. Enable ECS Exec on service:
-   ```bash
-   aws ecs update-service \
-     --cluster web-app-cluster \
-     --service backend-service \
-     --enable-execute-command
-   ```
+### 5. Test end-to-end
+Send test messages:
+```bash
+aws sqs send-message --queue-url $QUEUE_URL --message-body '{"order":"123","amount":9.99}' --region $REGION
+aws sqs send-message --queue-url $QUEUE_URL --message-body '{"order":"124","amount":19.99}' --region $REGION
+```
 
-2. Update task role for ECS Exec:
-   ```json
-   {
-     "Version": "2012-10-17",
-     "Statement": [{
-       "Effect": "Allow",
-       "Action": [
-         "ssmmessages:CreateControlChannel",
-         "ssmmessages:CreateDataChannel",
-         "ssmmessages:OpenControlChannel",
-         "ssmmessages:OpenDataChannel"
-       ],
-       "Resource": "*"
-     }]
-   }
-   ```
+Inspect Lambda logs:
+```bash
+aws logs describe-log-streams --log-group-name /aws/lambda/$LAMBDA_NAME --region $REGION
+aws logs filter-log-events --log-group-name /aws/lambda/$LAMBDA_NAME --limit 50 --region $REGION
+```
 
-3. Connect to running container:
-   ```bash
-   # List tasks
-   aws ecs list-tasks \
-     --cluster web-app-cluster \
-     --service-name backend-service
-   
-   # Execute command in container
-   aws ecs execute-command \
-     --cluster web-app-cluster \
-     --task <task-id> \
-     --container backend \
-     --interactive \
-     --command "/bin/sh"
-   ```
+Simulate failures:
+- Throw an exception in lambda_handler to observe retries and DLQ delivery after maxReceiveCount.
 
-4. Debug within container:
-   ```bash
-   # Inside container
-   ps aux
-   netstat -tlnp
-   env
-   curl localhost:8080/health
-   cat /proc/1/environ
-   exit
-   ```
+### 6. Best practices & patterns
+- Use idempotency (DynamoDB conditional writes or dedupe keys).
+- Tune visibility timeout > Lambda timeout + processing time.
+- Use small batch sizes for latency-sensitive processing.
+- Use SQS FIFO for strict ordering and exactly-once semantics (with deduplication).
+- Use SQS -> Lambda via SQS event source mapping for at-least-once delivery; implement idempotency to avoid duplicate side-effects.
+- For very high throughput, consider SQS -> Kinesis or SQS -> ECS consumers.
 
-### Step 9: Implement Sidecar Pattern
-1. Create logging sidecar task definition:
-   ```json
-   {
-     "containerDefinitions": [
-       {
-         "name": "application",
-         "image": "app:v1",
-         "portMappings": [{"containerPort": 80}],
-         "logConfiguration": {
-           "logDriver": "awsfirelens"
-         }
-       },
-       {
-         "name": "log-aggregator",
-         "image": "fluent/fluent-bit:latest",
-         "firelensConfiguration": {
-           "type": "fluentbit",
-           "options": {
-             "config-file-type": "file",
-             "config-file-value": "/fluent-bit/configs/parse-json.conf"
-           }
-         },
-         "logConfiguration": {
-           "logDriver": "awslogs",
-           "options": {
-             "awslogs-group": "/ecs/sidecar-logs",
-             "awslogs-region": "us-east-1"
-           }
-         }
-       }
-     ]
-   }
-   ```
+### 7. Monitoring & Alerting
+- CloudWatch metrics: ApproximateNumberOfMessagesVisible, ApproximateNumberOfMessagesNotVisible, NumberOfMessagesDeleted.
+- Lambda metrics: Invocations, Duration, Errors, Throttles.
+- Create CloudWatch alarm on ApproximateNumberOfMessagesVisible to alert on processing backlog.
 
-2. Create monitoring sidecar (Prometheus exporter):
-   ```json
-   {
-     "name": "metrics-exporter",
-     "image": "prom/node-exporter:latest",
-     "portMappings": [{
-       "containerPort": 9100
-     }],
-     "essential": false
-   }
-   ```
+Example alarm (backlog alert):
+```bash
+aws cloudwatch put-metric-alarm --alarm-name sqs-backlog-$QUEUE_NAME \
+  --metric-name ApproximateNumberOfMessagesVisible --namespace AWS/SQS \
+  --statistic Sum --period 300 --threshold 100 --comparison-operator GreaterThanThreshold \
+  --dimensions Name=QueueName,Value=$QUEUE_NAME --evaluation-periods 1 --region $REGION
+```
 
-### Step 10: Monitor Microservices with X-Ray
-1. Add X-Ray daemon sidecar:
-   ```json
-   {
-     "containerDefinitions": [{
-       "name": "xray-daemon",
-       "image": "amazon/aws-xray-daemon:latest",
-       "cpu": 32,
-       "memoryReservation": 256,
-       "portMappings": [{
-         "containerPort": 2000,
-         "protocol": "udp"
-       }]
-     }]
-   }
-   ```
+### 8. Cleanup
+```bash
+aws lambda update-function-configuration --function-name $LAMBDA_NAME --environment Variables={} --region $REGION || true
+aws lambda delete-function --function-name $LAMBDA_NAME --region $REGION || true
+aws sqs delete-queue --queue-url $QUEUE_URL --region $REGION || true
+aws sqs delete-queue --queue-url $DLQ_URL --region $REGION || true
+aws iam delete-role-policy --role-name $ROLE_NAME --policy-name LambdaSqsPolicy --region $REGION || true
+aws iam detach-role-policy --role-name $ROLE_NAME --policy-arn arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole --region $REGION || true
+aws iam delete-role --role-name $ROLE_NAME --region $REGION || true
+rm -f consumer.zip session08/consumer.py
+```
 
-2. Update application to use X-Ray:
-   ```python
-   # Add to app.py
-   from aws_xray_sdk.core import xray_recorder
-   from aws_xray_sdk.ext.flask.middleware import XRayMiddleware
-   
-   xray_recorder.configure(service='backend-api')
-   XRayMiddleware(app, xray_recorder)
-   
-   @app.route('/api/data')
-   @xray_recorder.capture('get_data')
-   def get_data():
-       # Existing code
-   ```
-
-3. View service map in X-Ray console:
-   - Shows request flow between services
-   - Latency analysis
-   - Error tracking
-
-### Step 11: Implement Circuit Breaker Pattern
-1. Configure deployment circuit breaker:
-   ```bash
-   aws ecs update-service \
-     --cluster web-app-cluster \
-     --service backend-service \
-     --deployment-configuration '{
-       "deploymentCircuitBreaker": {
-         "enable": true,
-         "rollback": true
-       },
-       "maximumPercent": 200,
-       "minimumHealthyPercent": 100
-     }'
-   ```
-
-2. Test circuit breaker:
-   - Deploy bad task definition
-   - Circuit breaker detects failures
-   - Automatic rollback to previous version
-
-## Validation
-- [ ] Cloud Map namespace created
-- [ ] Backend service registered with service discovery
-- [ ] Frontend successfully calls backend via DNS
-- [ ] Multi-container task definition working
-- [ ] Secrets Manager integration configured
-- [ ] ECS Exec enabled and tested
-- [ ] Sidecar containers deployed
-- [ ] X-Ray tracing implemented
-- [ ] Circuit breaker tested
-- [ ] Microservices communicating properly
-
-## Cleanup
-1. Delete ECS services (frontend, backend)
-2. Deregister all task definitions
-3. Delete Cloud Map service and namespace
-4. Delete ECR repositories
-5. Delete Secrets Manager secrets
-6. Delete CloudWatch log groups
-7. Delete X-Ray service data
-8. Delete load balancers and target groups
-9. Verify all resources removed
+## Validation checklist
+- [ ] SQS main queue and DLQ created
+- [ ] Lambda consumer registered and running
+- [ ] Event source mapping configured with appropriate batch and retry settings
+- [ ] Messages processed and visible in Lambda logs
+- [ ] Failed messages move to DLQ after configured attempts
+- [ ] Monitoring and alerts configured
 
 ## Summary
-In this lab, you built a microservices architecture on ECS using service discovery, multi-container tasks, and advanced debugging tools. You learned how to implement sidecar patterns, manage secrets securely, and enable distributed tracing. These patterns are essential for building production-grade containerized applications on AWS.
-
-**Key Takeaways:**
-- Cloud Map enables DNS-based service discovery
-- Multi-container tasks enable sidecar patterns
-- ECS Exec provides debugging without SSH
-- Secrets Manager securely stores sensitive data
-- Service discovery simplifies microservices communication
-- Sidecar containers handle cross-cutting concerns
-- X-Ray provides distributed tracing
-- Circuit breakers prevent cascading failures
-- FireLens enables flexible log routing
-- Container dependencies control startup order
+This lab demonstrates how to wire SQS and Lambda for resilient, scalable event-driven processing. Focus on idempotency, visibility timeout tuning, appropriate batching, and monitoring to build reliable consumers.

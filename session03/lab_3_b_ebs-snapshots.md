@@ -1,170 +1,167 @@
-# Lab 3.A: VPC Fundamentals and Networking
+# Lab 3.B: Attach and manage EBS volumes and snapshots for EC2 instances
 
 ## Overview
-This lab introduces Amazon Virtual Private Cloud (VPC), which allows you to provision a logically isolated section of AWS cloud. You'll learn how to design and implement custom network architectures, configure subnets across availability zones, and control traffic flow with routing tables and network ACLs.
+This lab demonstrates how to create, attach, format, resize, snapshot, restore, and share Amazon EBS volumes for EC2 instances. You will practice safe snapshot workflows and automate snapshot lifecycle using AWS Data Lifecycle Manager (DLM).
 
 ## Objectives
-- Create a custom VPC with CIDR block planning
-- Configure public and private subnets across multiple AZs
-- Set up Internet Gateway for public internet access
-- Configure route tables for traffic control
-- Implement Network ACLs for subnet-level security
-- Understand the difference between security groups and NACLs
+- Create and attach EBS volumes to an EC2 instance
+- Format and mount volumes on Linux
+- Resize volumes and grow the filesystem
+- Create point-in-time EBS snapshots and restore volumes from snapshots
+- Share snapshots (encrypted vs unencrypted considerations)
+- Automate snapshots with DLM and perform cleanup
 
-## Requirements
-- AWS account with VPC permissions
-- Understanding of IP addressing and CIDR notation
-- Basic networking knowledge (subnets, routing, firewalls)
-- Familiarity with EC2 instances
+## Prerequisites
+- AWS CLI configured and authenticated
+- An EC2 instance running in the target AZ (INSTANCE_ID)
+- jq (optional) for parsing JSON
+- sudo access on the EC2 instance
 
-## Steps
+---
 
-### Step 1: Plan Your VPC Architecture
-1. Design considerations:
-   - VPC CIDR: 10.0.0.0/16 (65,536 IP addresses)
-   - Public Subnet 1: 10.0.1.0/24 (AZ-1, 256 IPs)
-   - Public Subnet 2: 10.0.2.0/24 (AZ-2, 256 IPs)
-   - Private Subnet 1: 10.0.10.0/24 (AZ-1, 256 IPs)
-   - Private Subnet 2: 10.0.11.0/24 (AZ-2, 256 IPs)
+## Quick notes
+- EBS volumes exist in a single AZ; create/restore in the same AZ.
+- Snapshots are incremental and stored in S3 (transparent).
+- Encrypted snapshots can only be shared with AWS accounts when permissions and CMK allow it.
 
-### Step 2: Create a VPC
-1. Navigate to VPC Dashboard
-2. Click "Create VPC"
-3. Select "VPC only"
-4. Configure:
-   - Name tag: `lab-vpc`
-   - IPv4 CIDR block: `10.0.0.0/16`
-   - IPv6 CIDR block: No IPv6
-   - Tenancy: Default
-5. Create VPC
-6. Enable DNS hostnames:
-   - Select the VPC
-   - Actions → Edit DNS hostnames → Enable
+---
 
-### Step 3: Create Subnets
-1. Navigate to Subnets → Create subnet
-2. Create Public Subnet 1:
-   - VPC: `lab-vpc`
-   - Subnet name: `public-subnet-1`
-   - Availability Zone: Choose first AZ (e.g., us-east-1a)
-   - IPv4 CIDR: `10.0.1.0/24`
-3. Create Public Subnet 2:
-   - Subnet name: `public-subnet-2`
-   - Availability Zone: Choose second AZ (e.g., us-east-1b)
-   - IPv4 CIDR: `10.0.2.0/24`
-4. Create Private Subnet 1:
-   - Subnet name: `private-subnet-1`
-   - Availability Zone: Same as public-subnet-1
-   - IPv4 CIDR: `10.0.10.0/24`
-5. Create Private Subnet 2:
-   - Subnet name: `private-subnet-2`
-   - Availability Zone: Same as public-subnet-2
-   - IPv4 CIDR: `10.0.11.0/24`
+## Steps (CLI examples)
 
-### Step 4: Create and Attach Internet Gateway
-1. Navigate to Internet Gateways → Create internet gateway
-2. Name: `lab-igw`
-3. Create internet gateway
-4. Attach to VPC:
-   - Select the IGW
-   - Actions → Attach to VPC
-   - Select `lab-vpc`
-   - Attach
+Replace placeholders: INSTANCE_ID, AVAILABILITY_ZONE (e.g., us-east-1a), DEVICE_NAME (e.g., /dev/sdf or /dev/xvdf), VOLUME_SIZE (GiB), VOLUME_TYPE (gp3|gp2|io2), SNAPSHOT_ID, KMS_KEY_ID, TARGET_ACCOUNT_ID.
 
-### Step 5: Configure Route Tables
-1. **Create Public Route Table:**
-   - Navigate to Route Tables → Create route table
-   - Name: `public-rt`
-   - VPC: `lab-vpc`
-   - Create
-   
-2. **Add Internet Gateway Route:**
-   - Select `public-rt`
-   - Routes tab → Edit routes
-   - Add route: Destination `0.0.0.0/0`, Target: `lab-igw`
-   - Save
+### 1. Create a new EBS volume
+```bash
+aws ec2 create-volume \
+  --availability-zone $AVAILABILITY_ZONE \
+  --size 10 \
+  --volume-type gp3 \
+  --tag-specifications 'ResourceType=volume,Tags=[{Key=Name,Value=lab-ebs-volume}]' \
+  --query 'VolumeId' --output text
+# save to VOLUME_ID
+```
 
-3. **Associate Public Subnets:**
-   - Subnet associations tab → Edit subnet associations
-   - Select `public-subnet-1` and `public-subnet-2`
-   - Save
+Wait until available:
+```bash
+aws ec2 wait volume-available --volume-ids $VOLUME_ID
+```
 
-4. **Create Private Route Table:**
-   - Create route table
-   - Name: `private-rt`
-   - VPC: `lab-vpc`
-   - Associate with `private-subnet-1` and `private-subnet-2`
+### 2. Attach the volume to an instance
+```bash
+aws ec2 attach-volume --volume-id $VOLUME_ID --instance-id $INSTANCE_ID --device $DEVICE_NAME
+aws ec2 wait volume-in-use --volume-ids $VOLUME_ID
+```
 
-### Step 6: Enable Auto-assign Public IP for Public Subnets
-1. Select `public-subnet-1`
-2. Actions → Edit subnet settings
-3. Enable "Auto-assign public IPv4 address"
-4. Save
-5. Repeat for `public-subnet-2`
+### 3. Format and mount the volume (on the EC2 instance)
+SSH to the instance and run (example uses ext4):
+```bash
+sudo mkfs -t ext4 $DEVICE_NAME
+sudo mkdir -p /mnt/ebs-data
+sudo mount $DEVICE_NAME /mnt/ebs-data
+# verify
+df -h /mnt/ebs-data
+```
+To mount persistently, add to /etc/fstab using UUID:
+```bash
+sudo blkid $DEVICE_NAME
+# copy UUID and add line to /etc/fstab: UUID=... /mnt/ebs-data ext4 defaults,nofail 0 2
+```
 
-### Step 7: Configure Network ACLs
-1. Navigate to Network ACLs
-2. Find the default NACL for `lab-vpc`
-3. Create custom NACL:
-   - Name: `public-nacl`
-   - VPC: `lab-vpc`
-4. Configure inbound rules:
-   - Rule 100: HTTP (80), Source: 0.0.0.0/0, Allow
-   - Rule 110: HTTPS (443), Source: 0.0.0.0/0, Allow
-   - Rule 120: SSH (22), Source: 0.0.0.0/0, Allow
-   - Rule 130: Ephemeral ports (1024-65535), Source: 0.0.0.0/0, Allow
-5. Configure outbound rules:
-   - Rule 100: All traffic, Destination: 0.0.0.0/0, Allow
-6. Associate with public subnets
+### 4. Expand an EBS volume (online)
+Increase size:
+```bash
+aws ec2 modify-volume --volume-id $VOLUME_ID --size 20
+# wait for modification to complete
+aws ec2 wait volume-available --volume-ids $VOLUME_ID
+```
+On the instance:
+```bash
+# for NVMe devices (modern Nitro instances) device path may differ, e.g., /dev/nvme1n1
+sudo lsblk
+# grow partition if partitioned (example using growpart)
+sudo growpart /dev/xvdf 1   # if partition 1 exists
+sudo resize2fs /dev/xvdf1   # ext4 example
+# or for unpartitioned devices:
+sudo resize2fs $DEVICE_NAME
+```
 
-### Step 8: Test the VPC Configuration
-1. Launch EC2 instance in public subnet:
-   - AMI: Amazon Linux 2023
-   - Instance type: t2.micro
-   - Network: `lab-vpc`
-   - Subnet: `public-subnet-1`
-   - Auto-assign public IP: Enable
-   - Security group: Allow SSH from My IP
-2. Connect via SSH and verify internet connectivity:
-   ```bash
-   ping -c 4 google.com
-   curl http://checkip.amazonaws.com
-   ```
-3. Launch instance in private subnet:
-   - Same configuration but subnet: `private-subnet-1`
-   - No public IP assigned
-4. Attempt connection (should fail without bastion host)
+### 5. Create an EBS snapshot (point-in-time)
+```bash
+aws ec2 create-snapshot --volume-id $VOLUME_ID --description "lab snapshot" --tag-specifications 'ResourceType=snapshot,Tags=[{Key=Name,Value=lab-snapshot}]' --query 'SnapshotId' --output text
+# wait
+aws ec2 wait snapshot-completed --snapshot-ids $SNAPSHOT_ID
+```
+For consistent filesystem snapshots, stop the instance or freeze the filesystem (fsfreeze) before snapshot, or use application-level quiescing.
 
-## Validation
-- [ ] VPC created with correct CIDR block
-- [ ] Four subnets created across two availability zones
-- [ ] Internet Gateway attached to VPC
-- [ ] Route tables configured correctly
-- [ ] Public subnets can reach the internet
-- [ ] Private subnets are isolated from direct internet access
-- [ ] Network ACLs configured and associated
-- [ ] EC2 instance in public subnet has internet connectivity
+### 6. Restore a volume from snapshot
+```bash
+aws ec2 create-volume --availability-zone $AVAILABILITY_ZONE --snapshot-id $SNAPSHOT_ID --volume-type gp3 --query 'VolumeId' --output text
+aws ec2 wait volume-available --volume-ids $RESTORED_VOLUME_ID
+aws ec2 attach-volume --volume-id $RESTORED_VOLUME_ID --instance-id $INSTANCE_ID --device /dev/sdg
+```
+
+### 7. Share snapshots (unencrypted) and share encrypted snapshots with CMK setup
+- Unencrypted snapshot: modify snapshot attribute to add createVolumePermission for TARGET_ACCOUNT_ID.
+```bash
+aws ec2 modify-snapshot-attribute --snapshot-id $SNAPSHOT_ID --attribute createVolumePermission --operation-type add --user-ids $TARGET_ACCOUNT_ID
+```
+- Encrypted snapshot: share the CMK with the target account and copy snapshot into target account (recommended) — follow KMS sharing docs.
+
+### 8. Automate snapshots with Data Lifecycle Manager (DLM)
+Create a basic daily snapshot policy (simplified example):
+```bash
+cat > dlm-policy.json <<'EOF'
+{
+  "Description": "Daily EBS snapshot for lab volumes",
+  "State": "ENABLED",
+  "PolicyDetails": {
+    "ResourceTypes": ["VOLUME"],
+    "TargetTags": [{"Key":"Backup","Value":"daily"}],
+    "Schedules": [
+      {
+        "Name":"daily-snapshot",
+        "CreateRule":{"Interval":24,"IntervalUnit":"HOURS"},
+        "RetainRule":{"Count":7}
+      }
+    ]
+  }
+}
+EOF
+
+aws dlm create-lifecycle-policy --cli-input-json file://dlm-policy.json --query 'PolicyId' --output text
+```
+Tag volumes with Key=Backup,Value=daily to include them.
+
+---
+
+## Validation Checklist
+- [ ] Volume created and attached
+- [ ] Filesystem formatted and mounted
+- [ ] Data persists across reboots
+- [ ] Volume expanded and filesystem grown
+- [ ] Snapshot created and completed
+- [ ] Volume restored from snapshot and data verified
+- [ ] Snapshot sharing workflow tested (if applicable)
+- [ ] DLM policy in place and volumes tagged
+
+---
 
 ## Cleanup
-1. Terminate all EC2 instances in the VPC
-2. Delete NAT Gateways (if created in optional steps)
-3. Release Elastic IPs (if allocated)
-4. Delete custom Network ACLs
-5. Delete route tables (except main)
-6. Detach and delete Internet Gateway
-7. Delete subnets
-8. Delete VPC
-9. Verify all resources removed in VPC Dashboard
+```bash
+# detach volumes
+aws ec2 detach-volume --volume-id $VOLUME_ID || true
+aws ec2 wait volume-available --volume-ids $VOLUME_ID || true
+
+# delete restored volumes (if any)
+aws ec2 delete-volume --volume-id $RESTORED_VOLUME_ID || true
+
+# delete snapshot(s)
+aws ec2 delete-snapshot --snapshot-id $SNAPSHOT_ID || true
+
+# remove DLM policy
+aws dlm delete-lifecycle-policy --policy-id $POLICY_ID || true
+```
+Also unmount and remove fstab entries on the EC2 instance before deleting volumes.
 
 ## Summary
-In this lab, you built a production-ready VPC architecture with public and private subnets across multiple availability zones. You configured routing tables to control traffic flow, attached an Internet Gateway for public internet access, and implemented network ACLs for subnet-level security. This foundation is essential for deploying secure, scalable applications on AWS.
-
-**Key Takeaways:**
-- VPCs provide network isolation and control in AWS
-- Plan CIDR blocks carefully to avoid IP address conflicts
-- Use multiple availability zones for high availability
-- Public subnets have routes to Internet Gateway
-- Private subnets should not have direct internet access
-- Network ACLs are stateless, security groups are stateful
-- Always follow the principle of least privilege in network design
-- Route table associations determine subnet behavior
+This lab covers practical EBS operations: provisioning, attaching, formatting, resizing, snapshotting, restoring, sharing, and automating backups. Follow AWS best practices for consistent snapshots, encryption, and lifecycle policies to protect data and control costs.

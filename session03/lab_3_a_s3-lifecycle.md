@@ -1,201 +1,202 @@
-# Lab 3.B: NAT Gateway, VPC Peering, and VPC Endpoints
+# Lab 3.A: Manage S3 buckets with versioning, encryption, and lifecycle rules
 
 ## Overview
-This lab extends VPC networking concepts by implementing NAT Gateway for private subnet internet access, configuring VPC peering for inter-VPC communication, and using VPC endpoints for private AWS service access. These advanced networking patterns are essential for production environments requiring secure and efficient cloud connectivity.
+This lab teaches how to create and manage Amazon S3 buckets with object versioning, server-side encryption (SSE-S3 and SSE-KMS), bucket policies to enforce secure uploads, and lifecycle rules to transition and expire objects. You'll validate versioning behavior, encrypted storage, and cost-saving lifecycle transitions.
 
 ## Objectives
-- Configure NAT Gateway for private subnet internet access
-- Implement VPC Peering between two VPCs
-- Create VPC Endpoints for S3 and other AWS services
-- Understand the difference between NAT Gateway and NAT Instance
-- Configure route tables for advanced networking scenarios
-- Optimize costs and security with VPC endpoints
+- Create an S3 bucket with versioning enabled
+- Configure default encryption (SSE-S3 and SSE-KMS example)
+- Create and use a KMS key for SSE-KMS
+- Enforce HTTPS and required encryption with a bucket policy
+- Define lifecycle rules: transition to STANDARD_IA / GLACIER / DEEP_ARCHIVE and expire older versions
+- Validate versioning, encryption, and lifecycle behavior
+- Clean up resources
 
-## Requirements
-- Completed Lab 3.A or equivalent VPC knowledge
-- AWS account with VPC and EC2 permissions
-- Understanding of routing and network address translation
-- Basic knowledge of AWS service endpoints
+## Prerequisites
+- AWS CLI configured and authenticated
+- jq (optional) for JSON handling
+- awscli v2 recommended
+- Permissions to manage S3, KMS, and IAM
 
-## Steps
+---
 
-### Step 1: Allocate Elastic IP for NAT Gateway
-1. Navigate to VPC → Elastic IPs
-2. Click "Allocate Elastic IP address"
-3. Configure:
-   - Network Border Group: Select your region
-   - Tags: Name = `nat-gateway-eip`
-4. Allocate
-5. Note the allocated Elastic IP address
+## Steps (CLI examples)
 
-### Step 2: Create NAT Gateway
-1. Navigate to VPC → NAT Gateways
-2. Click "Create NAT gateway"
-3. Configure:
-   - Name: `lab-nat-gateway`
-   - Subnet: `public-subnet-1` (from Lab 3.A)
-   - Connectivity type: Public
-   - Elastic IP allocation ID: Select the EIP from Step 1
-4. Create NAT gateway
-5. Wait for status to change to "Available"
+Replace placeholders: YOUR_BUCKET_NAME, REGION, ACCOUNT_ID, KMS_KEY_ALIAS (e.g., lab-s3-kms), DAYS_FOR_IA, DAYS_FOR_GLACIER.
 
-### Step 3: Update Private Route Table
-1. Navigate to Route Tables
-2. Select `private-rt` (from Lab 3.A)
-3. Routes tab → Edit routes
-4. Add route:
-   - Destination: `0.0.0.0/0`
-   - Target: NAT Gateway (`lab-nat-gateway`)
-5. Save changes
+### 1. Create the bucket
+```bash
+export BUCKET=YOUR_BUCKET_NAME
+export REGION=us-east-1
 
-### Step 4: Test Private Subnet Internet Access
-1. Launch bastion host in public subnet (if not already):
-   - Instance in `public-subnet-1`
-   - Enable public IP
-   - Security group: Allow SSH from My IP
-2. Launch instance in private subnet:
-   - Instance in `private-subnet-1`
-   - No public IP
-   - Security group: Allow SSH from public subnet CIDR
-3. Connect to bastion host via SSH
-4. From bastion, SSH to private instance:
-   ```bash
-   ssh -i keypair.pem ec2-user@<private-ip>
-   ```
-5. Test internet access from private instance:
-   ```bash
-   ping -c 4 google.com
-   yum update -y
-   curl http://checkip.amazonaws.com
-   ```
+aws s3api create-bucket --bucket "$BUCKET" --region "$REGION" \
+  $( [ "$REGION" = "us-east-1" ] || echo "--create-bucket-configuration LocationConstraint=$REGION" )
+```
 
-### Step 5: Create Second VPC for Peering
-1. Navigate to VPC → Create VPC
-2. Configure:
-   - Name: `lab-vpc-2`
-   - IPv4 CIDR: `10.1.0.0/16` (different from lab-vpc)
-   - Create VPC
-3. Create subnet in new VPC:
-   - Name: `vpc2-subnet-1`
-   - CIDR: `10.1.1.0/24`
-4. Create Internet Gateway:
-   - Name: `lab-vpc-2-igw`
-   - Attach to `lab-vpc-2`
-5. Create and configure route table for internet access
+### 2. Enable versioning
+```bash
+aws s3api put-bucket-versioning --bucket "$BUCKET" --versioning-configuration Status=Enabled
+```
 
-### Step 6: Create VPC Peering Connection
-1. Navigate to VPC → Peering Connections
-2. Click "Create peering connection"
-3. Configure:
-   - Name: `lab-vpc-peering`
-   - VPC (Requester): `lab-vpc` (10.0.0.0/16)
-   - VPC (Accepter): `lab-vpc-2` (10.1.0.0/16)
-4. Create peering connection
-5. Select the peering connection → Actions → Accept request
-6. Accept the peering connection
+(Optional: MFA Delete requires root and console operations; not covered here.)
 
-### Step 7: Update Route Tables for VPC Peering
-1. **For lab-vpc route tables:**
-   - Select `private-rt`
-   - Add route: Destination `10.1.0.0/16`, Target: Peering connection
-   - Select `public-rt`
-   - Add route: Destination `10.1.0.0/16`, Target: Peering connection
+### 3. Create a KMS key (for SSE-KMS) and grant usage to S3
+```bash
+# create CMK
+aws kms create-key --description "KMS for $BUCKET" --query KeyMetadata.KeyId --output text
+# create alias (replace returned KeyId as KEY_ID)
+aws kms create-alias --alias-name "alias/lab-s3-kms" --target-key-id KEY_ID
+# allow S3 to use the key (example key policy minimal snippet)
+cat > key-policy.json <<'EOF'
+{
+  "Version":"2012-10-17",
+  "Statement":[
+    {
+      "Sid":"Allow S3 Use",
+      "Effect":"Allow",
+      "Principal": { "Service": "s3.amazonaws.com" },
+      "Action":[ "kms:Encrypt","kms:Decrypt","kms:GenerateDataKey","kms:ReEncrypt*" ],
+      "Resource":"*"
+    }
+  ]
+}
+EOF
 
-2. **For lab-vpc-2 route table:**
-   - Select the route table
-   - Add route: Destination `10.0.0.0/16`, Target: Peering connection
+aws kms put-key-policy --key-id KEY_ID --policy-name default --policy file://key-policy.json
+```
 
-### Step 8: Test VPC Peering
-1. Launch instance in `lab-vpc-2`:
-   - Subnet: `vpc2-subnet-1`
-   - Security group: Allow ICMP and SSH from 10.0.0.0/16
-2. From instance in `lab-vpc`, ping instance in `lab-vpc-2`:
-   ```bash
-   ping -c 4 <vpc2-instance-private-ip>
-   ```
-3. Establish SSH connection across VPCs
-4. Verify connectivity works in both directions
+### 4. Set default bucket encryption (SSE-KMS example)
+```bash
+aws s3api put-bucket-encryption --bucket "$BUCKET" --server-side-encryption-configuration '{
+  "Rules":[
+    {
+      "ApplyServerSideEncryptionByDefault":{
+        "SSEAlgorithm":"aws:kms",
+        "KMSMasterKeyID":"arn:aws:kms:REGION:ACCOUNT_ID:key/KEY_ID"
+      }
+    }
+  ]
+}'
+```
 
-### Step 9: Create S3 Gateway Endpoint
-1. Navigate to VPC → Endpoints
-2. Click "Create endpoint"
-3. Configure:
-   - Name: `s3-gateway-endpoint`
-   - Service category: AWS services
-   - Services: com.amazonaws.[region].s3 (Gateway type)
-   - VPC: `lab-vpc`
-   - Route tables: Select `private-rt`
-4. Create endpoint
-5. Verify route automatically added to private route table
+(For SSE-S3 use "SSEAlgorithm":"AES256".)
 
-### Step 10: Test S3 Gateway Endpoint
-1. Connect to instance in private subnet
-2. Create test file and upload to S3:
-   ```bash
-   echo "Test from private subnet" > test.txt
-   aws s3 mb s3://my-vpc-endpoint-test-bucket-$(date +%s)
-   aws s3 cp test.txt s3://my-vpc-endpoint-test-bucket-[timestamp]/
-   aws s3 ls s3://my-vpc-endpoint-test-bucket-[timestamp]/
-   ```
-3. Monitor VPC Flow Logs to confirm traffic uses endpoint
-4. Note: No NAT Gateway charges for S3 access!
+### 5. Enforce HTTPS and encrypted uploads with a bucket policy
+```bash
+cat > bucket-policy.json <<'EOF'
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "DenyHttp",
+      "Effect": "Deny",
+      "Principal": "*",
+      "Action": "s3:*",
+      "Resource": [ "arn:aws:s3:::$BUCKET", "arn:aws:s3:::$BUCKET/*" ],
+      "Condition": { "Bool": { "aws:SecureTransport": "false" } }
+    },
+    {
+      "Sid": "RequireSSE",
+      "Effect": "Deny",
+      "Principal": "*",
+      "Action": "s3:PutObject",
+      "Resource": "arn:aws:s3:::$BUCKET/*",
+      "Condition": {
+        "StringNotEquals": { "s3:x-amz-server-side-encryption": "aws:kms" }
+      }
+    }
+  ]
+}
+EOF
 
-### Step 11: Create Interface Endpoint (Optional)
-1. Create endpoint for EC2:
-   - Service: com.amazonaws.[region].ec2
-   - Type: Interface
-   - VPC: `lab-vpc`
-   - Subnets: Select private subnets
-   - Security group: Allow HTTPS (443) from VPC CIDR
-2. Create endpoint
-3. Test EC2 API access without internet:
-   ```bash
-   aws ec2 describe-instances --region [your-region]
-   ```
+aws s3api put-bucket-policy --bucket "$BUCKET" --policy file://bucket-policy.json
+```
 
-### Step 12: Monitor and Optimize Costs
-1. Navigate to Cost Explorer (if enabled)
-2. Review NAT Gateway data processing charges
-3. Identify S3 traffic using gateway endpoint (no charges)
-4. Compare costs with and without VPC endpoints
-5. Review VPC Flow Logs for traffic analysis
+### 6. Add lifecycle configuration (transition + expiration)
+Example: transition to STANDARD_IA after 30 days, GLACIER after 90 days, expire current versions after 365 days, noncurrent versions after 90 days.
 
-## Validation
-- [ ] NAT Gateway created and operational
-- [ ] Private subnet instances can access internet via NAT Gateway
-- [ ] VPC Peering connection established and accepted
-- [ ] Instances can communicate across peered VPCs
-- [ ] S3 Gateway Endpoint created and route added
-- [ ] S3 access from private subnet works without NAT Gateway
-- [ ] Interface endpoint created (optional)
-- [ ] Security groups properly configured for all scenarios
+```bash
+cat > lifecycle.json <<'EOF'
+{
+  "Rules": [
+    {
+      "ID": "TransitionToIAAndGlacier",
+      "Status": "Enabled",
+      "Filter": { "Prefix": "" },
+      "Transitions": [
+        { "Days": 30, "StorageClass": "STANDARD_IA" },
+        { "Days": 90, "StorageClass": "GLACIER" }
+      ],
+      "Expiration": { "Days": 365 },
+      "NoncurrentVersionTransitions": [
+        { "NoncurrentDays": 30, "StorageClass": "STANDARD_IA" },
+        { "NoncurrentDays": 90, "StorageClass": "GLACIER" }
+      ],
+      "NoncurrentVersionExpiration": { "NoncurrentDays": 180 }
+    }
+  ]
+}
+EOF
+
+aws s3api put-bucket-lifecycle-configuration --bucket "$BUCKET" --lifecycle-configuration file://lifecycle.json
+```
+
+Notes:
+- Use GLACIER or DEEP_ARCHIVE storage classes depending on retrieval needs; GLACIER retrieval has cost and delay implications.
+- For AWS regions with different class names, consult docs.
+
+### 7. Test versioning and encryption
+```bash
+# upload object v1
+aws s3 cp README.md s3://$BUCKET/README.md
+# upload v2
+aws s3 cp README.md s3://$BUCKET/README.md --metadata comment="v2"
+# list versions
+aws s3api list-object-versions --bucket "$BUCKET" --prefix README.md
+# check encryption metadata
+aws s3api head-object --bucket "$BUCKET" --key README.md --query '[ServerSideEncryption, SSEKMSKeyId]' --output text
+```
+
+### 8. Observe lifecycle behavior
+- Lifecycle transitions and expirations are asynchronous (can take up to 24+ hours).
+- Use S3 Storage Lens / Inventory or S3 analytics to validate transitions.
+- Check object storage class with head-object and list-objects-v2.
+
+## Validation Checklist
+- [ ] Bucket created and versioning enabled
+- [ ] Default encryption applied (SSE-KMS or SSE-S3)
+- [ ] KMS key created and accessible by S3
+- [ ] Bucket policy enforces HTTPS and required encryption
+- [ ] Lifecycle rules present and configured as intended
+- [ ] Uploaded objects show versions and encryption metadata
+- [ ] Objects transition to lower-cost storage per lifecycle rules
 
 ## Cleanup
-1. Delete VPC Endpoints:
-   - Select endpoints → Delete
-2. Delete VPC Peering Connection:
-   - Select peering → Actions → Delete
-3. Terminate all EC2 instances in both VPCs
-4. Delete NAT Gateway:
-   - Select → Actions → Delete
-   - Wait for deletion to complete
-5. Release Elastic IP:
-   - Select EIP → Actions → Release
-6. Delete lab-vpc-2:
-   - Delete subnets, IGW, route tables, VPC
-7. Clean up lab-vpc if no longer needed
-8. Verify all billable resources are removed
+```bash
+# Remove lifecycle, policy, and encryption, then empty and delete bucket
+aws s3api delete-bucket-lifecycle --bucket "$BUCKET" || true
+aws s3api delete-bucket-policy --bucket "$BUCKET" || true
+aws s3api put-bucket-encryption --bucket "$BUCKET" --server-side-encryption-configuration '{}' || true
+
+# To delete bucket with versions, remove versions first:
+aws s3api list-object-versions --bucket "$BUCKET" --query 'Versions[].{Key:Key,VersionId:VersionId}' --output json |
+  jq -c '.[]' | while read v; do
+    k=$(echo $v | jq -r .Key)
+    vid=$(echo $v | jq -r .VersionId)
+    aws s3api delete-object --bucket "$BUCKET" --key "$k" --version-id "$vid"
+  done
+
+# delete delete markers
+aws s3api list-object-versions --bucket "$BUCKET" --query 'DeleteMarkers[].{Key:Key,VersionId:VersionId}' --output json |
+  jq -c '.[]' | while read v; do
+    k=$(echo $v | jq -r .Key)
+    vid=$(echo $v | jq -r .VersionId)
+    aws s3api delete-object --bucket "$BUCKET" --key "$k" --version-id "$vid"
+  done
+
+aws s3api delete-bucket --bucket "$BUCKET"
+# Optionally delete CMK (careful: requires disabling and policy updates)
+```
 
 ## Summary
-In this lab, you implemented advanced VPC networking features including NAT Gateway for private subnet internet access, VPC Peering for multi-VPC communication, and VPC Endpoints for cost-efficient AWS service access. You learned how to design secure network architectures that balance connectivity requirements with cost optimization and security best practices.
-
-**Key Takeaways:**
-- NAT Gateway enables private subnet internet access with high availability
-- NAT Gateway is managed by AWS and scales automatically
-- VPC Peering allows direct network connectivity between VPCs
-- Peering is non-transitive; connections must be explicit
-- Gateway endpoints (S3, DynamoDB) have no additional charges
-- Interface endpoints incur hourly and data processing charges
-- VPC endpoints keep traffic within AWS network for security
-- Always update security groups and route tables for connectivity
-- Consider cost implications of NAT Gateway vs VPC endpoints
+This lab demonstrates S3 versioning, encryption with SSE-KMS/SSE-S3, lifecycle policies to reduce storage costs, and policy controls to enforce secure uploads. Use lifecycle rules and encryption to meet retention, compliance, and cost goals.
