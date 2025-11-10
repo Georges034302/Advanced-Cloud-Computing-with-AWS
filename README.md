@@ -6,16 +6,6 @@ This comprehensive lab series provides hands-on experience with Amazon Web Servi
 
 ---
 
-**What You'll Learn:**
-- **Core Services**: Master EC2, S3, RDS, DynamoDB, Lambda, and more
-- **Networking**: Design VPCs, configure load balancing, implement service discovery
-- **Security**: Apply IAM best practices, encryption, and compliance controls
-- **Automation**: Use CloudFormation, CI/CD pipelines, and Infrastructure as Code
-- **Containers**: Deploy with ECS, Fargate, and orchestrate microservices
-- **Serverless**: Build event-driven architectures with Lambda and Step Functions
-- **Best Practices**: Apply the AWS Well-Architected Framework principles
-- **Advanced Topics**: Explore ML with SageMaker, IoT Core, GraphQL APIs, and more
-
 **Prerequisites:**
 - Basic understanding of cloud computing concepts
 - Familiarity with command line interfaces
