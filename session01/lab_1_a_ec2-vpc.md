@@ -1,4 +1,5 @@
 # Lab 1.A: Deploy a Linux EC2 Instance in a Custom VPC
+<img width="1024" height="940" alt="IMG" src="https://github.com/user-attachments/assets/f0c88331-056d-405f-b52d-5ccdd3d231a9" />
 
 ## Overview
 This lab walks you through creating a custom VPC, subnet, internet gateway, route table, security group, key pair, and launching a Linux EC2 instance using the AWS CLI. You will verify networking, connect via SSH, and deploy a simple web server automatically using EC2 user data.
