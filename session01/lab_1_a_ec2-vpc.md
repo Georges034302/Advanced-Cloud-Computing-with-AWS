@@ -70,12 +70,7 @@ aws ec2 authorize-security-group-ingress --group-id $SG_ID --protocol tcp --port
 ```
 Console: EC2 > Security Groups > Create security group in your VPC, add inbound rules for SSH (22) and HTTP (80).
 
-### 4. (Optional) Create an IAM role for EC2
-If the instance needs AWS access (e.g., S3), create an instance profile role:
-- Console: IAM > Roles > Create role > AWS service > EC2 > Attach policy (e.g., AmazonS3ReadOnlyAccess) > Name it lab-ec2-role
-- Or use iam-create-role and instance-profile CLI flows.
-
-### 5. Launch EC2 instance
+### 4. Launch EC2 instance
 Choose an Amazon Linux 2 AMI (or preferred distro). CLI example:
 
 ```bash
@@ -103,7 +98,7 @@ PUBLIC_IP=$(aws ec2 describe-instances --instance-ids $INSTANCE_ID --query 'Rese
 echo "Instance public IP: $PUBLIC_IP"
 ```
 
-### 6. Bootstrap web server via user data (optional)
+### 5. Bootstrap web server via user data 
 When launching, you can add user-data to install and start a web server:
 ```bash
 USER_DATA='#!/bin/bash
@@ -116,7 +111,7 @@ echo "Hello from Lab 1.A - EC2 in VPC" > /var/www/html/index.html
 # pass --user-data "$(echo "$USER_DATA" | base64 --wrap=0)" or use --user-data file://user-data.txt in run-instances
 ```
 
-### 7. SSH and verify HTTP
+### 6. SSH and verify HTTP
 SSH:
 ```bash
 ssh -i lab-key.pem ec2-user@$PUBLIC_IP
@@ -125,7 +120,7 @@ curl http://$PUBLIC_IP
 ```
 You should see the sample page content.
 
-### 8. Validation Checklist
+### 7. Validation Checklist
 - [ ] VPC 10.0.0.0/16 created
 - [ ] Public subnet 10.0.1.0/24 created and auto-assign public IP enabled
 - [ ] Internet Gateway attached and route table has 0.0.0.0/0 -> IGW
@@ -133,7 +128,7 @@ You should see the sample page content.
 - [ ] EC2 instance launched and reachable via SSH
 - [ ] Web server responding on HTTP
 
-### 9. Cleanup
+### 8. Cleanup
 Remove resources to avoid charges.
 
 ```bash
