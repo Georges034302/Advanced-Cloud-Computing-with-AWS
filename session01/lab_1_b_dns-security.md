@@ -12,10 +12,42 @@ This lab shows how to secure HTTP access to a web server running on EC2 using Se
 - Clean up to avoid charges
 
 ## Prerequisites
+
 - AWS CLI configured or Console access
-- Existing VPC and public subnet (VPC_ID, SUBNET_ID)
-- A domain hosted in Route 53 (HOSTED_ZONE_ID and domain name) or permission to create a hosted zone
-- Local public IP (run curl ifconfig.co) for SSH restrictions
+- Local public IP (run `curl ifconfig.co`) for SSH restrictions
+- Create VPC and Public Subnet
+
+    ```bash
+    # Create VPC and capture VPC ID
+    VPC_ID=$(
+      aws ec2 create-vpc \
+        --cidr-block 10.0.0.0/16 \
+        --tag-specifications 'ResourceType=vpc,Tags=[{Key=Name,Value=lab-vpc}]' \
+        --query 'Vpc.VpcId' \
+        --output text
+    )
+    echo "VPC_ID=$VPC_ID"
+
+    # Query availability zones and pick first
+    AZ=$(
+      aws ec2 describe-availability-zones \
+        --query 'AvailabilityZones[0].ZoneName' \
+        --output text
+    )
+    echo "AZ=$AZ"
+
+    # Create subnet in the VPC, tag it, and get subnet ID
+    SUBNET_ID=$(
+      aws ec2 create-subnet \
+        --vpc-id "$VPC_ID" \
+        --cidr-block 10.0.1.0/24 \
+        --availability-zone "$AZ" \
+        --tag-specifications 'ResourceType=subnet,Tags=[{Key=Name,Value=lab-public-subnet}]' \
+        --query 'Subnet.SubnetId' \
+        --output text
+    )
+    echo "SUBNET_ID=$SUBNET_ID"
+    ```
 
 ---
 
@@ -33,15 +65,17 @@ Replace placeholders: VPC_ID, SUBNET_ID, HOSTED_ZONE_ID, YOUR_DOMAIN, YOUR_PUBLI
 
 ### 1. Create a restrictive Security Group
 ```bash
-# Create SG
+# Create SG and tag it
 SG_ID=$(
   aws ec2 create-security-group \
     --group-name lab-web-sg \
     --description "Allow web + SSH from my IP" \
     --vpc-id $VPC_ID \
+    --tag-specifications 'ResourceType=security-group,Tags=[{Key=Name,Value=lab-web-sg}]' \
     --query 'GroupId' \
     --output text
 )
+echo "SG_ID=$SG_ID"
 
 # Allow HTTP (80) from anywhere
 aws ec2 authorize-security-group-ingress \
@@ -69,18 +103,15 @@ aws ec2 authorize-security-group-ingress \
 
 ### 2. Create a subnet-level NACL with explicit rules
 ```bash
-# Create NACL
+# Create NACL and tag it
 NACL_ID=$(
   aws ec2 create-network-acl \
     --vpc-id $VPC_ID \
+    --tag-specifications 'ResourceType=network-acl,Tags=[{Key=Name,Value=lab-public-nacl}]' \
     --query 'NetworkAcl.NetworkAclId' \
     --output text
 )
-
-# Tag NACL
-aws ec2 create-tags \
-  --resources $NACL_ID \
-  --tags Key=Name,Value=lab-public-nacl
+echo "NACL_ID=$NACL_ID"
 
 # Allow inbound HTTP (80)
 aws ec2 create-network-acl-entry \
@@ -179,6 +210,7 @@ AMI_ID=$(
     --query 'Images | sort_by(@,&CreationDate) | [-1].ImageId' \
     --output text
 )
+echo "AMI_ID=$AMI_ID"
 
 # Create user-data script
 USER_DATA='#!/bin/bash
@@ -189,7 +221,7 @@ systemctl start httpd
 echo "Hello from Lab 1.B - secure web access" > /var/www/html/index.html
 '
 
-# Launch EC2 instance
+# Launch EC2 instance and tag it
 INSTANCE_ID=$(
   aws ec2 run-instances \
     --image-id $AMI_ID \
@@ -199,9 +231,11 @@ INSTANCE_ID=$(
     --subnet-id $SUBNET_ID \
     --associate-public-ip-address \
     --user-data "$USER_DATA" \
+    --tag-specifications 'ResourceType=instance,Tags=[{Key=Name,Value=lab-web-ec2}]' \
     --query 'Instances[0].InstanceId' \
     --output text
 )
+echo "INSTANCE_ID=$INSTANCE_ID"
 
 # Wait for instance to be running
 aws ec2 wait instance-running \
@@ -214,7 +248,7 @@ PUBLIC_IP=$(
     --query 'Reservations[0].Instances[0].PublicIpAddress' \
     --output text
 )
-echo "Web server public IP: $PUBLIC_IP"
+echo "PUBLIC_IP=$PUBLIC_IP"
 ```
 
 ---
