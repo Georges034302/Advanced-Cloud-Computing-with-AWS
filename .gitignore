@@ -1,0 +1,7 @@
+# Ignore EC2 private key files
+*.pem
+
+# Ignore AWS CLI local config and credentials
+aws/
+awscli/
+

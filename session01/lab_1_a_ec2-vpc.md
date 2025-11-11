@@ -35,14 +35,12 @@ This lab walks you through creating a custom VPC, subnet, internet gateway, rout
 VPC_ID=$(
   aws ec2 create-vpc \
     --cidr-block 10.0.0.0/16 \
+    --tag-specifications 'ResourceType=vpc,Tags=[{Key=Name,Value=lab-vpc}]' \
     --query 'Vpc.VpcId' \
     --output text
 )
+echo "VPC_ID=$VPC_ID"
 
-# Tag the VPC with a name
-aws ec2 create-tags \
-  --resources "$VPC_ID" \
-  --tags Key=Name,Value=lab-vpc
 
 # Query availability zones and pick first
 AZ=$(
@@ -50,41 +48,48 @@ AZ=$(
     --query 'AvailabilityZones[0].ZoneName' \
     --output text
 )
+echo "VPC AZ=$AZ"
 
-# Create subnet in the VPC and get subnet ID
+# Create subnet in the VPC, tag it, and get subnet ID
 SUBNET_ID=$(
   aws ec2 create-subnet \
     --vpc-id "$VPC_ID" \
     --cidr-block 10.0.1.0/24 \
     --availability-zone "$AZ" \
+    --tag-specifications 'ResourceType=subnet,Tags=[{Key=Name,Value=lab-public-subnet}]' \
     --query 'Subnet.SubnetId' \
     --output text
 )
+echo "SUBNET_ID=$SUBNET_ID"
 
 # Enable auto-assign public IPv4 on subnet
 aws ec2 modify-subnet-attribute \
   --subnet-id "$SUBNET_ID" \
   --map-public-ip-on-launch
 
-# Create Internet Gateway and get Gateway ID
+# Create Internet Gateway and tag it, then get Gateway ID
 IGW_ID=$(
   aws ec2 create-internet-gateway \
+    --tag-specifications 'ResourceType=internet-gateway,Tags=[{Key=Name,Value=lab-igw}]' \
     --query 'InternetGateway.InternetGatewayId' \
     --output text
 )
+echo "IGW_ID=$IGW_ID"
 
 # Attach Internet Gateway to VPC
 aws ec2 attach-internet-gateway \
   --internet-gateway-id "$IGW_ID" \
   --vpc-id "$VPC_ID"
 
-# Create a route table for the VPC and get table ID
+# Create a route table for the VPC, tag it, and get table ID
 RTB_ID=$(
   aws ec2 create-route-table \
     --vpc-id "$VPC_ID" \
+    --tag-specifications 'ResourceType=route-table,Tags=[{Key=Name,Value=lab-public-rtb}]' \
     --query 'RouteTable.RouteTableId' \
     --output text
 )
+echo "RTB_ID=$RTB_ID"
 
 # Create route to Internet Gateway
 aws ec2 create-route \
@@ -123,15 +128,17 @@ chmod 600 lab-key.pem
 ### 3. Create Security Group Allowing SSH and HTTP
 
 ```bash
-# Create security group in the VPC and capture ID
+# Create security group in the VPC, tag it, and capture ID
 SG_ID=$(
   aws ec2 create-security-group \
     --group-name lab-sg \
     --description "SSH+HTTP" \
     --vpc-id "$VPC_ID" \
+    --tag-specifications 'ResourceType=security-group,Tags=[{Key=Name,Value=lab-sg}]' \
     --query 'GroupId' \
     --output text
 )
+echo "SG_ID=$SG_ID"
 
 # Allow SSH from your IP (replace <your-ip>/32)
 aws ec2 authorize-security-group-ingress \
@@ -162,7 +169,7 @@ yum update -y
 yum install -y httpd
 systemctl enable httpd
 systemctl start httpd
-echo "Hello from Lab 1.A - EC2 in VPC" > /var/www/html/index.html
+echo "Hello from - EC2 in Custom VPC" > /var/www/html/index.html
 EOF
 ```
 
@@ -175,6 +182,7 @@ AMI_ID=$(
     --query 'Images | sort_by(@, &CreationDate) | [-1].ImageId' \
     --output text
 )
+echo "AMI_ID=$AMI_ID"
 ```
 
 ```bash
@@ -199,6 +207,7 @@ INSTANCE_ID=$(
     --query 'Reservations[].Instances[].InstanceId' \
     --output text | awk '{print $1}'
 )
+echo "INSTANCE_ID=$INSTANCE_ID"
 ```
 
 ```bash
@@ -215,9 +224,8 @@ PUBLIC_IP=$(
     --query 'Reservations[0].Instances[0].PublicIpAddress' \
     --output text
 )
-
 # Print the web server URL
-echo "Web server ready at: http://$PUBLIC_IP"
+echo "Web server ready at: http://$PUBLIC_IP" && "$BROWSER" "http://$PUBLIC_IP"
 ```
 
 ---
@@ -265,8 +273,8 @@ scp -i lab-key.pem -r website ec2-user@"$PUBLIC_IP":/tmp/
 ```bash
 # Connect and replace web root with uploaded site
 ssh -i lab-key.pem ec2-user@"$PUBLIC_IP"
-sudo rm -rf /var/www/html/*
-sudo cp -r /tmp/website/* /var/www/html/
+cd website
+sudo cp -r * /var/www/html/
 sudo systemctl restart httpd
 exit
 ```
