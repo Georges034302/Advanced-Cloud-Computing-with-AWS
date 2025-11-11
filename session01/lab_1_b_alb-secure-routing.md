@@ -1,5 +1,6 @@
 # Lab 1.B: Deploy Secure Multi-EC2 Python Jokes API with ALB Path-Based Routing
-<img width="1536" height="1024" alt="IMG" src="https://github.com/user-attachments/assets/b0587019-6f27-4692-aaba-714e3fed8db1" />
+
+<img width="1315" height="1024" alt="IMG" src="https://github.com/user-attachments/assets/b67f8928-9a7e-430b-8cd0-afab8d53128a" />
 
 ## Overview
 This lab extends your previous AWS networking foundation (Lab 1.A) by deploying a **Python REST API** across **two EC2 instances**, fronted by an **Application Load Balancer (ALB)**. The ALB routes incoming requests based on the URL path:
