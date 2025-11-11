@@ -1,5 +1,6 @@
 # Lab 1.B: Secure web access using Security Groups, NACLs, and Route 53 DNS
-![IMG](https://github.com/user-attachments/assets/bc621781-a612-4fcf-87bf-5d8aadaf3743)
+
+<img width="1536" height="1024" alt="IMG" src="https://github.com/user-attachments/assets/995419f8-170f-47e7-ad2a-4fe57a38e2ad" />
 
 ## Overview
 This lab shows how to secure HTTP access to a web server running on EC2 using Security Groups and Network ACLs (NACLs), and how to expose the service via Route 53 DNS. You'll create a hardened security group, a restrictive NACL for the public subnet, launch an EC2 web server, and add a DNS A record pointing to the instance.
