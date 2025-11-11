@@ -22,7 +22,7 @@ This comprehensive lab series provides hands-on experience with Amazon Web Servi
   **Labs for this session:**
   - [lab_1_a_ec2-vpc.md](session01/lab_1_a_ec2-vpc.md):  
     *Launch and configure a Linux EC2 instance in a custom VPC.*
-  - [lab_1_b_dns-security.md](session01/lab_1_b_dns-security.md):  
+  - [lab_1_b_alb-secure-routing.md](session01/lab_1_b_alb-secure-routing.md):  
     *Secure web access using Security Groups, NACLs, and Route 53 DNS.*
 
 </details>
