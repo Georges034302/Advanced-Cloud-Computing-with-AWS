@@ -7,7 +7,7 @@ This lab shows how to secure HTTP access to a web server running on EC2 using Se
 ## Objectives
 - Create a Security Group that allows only required ingress (HTTP/HTTPS) and SSH from a limited IP
 - Configure a subnet-level NACL with explicit allow/deny rules
-- Launch an EC2 instance
+- Launch an EC2 instance running a web server
 - Create or update a Route 53 record to point to the web endpoint
 - Validate access and verify that the firewall layers are effective
 - Clean up to avoid charges
