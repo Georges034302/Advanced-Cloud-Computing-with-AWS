@@ -1,12 +1,13 @@
 # Lab 1.B: Secure web access using Security Groups, NACLs, and Route 53 DNS
+![IMG](https://github.com/user-attachments/assets/bc621781-a612-4fcf-87bf-5d8aadaf3743)
 
 ## Overview
-This lab shows how to secure HTTP access to a web server running on EC2 using Security Groups and Network ACLs (NACLs), and how to expose the service via Route 53 DNS. You'll create a hardened security group, a restrictive NACL for the public subnet, launch an EC2 web server, and add a DNS A record pointing to the instance (or to a load balancer).
+This lab shows how to secure HTTP access to a web server running on EC2 using Security Groups and Network ACLs (NACLs), and how to expose the service via Route 53 DNS. You'll create a hardened security group, a restrictive NACL for the public subnet, launch an EC2 web server, and add a DNS A record pointing to the instance.
 
 ## Objectives
 - Create a Security Group that allows only required ingress (HTTP/HTTPS) and SSH from a limited IP
 - Configure a subnet-level NACL with explicit allow/deny rules
-- Launch an EC2 instance (or ALB) serving HTTP
+- Launch an EC2 instance
 - Create or update a Route 53 record to point to the web endpoint
 - Validate access and verify that the firewall layers are effective
 - Clean up to avoid charges
@@ -14,7 +15,6 @@ This lab shows how to secure HTTP access to a web server running on EC2 using Se
 ## Prerequisites
 
 - AWS CLI configured or Console access
-- Local public IP (run `curl ifconfig.co`) for SSH restrictions
 - Create VPC and Public Subnet
 
     ```bash
@@ -51,17 +51,7 @@ This lab shows how to secure HTTP access to a web server running on EC2 using Se
 
 ---
 
-## Architecture (high level)
-- Public subnet with NACL configured to be explicit about allowed/denied ports
-- Security Group attached to EC2 (stateful) allowing only required ports
-- Optional ALB in public subnets with SG allowing HTTP/HTTPS from internet
-- Route 53 A/ALIAS record pointing to ALB or to instance public IP
-
----
-
-## Steps (CLI examples)
-
-Replace placeholders: VPC_ID, SUBNET_ID, HOSTED_ZONE_ID, YOUR_DOMAIN, YOUR_PUBLIC_IP (CIDR format e.g., 203.0.113.5/32).
+## Steps 
 
 ### 1. Create a restrictive Security Group
 ```bash
@@ -329,6 +319,5 @@ aws ec2 delete-security-group \
 
 ## Summary
 In this lab, you secured web access to an EC2 instance using AWS Security Groups and Network ACLs (NACLs), and exposed the service via Route 53 DNS.  
-You created a restrictive security group, configured explicit NACL rules for your public subnet, launched a web server on EC2, and mapped a DNS record to the instance.  
-You validated access and firewall effectiveness, and learned how to clean up resources to avoid charges.  
-This approach demonstrates layered security and DNS integration for public cloud workloads.
+You created a restrictive security group, configured explicit NACL rules for your public subnet, launched a web server on EC2, and mapped a DNS record to the instance.
+
