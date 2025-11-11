@@ -329,10 +329,17 @@ RTB_ASSOC_IDS=$(
     --query 'RouteTables[].Associations[].RouteTableAssociationId' \
     --output text
 )
-for a in $RTB_ASSOC_IDS; do
-  # disassociate each association if present
-  aws ec2 disassociate-route-table \
-    --association-id "$a" || true
+# Disassociate only non-main route table associations, suppress errors
+for assoc_id in $RTB_ASSOC_IDS; do
+  IS_MAIN=$(
+    aws ec2 describe-route-tables \
+      --route-table-ids "$RTB_ID" \
+      --query "RouteTables[0].Associations[?RouteTableAssociationId=='$assoc_id'].Main" \
+      --output text
+  )
+  if [ "$IS_MAIN" != "True" ]; then
+    aws ec2 disassociate-route-table --association-id "$assoc_id" 2>/dev/null || true
+  fi
 done
 
 # Delete route table (ignore failure)
