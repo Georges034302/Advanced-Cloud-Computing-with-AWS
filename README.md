@@ -36,13 +36,15 @@ This comprehensive lab series provides hands-on experience with Amazon Web Servi
 <details>
   <summary>Lab Session 02: Identity and Access Control with IAM</summary>
 
-  Master AWS Identity and Access Management (IAM) by applying least-privilege security and MFA.
+  Master AWS Identity and Access Management (IAM) by implementing least-privilege security, multi-factor authentication, and federated access patterns.
 
   **Labs for this session:**
   - [lab_2_a_iam-users-policies.md](session02/lab_2_a_iam-users-policies.md):  
-    *Create IAM users, groups, and custom policies for least privilege.*
+    *Create IAM users, groups, and custom managed policies following least-privilege principles. Configure permission boundaries and test permissions using the policy simulator.*
   - [lab_2_b_iam-roles-mfa.md](session02/lab_2_b_iam-roles-mfa.md):  
-    *Configure IAM roles and MFA for secure access to AWS services.*
+    *Configure IAM roles with trust policies for EC2 and cross-account access. Enforce multi-factor authentication (MFA) for privileged operations using STS AssumeRole.*
+  - [lab_2_c_cognito-federated-access.md](session02/lab_2_c_cognito-federated-access.md):  
+    *Implement federated access using Amazon Cognito Identity Pools and external identity providers (Google OAuth). Obtain temporary AWS credentials without creating IAM users.*
 
 </details>
 
