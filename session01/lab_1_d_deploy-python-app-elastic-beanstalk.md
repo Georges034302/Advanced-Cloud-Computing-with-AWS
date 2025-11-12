@@ -1,4 +1,5 @@
 # Lab 1.D: Deploy a Python Web App on AWS Elastic Beanstalk
+<img width="1536" height="534" alt="IMG" src="https://github.com/user-attachments/assets/4efda192-be84-4d3c-8b56-4c7618e143cc" />
 
 ## Overview
 This lab demonstrates how to deploy a Python Flask web application on **AWS Elastic Beanstalk**. Elastic Beanstalk automatically handles provisioning, load balancing, scaling, and monitoring, allowing you to focus on your application code.
