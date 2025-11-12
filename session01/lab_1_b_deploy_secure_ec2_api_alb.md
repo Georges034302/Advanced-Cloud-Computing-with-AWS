@@ -1,308 +1,220 @@
 # Lab 1.B: Deploy Secure Multi-EC2 Python Jokes API with ALB Path-Based Routing
 
 <img width="1315" height="1024" alt="IMG" src="https://github.com/user-attachments/assets/b67f8928-9a7e-430b-8cd0-afab8d53128a" />
+---
 
-## Overview
-This lab extends your previous AWS networking foundation (Lab 1.A) by deploying a **Python REST API** across **two EC2 instances**, fronted by an **Application Load Balancer (ALB)**. The ALB routes incoming requests based on the URL path:
-- `/joke` → EC2 instance A (single random joke)
-- `/jokes` → EC2 instance B (list of jokes)
+## **Overview**
+This lab extends your AWS networking foundation by deploying a **Python REST API** across **two EC2 instances**, fronted by an **Application Load Balancer (ALB)**.  
+The ALB routes requests based on the path:
+- `/joke` → EC2 A (single random joke)  
+- `/jokes` → EC2 B (list of jokes)  
 
-The architecture also incorporates **enhanced security controls** using **Network ACLs (NACLs)** and **Security Groups (SGs)** to protect network traffic at multiple layers.
+It uses **Network ACLs (NACLs)** and **Security Groups (SGs)** for layered defense.
+
+⚠ **Note:** ALBs require **two subnets in different Availability Zones**. This lab deploys them in `ap-southeast-2a` and `ap-southeast-2b`.
 
 ---
 
-## Objectives
-- Create a VPC and Public Subnet
-- Configure NACLs and Security Groups for layered security
-- Launch two EC2 instances running separate Flask APIs
-- Deploy an Application Load Balancer (ALB) to route traffic by URL path
-- Validate ALB path-based routing functionality
-- Clean up resources to avoid ongoing charges
+## **Objectives**
+- Create a VPC and two public subnets  
+- Configure NACLs and Security Groups  
+- Launch two EC2 instances with Flask APIs  
+- Deploy an ALB with path-based routing  
+- Validate endpoints and clean up  
 
 ---
 
-## Architecture Diagram (Conceptual)
+## **Architecture**
 ```
 Internet → ALB (Port 80)
-      │
-      ▼
-+------------------------+
-| AWS Cloud (VPC 10.0.0.0/16) |
-|  ┌─────────────────────────────┐
-|  │ Public Subnet 10.0.1.0/24   │
-|  │   ┌─────────────────────┐   │
-|  │   │   Network ACL       │   │
-|  │   │  (Allow HTTP/SSH)   │   │
-|  │   └─────────────────────┘   │
-|  │      │             │        │
-|  │   [EC2 A]       [EC2 B]     │
-|  │  Flask /joke    Flask /jokes│
-|  │  SG:5000 from ALB           │
-|  │                             │
-|  └─────────────────────────────┘
-|     ▲                 ▲
-|     │                 │
-|   Target Group 1   Target Group 2
-|     │                 │
-|     └────── ALB Path Routing ───┘
-+--------------------------------+
+          │
+   ┌──────┴───────────────┐
+   │ AWS VPC (10.0.0.0/16)│
+   │ ┌──────────┐ ┌──────────┐
+   │ │Subnet A  │ │Subnet B  │
+   │ │EC2 A     │ │EC2 B     │
+   │ │/joke     │ │/jokes    │
+   │ └──────────┘ └──────────┘
+   │  ▲  ▲           ▲  ▲
+   │  │  └─ Target Group 1
+   │  └──── Target Group 2
+   └────────────────────────┘
 ```
 
 ---
 
-## Prerequisites
+## **Prerequisites**
 - AWS CLI configured (`aws configure`)
-- Key Pair created (or use `lab-key.pem` from previous lab)
-- IAM permissions to create EC2, ALB, and networking resources
+- IAM permissions for EC2, VPC, ALB resources
+- No pre-existing infrastructure required  
 
 ---
 
-## Step 1. Create VPC, Subnet, and Internet Gateway
-
+## **Step 1 – Create VPC, Subnets & Internet Gateway**
 ```bash
-# Create VPC and tag it
-VPC_ID=$(aws ec2 create-vpc \
-  --cidr-block 10.0.0.0/16 \
-  --query 'Vpc.VpcId' --output text)
+# 1️⃣  Create VPC
+VPC_ID=$(aws ec2 create-vpc --cidr-block 10.0.0.0/16 --query 'Vpc.VpcId' --output text)
 aws ec2 create-tags --resources $VPC_ID --tags Key=Name,Value=lab-vpc
 echo "VPC_ID=$VPC_ID"
 
-# Get Availability Zone
-AZ=$(aws ec2 describe-availability-zones \
-  --query 'AvailabilityZones[0].ZoneName' --output text)
-echo "AZ=$AZ"
+# 2️⃣  Get first two AZs in Sydney
+AZ1=$(aws ec2 describe-availability-zones --region ap-southeast-2 --query 'AvailabilityZones[0].ZoneName' --output text)
+AZ2=$(aws ec2 describe-availability-zones --region ap-southeast-2 --query 'AvailabilityZones[1].ZoneName' --output text)
+echo "AZ1=$AZ1 | AZ2=$AZ2"
 
-# Create Subnet and tag it
-SUBNET_ID=$(aws ec2 create-subnet \
-  --vpc-id $VPC_ID \
-  --cidr-block 10.0.1.0/24 \
-  --availability-zone $AZ \
-  --query 'Subnet.SubnetId' --output text)
-aws ec2 create-tags --resources $SUBNET_ID --tags Key=Name,Value=lab-public-subnet
-echo "SUBNET_ID=$SUBNET_ID"
+# 3️⃣  Create two public subnets
+SUBNET1_ID=$(aws ec2 create-subnet --vpc-id $VPC_ID --cidr-block 10.0.1.0/24 --availability-zone $AZ1 --query 'Subnet.SubnetId' --output text)
+SUBNET2_ID=$(aws ec2 create-subnet --vpc-id $VPC_ID --cidr-block 10.0.2.0/24 --availability-zone $AZ2 --query 'Subnet.SubnetId' --output text)
+aws ec2 modify-subnet-attribute --subnet-id $SUBNET1_ID --map-public-ip-on-launch
+aws ec2 modify-subnet-attribute --subnet-id $SUBNET2_ID --map-public-ip-on-launch
+aws ec2 create-tags --resources $SUBNET1_ID --tags Key=Name,Value=subnet-a
+aws ec2 create-tags --resources $SUBNET2_ID --tags Key=Name,Value=subnet-b
 
-# Enable auto public IP assignment
-aws ec2 modify-subnet-attribute --subnet-id $SUBNET_ID --map-public-ip-on-launch
-
-# Create Internet Gateway and tag it, then attach
+# 4️⃣  Create and attach Internet Gateway
 IGW_ID=$(aws ec2 create-internet-gateway --query 'InternetGateway.InternetGatewayId' --output text)
-aws ec2 create-tags --resources $IGW_ID --tags Key=Name,Value=lab-igw
 aws ec2 attach-internet-gateway --internet-gateway-id $IGW_ID --vpc-id $VPC_ID
-echo "IGW_ID=$IGW_ID"
 
-# Create Route Table, tag it, and associate
+# 5️⃣  Create Route Table and associate subnets
 RTB_ID=$(aws ec2 create-route-table --vpc-id $VPC_ID --query 'RouteTable.RouteTableId' --output text)
-aws ec2 create-tags --resources $RTB_ID --tags Key=Name,Value=lab-public-rtb
-echo "RTB_ID=$RTB_ID"
-
 aws ec2 create-route --route-table-id $RTB_ID --destination-cidr-block 0.0.0.0/0 --gateway-id $IGW_ID
-aws ec2 associate-route-table --route-table-id $RTB_ID --subnet-id $SUBNET_ID
+aws ec2 associate-route-table --route-table-id $RTB_ID --subnet-id $SUBNET1_ID
+aws ec2 associate-route-table --route-table-id $RTB_ID --subnet-id $SUBNET2_ID
 ```
 
 ---
 
-## Step 2. Create Security Groups
-
-### ALB Security Group
+## **Step 2 – Create Security Groups**
 ```bash
-# Create ALB Security Group and tag it
-ALB_SG=$(aws ec2 create-security-group \
-  --group-name alb-sg --description "ALB SG" --vpc-id $VPC_ID \
-  --tag-specifications 'ResourceType=security-group,Tags=[{Key=Name,Value=alb-sg}]' \
-  --query 'GroupId' --output text)
-echo "ALB_SG=$ALB_SG"
+# ALB Security Group
+ALB_SG=$(aws ec2 create-security-group --group-name alb-sg --description "ALB SG" --vpc-id $VPC_ID --query 'GroupId' --output text)
+aws ec2 authorize-security-group-ingress --group-id $ALB_SG --protocol tcp --port 80 --cidr 0.0.0.0/0
 
-# Allow inbound HTTP to ALB SG
-aws ec2 authorize-security-group-ingress \
-  --group-id $ALB_SG --protocol tcp --port 80 --cidr 0.0.0.0/0
-```
-
-### EC2 Security Group
-```bash
-# Create EC2 Security Group and tag it
-EC2_SG=$(aws ec2 create-security-group \
-  --group-name ec2-sg --description "EC2 SG" --vpc-id $VPC_ID \
-  --tag-specifications 'ResourceType=security-group,Tags=[{Key=Name,Value=ec2-sg}]' \
-  --query 'GroupId' --output text)
-echo "EC2_SG=$EC2_SG"
-
-# Allow inbound from ALB SG only
-aws ec2 authorize-security-group-ingress \
-  --group-id $EC2_SG --protocol tcp --port 5000 --source-group $ALB_SG
-
-# Allow SSH from your IP
+# EC2 Security Group
+EC2_SG=$(aws ec2 create-security-group --group-name ec2-sg --description "EC2 SG" --vpc-id $VPC_ID --query 'GroupId' --output text)
+aws ec2 authorize-security-group-ingress --group-id $EC2_SG --protocol tcp --port 5000 --source-group $ALB_SG
 MY_IP=$(curl -s ifconfig.me)
-echo "MY_IP=$MY_IP"
-aws ec2 authorize-security-group-ingress \
-  --group-id $EC2_SG --protocol tcp --port 22 --cidr ${MY_IP}/32
+aws ec2 authorize-security-group-ingress --group-id $EC2_SG --protocol tcp --port 22 --cidr ${MY_IP}/32
 ```
 
 ---
 
-## Step 3. Create Network ACL
-
+## **Step 3 – Create Network ACL**
 ```bash
-# Create NACL and tag it
 NACL_ID=$(aws ec2 create-network-acl --vpc-id $VPC_ID --query 'NetworkAcl.NetworkAclId' --output text)
-aws ec2 create-tags --resources $NACL_ID --tags Key=Name,Value=public-nacl
-echo "NACL_ID=$NACL_ID"
 
-# Inbound Rules
-aws ec2 create-network-acl-entry --network-acl-id $NACL_ID --rule-number 100 --protocol tcp --port-range From=80,To=80 --rule-action allow --cidr-block 0.0.0.0/0
-aws ec2 create-network-acl-entry --network-acl-id $NACL_ID --rule-number 110 --protocol tcp --port-range From=22,To=22 --rule-action allow --cidr-block ${MY_IP}/32
-aws ec2 create-network-acl-entry --network-acl-id $NACL_ID --rule-number 120 --protocol tcp --port-range From=1024,To=65535 --rule-action allow --cidr-block 0.0.0.0/0
-aws ec2 create-network-acl-entry --network-acl-id $NACL_ID --rule-number 32766 --protocol -1 --rule-action deny --cidr-block 0.0.0.0/0
+# Inbound
+aws ec2 create-network-acl-entry --cli-input-json '{"NetworkAclId":"'"$NACL_ID"'","RuleNumber":100,"Protocol":"6","RuleAction":"allow","Egress":false,"CidrBlock":"0.0.0.0/0","PortRange":{"From":80,"To":80}}'
+aws ec2 create-network-acl-entry --cli-input-json '{"NetworkAclId":"'"$NACL_ID"'","RuleNumber":110,"Protocol":"6","RuleAction":"allow","Egress":false,"CidrBlock":"0.0.0.0/0","PortRange":{"From":22,"To":22}}'
 
-# Outbound Rules
-aws ec2 create-network-acl-entry --network-acl-id $NACL_ID --rule-number 100 --protocol tcp --port-range From=80,To=80 --egress --rule-action allow --cidr-block 0.0.0.0/0
-aws ec2 create-network-acl-entry --network-acl-id $NACL_ID --rule-number 110 --protocol tcp --port-range From=443,To=443 --egress --rule-action allow --cidr-block 0.0.0.0/0
-aws ec2 create-network-acl-entry --network-acl-id $NACL_ID --rule-number 120 --protocol tcp --port-range From=1024,To=65535 --egress --rule-action allow --cidr-block 0.0.0.0/0
-
-# Associate NACL with subnet
-ASSOC_ID=$(aws ec2 describe-network-acls --filters Name=association.subnet-id,Values=$SUBNET_ID --query 'NetworkAcls[].Associations[].NetworkAclAssociationId' --output text)
-echo "ASSOC_ID=$ASSOC_ID"
-aws ec2 replace-network-acl-association --association-id $ASSOC_ID --network-acl-id $NACL_ID
+# Outbound
+aws ec2 create-network-acl-entry --cli-input-json '{"NetworkAclId":"'"$NACL_ID"'","RuleNumber":100,"Protocol":"6","RuleAction":"allow","Egress":true,"CidrBlock":"0.0.0.0/0","PortRange":{"From":80,"To":80}}'
+aws ec2 create-network-acl-entry --cli-input-json '{"NetworkAclId":"'"$NACL_ID"'","RuleNumber":110,"Protocol":"6","RuleAction":"allow","Egress":true,"CidrBlock":"0.0.0.0/0","PortRange":{"From":443,"To":443}}'
 ```
 
 ---
 
-## Step 4. Launch EC2 Instances (Flask APIs)
-
-### User Data for EC2 A (/joke)
+## **Step 4 – Launch EC2 Instances**
 ```bash
-# Create user-data for EC2 A
+# Latest Amazon Linux 2 AMI
+AMI_ID=$(aws ec2 describe-images --owners amazon   --filters 'Name=name,Values=amzn2-ami-hvm-*-x86_64-gp2'   --query 'Images | sort_by(@,&CreationDate) | [-1].ImageId' --output text)
+
+# Create Key Pair
+aws ec2 create-key-pair --key-name lab-key --query 'KeyMaterial' --output text > lab-key.pem
+chmod 600 lab-key.pem
+
+# User Data A
 cat > user-data-a.sh <<'EOF'
 #!/bin/bash
 yum update -y
 yum install -y python3-pip
-yum install -y git
 pip3 install flask
 cat > /home/ec2-user/app.py <<'APP'
-from flask import Flask, jsonify
-import socket
+from flask import Flask, jsonify; import socket
 app = Flask(__name__)
 @app.route('/joke')
-def get_joke():
-    return jsonify({
-        'joke': 'Why do developers hate nature? It has too many bugs!',
-        'host': socket.gethostname()
-    })
-if __name__ == '__main__':
-    app.run(host='0.0.0.0', port=5000)
+def joke(): return jsonify({'joke':'Why do developers hate nature? It has too many bugs!','host':socket.gethostname()})
+app.run(host='0.0.0.0', port=5000)
 APP
 nohup python3 /home/ec2-user/app.py &
 EOF
-```
 
-### User Data for EC2 B (/jokes)
-```bash
-# Create user-data for EC2 B
+# User Data B
 cat > user-data-b.sh <<'EOF'
 #!/bin/bash
 yum update -y
 yum install -y python3-pip
-yum install -y git
 pip3 install flask
 cat > /home/ec2-user/app.py <<'APP'
-from flask import Flask, jsonify
-import socket
+from flask import Flask, jsonify; import socket
 app = Flask(__name__)
 @app.route('/jokes')
-def get_jokes():
-    jokes = [
-        'Why did the cloud break up with the server? It needed space.',
-        'I told my computer I needed a break, and it said \'No problem, I’ll go to sleep.\'',
-        'Why do Python programmers wear glasses? Because they can’t C #.'
-    ]
-    return jsonify({'jokes': jokes, 'host': socket.gethostname()})
-if __name__ == '__main__':
-    app.run(host='0.0.0.0', port=5000)
+def jokes():
+    data=['Why did the cloud break up with the server? It needed space.',
+          'I told my computer I needed a break, and it said “No problem, I’ll go to sleep.”',
+          'Why do Python programmers wear glasses? Because they can’t C#.']
+    return jsonify({'jokes':data,'host':socket.gethostname()})
+app.run(host='0.0.0.0', port=5000)
 APP
 nohup python3 /home/ec2-user/app.py &
 EOF
-```
 
-### Launch EC2 Instances
-```bash
-# Find latest Amazon Linux 2 AMI
-AMI_ID=$(aws ec2 describe-images --owners amazon --filters 'Name=name,Values=amzn2-ami-hvm-*-x86_64-gp2' 'Name=state,Values=available' --query 'Images | sort_by(@,&CreationDate) | [-1].ImageId' --output text)
-echo "AMI_ID=$AMI_ID"
+# Launch EC2 Instances
+EC2A_ID=$(aws ec2 run-instances --image-id $AMI_ID --instance-type t3.micro --key-name lab-key   --security-group-ids $EC2_SG --subnet-id $SUBNET1_ID --associate-public-ip-address   --user-data file://user-data-a.sh --query 'Instances[0].InstanceId' --output text)
 
-# Launch EC2 A and tag it
-EC2A_ID=$(aws ec2 run-instances --image-id $AMI_ID --instance-type t3.micro --key-name lab-key --security-group-ids $EC2_SG --subnet-id $SUBNET_ID --associate-public-ip-address --user-data file://user-data-a.sh --tag-specifications 'ResourceType=instance,Tags=[{Key=Name,Value=ec2-a}]' --query 'Instances[0].InstanceId' --output text)
-echo "EC2A_ID=$EC2A_ID"
-
-# Launch EC2 B and tag it
-EC2B_ID=$(aws ec2 run-instances --image-id $AMI_ID --instance-type t3.micro --key-name lab-key --security-group-ids $EC2_SG --subnet-id $SUBNET_ID --associate-public-ip-address --user-data file://user-data-b.sh --tag-specifications 'ResourceType=instance,Tags=[{Key=Name,Value=ec2-b}]' --query 'Instances[0].InstanceId' --output text)
-echo "EC2B_ID=$EC2B_ID"
+EC2B_ID=$(aws ec2 run-instances --image-id $AMI_ID --instance-type t3.micro --key-name lab-key   --security-group-ids $EC2_SG --subnet-id $SUBNET2_ID --associate-public-ip-address   --user-data file://user-data-b.sh --query 'Instances[0].InstanceId' --output text)
 
 aws ec2 wait instance-running --instance-ids $EC2A_ID $EC2B_ID
 ```
 
 ---
 
-## Step 5. Create ALB and Target Groups
+## **Step 5 – Create ALB and Target Groups**
 ```bash
-# Create ALB and tag it
-ALB_ARN=$(aws elbv2 create-load-balancer --name jokes-alb --subnets $SUBNET_ID --security-groups $ALB_SG --query 'LoadBalancers[0].LoadBalancerArn' --output text)
-echo "ALB_ARN=$ALB_ARN"
+# Create ALB (Across Two Subnets)
+ALB_ARN=$(aws elbv2 create-load-balancer --name jokes-alb   --subnets $SUBNET1_ID $SUBNET2_ID --security-groups $ALB_SG   --query 'LoadBalancers[0].LoadBalancerArn' --output text)
 
-# Create Target Groups and tag them
-TG1_ARN=$(aws elbv2 create-target-group --name tg-joke --protocol HTTP --port 5000 --vpc-id $VPC_ID --target-type instance --query 'TargetGroups[0].TargetGroupArn' --output text)
-echo "TG1_ARN=$TG1_ARN"
-TG2_ARN=$(aws elbv2 create-target-group --name tg-jokes --protocol HTTP --port 5000 --vpc-id $VPC_ID --target-type instance --query 'TargetGroups[0].TargetGroupArn' --output text)
-echo "TG2_ARN=$TG2_ARN"
+# Target Groups
+TG1_ARN=$(aws elbv2 create-target-group --name tg-joke --protocol HTTP --port 5000   --vpc-id $VPC_ID --target-type instance --query 'TargetGroups[0].TargetGroupArn' --output text)
+TG2_ARN=$(aws elbv2 create-target-group --name tg-jokes --protocol HTTP --port 5000   --vpc-id $VPC_ID --target-type instance --query 'TargetGroups[0].TargetGroupArn' --output text)
 
+# Register Instances
 aws elbv2 register-targets --target-group-arn $TG1_ARN --targets Id=$EC2A_ID
 aws elbv2 register-targets --target-group-arn $TG2_ARN --targets Id=$EC2B_ID
 
-# Create Listener and tag it
-LISTENER_ARN=$(aws elbv2 create-listener --load-balancer-arn $ALB_ARN --protocol HTTP --port 80 --default-actions Type=forward,TargetGroupArn=$TG1_ARN --query 'Listeners[0].ListenerArn' --output text)
-echo "LISTENER_ARN=$LISTENER_ARN"
+# Listener & Path Routing
+LISTENER_ARN=$(aws elbv2 create-listener --load-balancer-arn $ALB_ARN   --protocol HTTP --port 80 --default-actions Type=forward,TargetGroupArn=$TG1_ARN   --query 'Listeners[0].ListenerArn' --output text)
 
-# Add path-based rules
-aws elbv2 create-rule --listener-arn $LISTENER_ARN --priority 1 --conditions Field=path-pattern,Values="/joke" --actions Type=forward,TargetGroupArn=$TG1_ARN
-aws elbv2 create-rule --listener-arn $LISTENER_ARN --priority 2 --conditions Field=path-pattern,Values="/jokes" --actions Type=forward,TargetGroupArn=$TG2_ARN
+aws elbv2 create-rule --listener-arn $LISTENER_ARN --priority 1   --conditions Field=path-pattern,Values="/joke"   --actions Type=forward,TargetGroupArn=$TG1_ARN
+
+aws elbv2 create-rule --listener-arn $LISTENER_ARN --priority 2   --conditions Field=path-pattern,Values="/jokes"   --actions Type=forward,TargetGroupArn=$TG2_ARN
 ```
 
 ---
 
-## Step 6. Validation
+## **Step 6 – Validation**
 ```bash
-# Retrieve the ALB DNS name
 ALB_DNS=$(aws elbv2 describe-load-balancers --names jokes-alb --query 'LoadBalancers[0].DNSName' --output text)
 echo "ALB URL: http://$ALB_DNS"
 
-# Test endpoints
 curl http://$ALB_DNS/joke
 curl http://$ALB_DNS/jokes
-
-# Open in browser (Ubuntu devcontainer)
-"$BROWSER" "http://$ALB_DNS/joke"
-"$BROWSER" "http://$ALB_DNS/jokes"
 ```
-✅ You should see JSON responses from two different hosts (EC2 A and B).
+✅ Expected output: JSON responses from different EC2 hosts.
 
 ---
 
-## Step 7. Cleanup
+## **Step 7 – Cleanup**
 ```bash
-# Terminate EC2 instances
 aws ec2 terminate-instances --instance-ids $EC2A_ID $EC2B_ID
 aws ec2 wait instance-terminated --instance-ids $EC2A_ID $EC2B_ID
-
-# Delete ALB and target groups
 aws elbv2 delete-load-balancer --load-balancer-arn $ALB_ARN
 aws elbv2 delete-target-group --target-group-arn $TG1_ARN
 aws elbv2 delete-target-group --target-group-arn $TG2_ARN
-
-# Delete security groups
 aws ec2 delete-security-group --group-id $ALB_SG
 aws ec2 delete-security-group --group-id $EC2_SG
-
-# Delete NACL, subnet, IGW, route table, and VPC
 aws ec2 delete-network-acl --network-acl-id $NACL_ID
-aws ec2 delete-subnet --subnet-id $SUBNET_ID
+aws ec2 delete-subnet --subnet-id $SUBNET1_ID
+aws ec2 delete-subnet --subnet-id $SUBNET2_ID
 aws ec2 detach-internet-gateway --internet-gateway-id $IGW_ID --vpc-id $VPC_ID
 aws ec2 delete-internet-gateway --internet-gateway-id $IGW_ID
 aws ec2 delete-route-table --route-table-id $RTB_ID
@@ -311,12 +223,10 @@ aws ec2 delete-vpc --vpc-id $VPC_ID
 
 ---
 
-## Summary
-This lab demonstrates:
-- Deploying two independent Python Flask APIs on EC2
-- Using Application Load Balancer path-based routing for multi-endpoint architecture
-- Applying Network ACLs and Security Groups for layered defense
-- Validating end-to-end routing from ALB to backend APIs securely
-
-All resource creation commands now include tags, and each variable assignment is followed by an echo to display its value.
-
+## **Summary**
+You have:
+- Created a multi-AZ VPC environment  
+- Launched two Flask APIs on EC2  
+- Configured path-based routing via ALB  
+- Applied NACL + SG security layers  
+- Validated and cleaned up resources  
