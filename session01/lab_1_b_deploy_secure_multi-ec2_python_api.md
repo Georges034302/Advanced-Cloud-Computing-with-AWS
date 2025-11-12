@@ -1,6 +1,6 @@
 # Lab 1.B: Deploy Secure Multi-EC2 Python Jokes API
+<img width="1536" height="1024" alt="IMG" src="https://github.com/user-attachments/assets/958fa5ad-f9ff-4911-a9a9-03367dc2e1ea" />
 
-<img width="1536" height="815" alt="IMG" src="https://github.com/user-attachments/assets/7eedf29f-0974-4278-8501-2488bfc67353" />
 ---
 
 ## **Overview**
