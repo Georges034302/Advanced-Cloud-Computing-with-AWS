@@ -26,9 +26,9 @@ This comprehensive lab series provides hands-on experience with Amazon Web Servi
     *Launch and configure a Linux EC2 instance in a custom VPC, including subnet, internet gateway, route table, and security group setup.*
   - [lab_1_b_deploy_secure_ec2_api_alb.md](session01/lab_1_b_deploy_secure_ec2_api_alb.md):  
     *Deploy multiple Python Flask APIs on EC2, secure them with security groups and network ACLs, and use an Application Load Balancer (ALB) for path-based routing.*
-  - [Lab_1_c_host-static-website-lightsail.md](session01/Lab_1_c_host-static-website-lightsail.md):  
+  - [lab_1_c_host-static-website-lightsail.md](session01/lab_1_c_host-static-website-lightsail.md):  
     *Deploy and host a static website using AWS Lightsail.*
-  - [Lab_1_s_deploy-python-app-elastic-beanstalk.md](session01/Lab_1_s_deploy-python-app-elastic-beanstalk.md):  
+  - [lab_1_d_deploy-python-app-elastic-beanstalk.md](session01/Lab_1_s_deploy-python-app-elastic-beanstalk.md):  
     *Deploy a Python application using AWS Elastic Beanstalk for managed scaling and deployment.*
 
 </details>
