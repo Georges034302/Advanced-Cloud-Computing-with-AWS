@@ -1,27 +1,28 @@
-# Lab 2.C: IAM Identity Federation and Temporary Credentials
+# Lab 2.C: Federated Access with AWS Cognito and IAM Roles
 
 ## Overview
-This lab demonstrates how to implement AWS IAM identity federation using OpenID Connect (OIDC) to allow external identities to access AWS resources without creating IAM users. You will configure temporary security credentials using AWS STS for federated access, commonly used in CI/CD pipelines and web applications.
+This lab demonstrates how users from external identity providers (Google, Facebook, Amazon) can authenticate using Amazon Cognito and obtain temporary IAM role credentials via AWS STS. You will integrate federated identities without creating IAM users, showcasing secure, temporary access to AWS resources.
 
 ---
 
 ## Objectives
-- Set up OIDC identity provider in AWS IAM
-- Create IAM roles with OIDC trust policies for federated access
-- Configure GitHub Actions integration with AWS using OIDC
-- Use `sts:AssumeRoleWithWebIdentity` for temporary credentials
-- Implement session tags for attribute-based access control (ABAC)
-- Test federated access with various conditions
-- Audit federated access using CloudTrail
+- Create an Amazon Cognito Identity Pool for federated authentication
+- Link external identity providers (Google or Facebook) to Cognito
+- Configure IAM roles for authenticated and unauthenticated users
+- Exchange IdP tokens for temporary AWS credentials using STS
+- Access S3 resources using federated temporary credentials
+- Validate least-privilege access and token expiration
+- Test identity federation workflow end-to-end
 
 ---
 
 ## Prerequisites
 - AWS CLI configured (`aws configure`)
-- IAM permissions to create identity providers, roles, and policies
-- GitHub account (for OIDC federation example)
-- Basic understanding of OIDC/OAuth 2.0 concepts
+- IAM permissions to create Cognito Identity Pools, roles, and policies
+- Google account (for OAuth 2.0 authentication) or Facebook account
+- Basic understanding of OAuth 2.0 and federated identity concepts
 - jq installed for JSON parsing
+- Browser for Google/Facebook authentication
 
 ---
 
@@ -38,22 +39,19 @@ echo "ACCOUNT_ID=$ACCOUNT_ID"
 REGION="ap-southeast-2"
 echo "REGION=$REGION"
 
+# Set Cognito Identity Pool name
+IDENTITY_POOL_NAME="FederationLabIdentityPool"
+echo "IDENTITY_POOL_NAME=$IDENTITY_POOL_NAME"
+
 # Set bucket name for federation testing
-BUCKET_NAME="federation-test-bucket-${ACCOUNT_ID}"
+BUCKET_NAME="cognito-federation-bucket-${ACCOUNT_ID}"
 echo "BUCKET_NAME=$BUCKET_NAME"
-
-# Set GitHub repository details (replace with your repo)
-GITHUB_ORG="YourGitHubOrg"
-echo "GITHUB_ORG=$GITHUB_ORG"
-
-GITHUB_REPO="YourRepo"
-echo "GITHUB_REPO=$GITHUB_REPO"
 
 # Verify AWS CLI is configured
 aws sts get-caller-identity
 
 # Check if jq is installed
-which jq || echo "Warning: jq not installed (recommended for JSON parsing)"
+which jq || echo "Warning: jq not installed (required for JSON parsing)"
 ```
 
 ---
@@ -61,7 +59,7 @@ which jq || echo "Warning: jq not installed (recommended for JSON parsing)"
 ## Step 2 – Create S3 Bucket for Testing
 
 ```bash
-# Create S3 bucket for federation testing
+# Create S3 bucket for Cognito federation testing
 aws s3api create-bucket \
   --bucket "$BUCKET_NAME" \
   --region "$REGION" \
@@ -70,77 +68,84 @@ aws s3api create-bucket \
 # Verify bucket creation
 aws s3 ls | grep "$BUCKET_NAME"
 
-# Upload test file
-echo "Federation test file" > federation-test.txt
+# Create test folders for authenticated and unauthenticated access
+echo "Authenticated user content" > auth-test.txt
+echo "Public unauthenticated content" > unauth-test.txt
 
-# Upload to S3
-aws s3 cp federation-test.txt "s3://${BUCKET_NAME}/"
+# Upload test files
+aws s3 cp auth-test.txt "s3://${BUCKET_NAME}/authenticated/"
+aws s3 cp unauth-test.txt "s3://${BUCKET_NAME}/public/"
 
-# Verify file upload
-aws s3 ls "s3://${BUCKET_NAME}/"
+# Verify uploads
+aws s3 ls "s3://${BUCKET_NAME}/" --recursive
 ```
 
 ---
 
-## Step 3 – Create OIDC Identity Provider for GitHub
+## Step 3 – Configure Google OAuth 2.0 (External IdP)
 
 ```bash
-# Set GitHub OIDC provider URL
-GITHUB_OIDC_URL="https://token.actions.githubusercontent.com"
-echo "GITHUB_OIDC_URL=$GITHUB_OIDC_URL"
+# Display instructions for Google OAuth setup
+cat <<'INSTRUCTIONS'
+========================================
+Google OAuth 2.0 Configuration Steps
+========================================
 
-# Set GitHub OIDC thumbprint (GitHub's current certificate thumbprint)
-# This is GitHub's certificate thumbprint as of 2024
-GITHUB_THUMBPRINT="6938fd4d98bab03faadb97b34396831e3780aea1"
-echo "GITHUB_THUMBPRINT=$GITHUB_THUMBPRINT"
+1. Go to Google Cloud Console: https://console.cloud.google.com
+2. Create a new project (or select existing)
+3. Navigate to: APIs & Services > Credentials
+4. Click "Create Credentials" > "OAuth 2.0 Client ID"
+5. Configure OAuth consent screen:
+   - User Type: External
+   - App name: AWS Cognito Federation Lab
+   - User support email: your-email@example.com
+6. Create OAuth 2.0 Client ID:
+   - Application type: Web application
+   - Authorized JavaScript origins: https://localhost
+   - Authorized redirect URIs: https://localhost
+7. Note down:
+   - Client ID (starts with: xxxxxxxxx.apps.googleusercontent.com)
+   - Client Secret
 
-# Create OIDC identity provider for GitHub Actions
-aws iam create-open-id-connect-provider \
-  --url "$GITHUB_OIDC_URL" \
-  --client-id-list sts.amazonaws.com \
-  --thumbprint-list "$GITHUB_THUMBPRINT" \
-  --tags Key=Purpose,Value=GitHubActions Key=Environment,Value=Lab
+After obtaining credentials, save them:
 
-# Get the OIDC provider ARN
-OIDC_PROVIDER_ARN="arn:aws:iam::${ACCOUNT_ID}:oidc-provider/token.actions.githubusercontent.com"
-echo "OIDC_PROVIDER_ARN=$OIDC_PROVIDER_ARN"
+INSTRUCTIONS
 
-# Verify OIDC provider was created
-aws iam get-open-id-connect-provider \
-  --open-id-connect-provider-arn "$OIDC_PROVIDER_ARN"
+# Prompt for Google OAuth credentials
+echo ""
+read -p "Enter your Google OAuth 2.0 Client ID: " GOOGLE_CLIENT_ID
+read -p "Enter your Google OAuth 2.0 Client Secret: " GOOGLE_CLIENT_SECRET
 
-# List all OIDC providers
-aws iam list-open-id-connect-providers \
-  --output table
+echo "GOOGLE_CLIENT_ID=$GOOGLE_CLIENT_ID"
+echo "GOOGLE_CLIENT_SECRET saved (not displayed)"
 ```
 
 ---
 
-## Step 4 – Create IAM Role with OIDC Trust Policy
+## Step 4 – Create IAM Role for Unauthenticated Users
 
 ```bash
-# Set role name for GitHub Actions
-GITHUB_ROLE_NAME="GitHubActionsRole"
-echo "GITHUB_ROLE_NAME=$GITHUB_ROLE_NAME"
+# Set unauthenticated role name
+UNAUTH_ROLE_NAME="Cognito_${IDENTITY_POOL_NAME}_Unauth_Role"
+echo "UNAUTH_ROLE_NAME=$UNAUTH_ROLE_NAME"
 
-# Create trust policy JSON for GitHub OIDC provider
-# This allows GitHub Actions from your specific repo to assume the role
-cat > github-oidc-trust.json <<EOF
+# Create trust policy for unauthenticated Cognito users
+cat > cognito-unauth-trust.json <<'EOF'
 {
   "Version": "2012-10-17",
   "Statement": [
     {
       "Effect": "Allow",
       "Principal": {
-        "Federated": "${OIDC_PROVIDER_ARN}"
+        "Federated": "cognito-identity.amazonaws.com"
       },
       "Action": "sts:AssumeRoleWithWebIdentity",
       "Condition": {
         "StringEquals": {
-          "token.actions.githubusercontent.com:aud": "sts.amazonaws.com"
+          "cognito-identity.amazonaws.com:aud": "IDENTITY_POOL_ID_PLACEHOLDER"
         },
-        "StringLike": {
-          "token.actions.githubusercontent.com:sub": "repo:${GITHUB_ORG}/${GITHUB_REPO}:*"
+        "ForAnyValue:StringLike": {
+          "cognito-identity.amazonaws.com:amr": "unauthenticated"
         }
       }
     }
@@ -148,44 +153,175 @@ cat > github-oidc-trust.json <<EOF
 }
 EOF
 
-# Display the trust policy
-cat github-oidc-trust.json
+# Display the trust policy template
+cat cognito-unauth-trust.json
 
-# Create the IAM role with OIDC trust policy
+# Create the unauthenticated role (will update trust policy later)
 aws iam create-role \
-  --role-name "$GITHUB_ROLE_NAME" \
-  --assume-role-policy-document file://github-oidc-trust.json \
-  --description "Role for GitHub Actions to access AWS resources via OIDC" \
-  --tags Key=ManagedBy,Value=GitHubActions
+  --role-name "$UNAUTH_ROLE_NAME" \
+  --assume-role-policy-document file://cognito-unauth-trust.json \
+  --description "Role for unauthenticated Cognito federated users"
+
+# Get role ARN
+UNAUTH_ROLE_ARN=$(aws iam get-role \
+  --role-name "$UNAUTH_ROLE_NAME" \
+  --query 'Role.Arn' \
+  --output text)
+echo "UNAUTH_ROLE_ARN=$UNAUTH_ROLE_ARN"
 
 # Verify role creation
 aws iam get-role \
-  --role-name "$GITHUB_ROLE_NAME" \
+  --role-name "$UNAUTH_ROLE_NAME" \
   --query 'Role.[RoleName,Arn,CreateDate]' \
   --output table
-
-# Get role ARN
-GITHUB_ROLE_ARN=$(aws iam get-role \
-  --role-name "$GITHUB_ROLE_NAME" \
-  --query 'Role.Arn' \
-  --output text)
-echo "GITHUB_ROLE_ARN=$GITHUB_ROLE_ARN"
 ```
 
 ---
 
-## Step 5 – Create and Attach Permissions Policy
+## Step 5 – Create IAM Role for Authenticated Users
 
 ```bash
-# Set policy name
-FEDERATION_POLICY_NAME="FederationS3AccessPolicy"
-echo "FEDERATION_POLICY_NAME=$FEDERATION_POLICY_NAME"
+# Set authenticated role name
+AUTH_ROLE_NAME="Cognito_${IDENTITY_POOL_NAME}_Auth_Role"
+echo "AUTH_ROLE_NAME=$AUTH_ROLE_NAME"
 
-# Create permissions policy JSON with least-privilege S3 access
-cat > federation-s3-policy.json <<EOF
+# Create trust policy for authenticated Cognito users
+cat > cognito-auth-trust.json <<'EOF'
 {
   "Version": "2012-10-17",
   "Statement": [
+    {
+      "Effect": "Allow",
+      "Principal": {
+        "Federated": "cognito-identity.amazonaws.com"
+      },
+      "Action": "sts:AssumeRoleWithWebIdentity",
+      "Condition": {
+        "StringEquals": {
+          "cognito-identity.amazonaws.com:aud": "IDENTITY_POOL_ID_PLACEHOLDER"
+        },
+        "ForAnyValue:StringLike": {
+          "cognito-identity.amazonaws.com:amr": "authenticated"
+        }
+      }
+    }
+  ]
+}
+EOF
+
+# Display the trust policy template
+cat cognito-auth-trust.json
+
+# Create the authenticated role
+aws iam create-role \
+  --role-name "$AUTH_ROLE_NAME" \
+  --assume-role-policy-document file://cognito-auth-trust.json \
+  --description "Role for authenticated Cognito federated users"
+
+# Get role ARN
+AUTH_ROLE_ARN=$(aws iam get-role \
+  --role-name "$AUTH_ROLE_NAME" \
+  --query 'Role.Arn' \
+  --output text)
+echo "AUTH_ROLE_ARN=$AUTH_ROLE_ARN"
+
+# Verify role creation
+aws iam get-role \
+  --role-name "$AUTH_ROLE_NAME" \
+  --query 'Role.[RoleName,Arn,CreateDate]' \
+  --output table
+```
+
+---
+
+## Step 6 – Create Permissions Policy for Unauthenticated Users
+
+```bash
+# Set unauthenticated policy name
+UNAUTH_POLICY_NAME="CognitoUnauthenticatedPolicy"
+echo "UNAUTH_POLICY_NAME=$UNAUTH_POLICY_NAME"
+
+# Create limited permissions policy for unauthenticated users
+cat > cognito-unauth-policy.json <<EOF
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "AllowPublicS3ReadOnly",
+      "Effect": "Allow",
+      "Action": [
+        "s3:GetObject"
+      ],
+      "Resource": "arn:aws:s3:::${BUCKET_NAME}/public/*"
+    },
+    {
+      "Sid": "AllowListBucket",
+      "Effect": "Allow",
+      "Action": "s3:ListBucket",
+      "Resource": "arn:aws:s3:::${BUCKET_NAME}",
+      "Condition": {
+        "StringLike": {
+          "s3:prefix": "public/*"
+        }
+      }
+    }
+  ]
+}
+EOF
+
+# Display the policy document
+cat cognito-unauth-policy.json
+
+# Create the IAM policy
+UNAUTH_POLICY_ARN=$(aws iam create-policy \
+  --policy-name "$UNAUTH_POLICY_NAME" \
+  --policy-document file://cognito-unauth-policy.json \
+  --description "Limited S3 read access for unauthenticated Cognito users" \
+  --query 'Policy.Arn' \
+  --output text)
+echo "UNAUTH_POLICY_ARN=$UNAUTH_POLICY_ARN"
+
+# Attach policy to unauthenticated role
+aws iam attach-role-policy \
+  --role-name "$UNAUTH_ROLE_NAME" \
+  --policy-arn "$UNAUTH_POLICY_ARN"
+
+# Verify policy attachment
+aws iam list-attached-role-policies \
+  --role-name "$UNAUTH_ROLE_NAME" \
+  --output table
+```
+
+---
+
+## Step 7 – Create Permissions Policy for Authenticated Users
+
+```bash
+# Set authenticated policy name
+AUTH_POLICY_NAME="CognitoAuthenticatedPolicy"
+echo "AUTH_POLICY_NAME=$AUTH_POLICY_NAME"
+
+# Create enhanced permissions policy for authenticated users
+cat > cognito-auth-policy.json <<EOF
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "AllowAuthenticatedS3FullAccess",
+      "Effect": "Allow",
+      "Action": [
+        "s3:GetObject",
+        "s3:PutObject",
+        "s3:DeleteObject"
+      ],
+      "Resource": "arn:aws:s3:::${BUCKET_NAME}/authenticated/*"
+    },
+    {
+      "Sid": "AllowPublicS3Read",
+      "Effect": "Allow",
+      "Action": "s3:GetObject",
+      "Resource": "arn:aws:s3:::${BUCKET_NAME}/public/*"
+    },
     {
       "Sid": "AllowListBucket",
       "Effect": "Allow",
@@ -196,17 +332,7 @@ cat > federation-s3-policy.json <<EOF
       "Resource": "arn:aws:s3:::${BUCKET_NAME}"
     },
     {
-      "Sid": "AllowObjectOperations",
-      "Effect": "Allow",
-      "Action": [
-        "s3:GetObject",
-        "s3:PutObject",
-        "s3:DeleteObject"
-      ],
-      "Resource": "arn:aws:s3:::${BUCKET_NAME}/*"
-    },
-    {
-      "Sid": "AllowSTSGetCallerIdentity",
+      "Sid": "AllowGetCallerIdentity",
       "Effect": "Allow",
       "Action": "sts:GetCallerIdentity",
       "Resource": "*"
@@ -216,175 +342,76 @@ cat > federation-s3-policy.json <<EOF
 EOF
 
 # Display the policy document
-cat federation-s3-policy.json
+cat cognito-auth-policy.json
 
 # Create the IAM policy
-FEDERATION_POLICY_ARN=$(aws iam create-policy \
-  --policy-name "$FEDERATION_POLICY_NAME" \
-  --policy-document file://federation-s3-policy.json \
-  --description "S3 access policy for federated identities" \
+AUTH_POLICY_ARN=$(aws iam create-policy \
+  --policy-name "$AUTH_POLICY_NAME" \
+  --policy-document file://cognito-auth-policy.json \
+  --description "Enhanced S3 access for authenticated Cognito users" \
   --query 'Policy.Arn' \
   --output text)
-echo "FEDERATION_POLICY_ARN=$FEDERATION_POLICY_ARN"
+echo "AUTH_POLICY_ARN=$AUTH_POLICY_ARN"
 
-# Attach policy to the GitHub Actions role
+# Attach policy to authenticated role
 aws iam attach-role-policy \
-  --role-name "$GITHUB_ROLE_NAME" \
-  --policy-arn "$FEDERATION_POLICY_ARN"
+  --role-name "$AUTH_ROLE_NAME" \
+  --policy-arn "$AUTH_POLICY_ARN"
 
 # Verify policy attachment
 aws iam list-attached-role-policies \
-  --role-name "$GITHUB_ROLE_NAME" \
+  --role-name "$AUTH_ROLE_NAME" \
   --output table
 ```
 
 ---
 
-## Step 6 – Create Role with Session Tags Support (ABAC)
+## Step 8 – Create Cognito Identity Pool
 
 ```bash
-# Set ABAC role name
-ABAC_ROLE_NAME="FederationABACRole"
-echo "ABAC_ROLE_NAME=$ABAC_ROLE_NAME"
+# Create Cognito Identity Pool with Google as IdP
+# Note: This requires the Google Client ID from Step 3
+IDENTITY_POOL_OUTPUT=$(aws cognito-identity create-identity-pool \
+  --identity-pool-name "$IDENTITY_POOL_NAME" \
+  --allow-unauthenticated-identities \
+  --supported-login-providers accounts.google.com="$GOOGLE_CLIENT_ID" \
+  --output json)
 
-# Create trust policy with session tags support
-cat > abac-trust.json <<EOF
+# Extract Identity Pool ID
+IDENTITY_POOL_ID=$(echo $IDENTITY_POOL_OUTPUT | jq -r '.IdentityPoolId')
+echo "IDENTITY_POOL_ID=$IDENTITY_POOL_ID"
+
+# Display Identity Pool details
+echo "$IDENTITY_POOL_OUTPUT" | jq '.'
+
+# Verify Identity Pool creation
+aws cognito-identity describe-identity-pool \
+  --identity-pool-id "$IDENTITY_POOL_ID" \
+  --output table
+```
+
+---
+
+## Step 9 – Update IAM Role Trust Policies with Identity Pool ID
+
+```bash
+# Update unauthenticated role trust policy with actual Identity Pool ID
+cat > cognito-unauth-trust-updated.json <<EOF
 {
   "Version": "2012-10-17",
   "Statement": [
     {
       "Effect": "Allow",
       "Principal": {
-        "Federated": "${OIDC_PROVIDER_ARN}"
-      },
-      "Action": [
-        "sts:AssumeRoleWithWebIdentity",
-        "sts:TagSession"
-      ],
-      "Condition": {
-        "StringEquals": {
-          "token.actions.githubusercontent.com:aud": "sts.amazonaws.com"
-        },
-        "StringLike": {
-          "token.actions.githubusercontent.com:sub": "repo:${GITHUB_ORG}/${GITHUB_REPO}:*"
-        }
-      }
-    }
-  ]
-}
-EOF
-
-# Display the trust policy
-cat abac-trust.json
-
-# Create the ABAC role
-aws iam create-role \
-  --role-name "$ABAC_ROLE_NAME" \
-  --assume-role-policy-document file://abac-trust.json \
-  --description "Role with ABAC support using session tags" \
-  --max-session-duration 3600
-
-# Verify role creation
-aws iam get-role \
-  --role-name "$ABAC_ROLE_NAME" \
-  --query 'Role.[RoleName,Arn,CreateDate]' \
-  --output table
-```
-
----
-
-## Step 7 – Create ABAC Policy Using Session Tags
-
-```bash
-# Set ABAC policy name
-ABAC_POLICY_NAME="SessionTagBasedS3Access"
-echo "ABAC_POLICY_NAME=$ABAC_POLICY_NAME"
-
-# Create ABAC policy that uses session tags for access control
-cat > abac-policy.json <<EOF
-{
-  "Version": "2012-10-17",
-  "Statement": [
-    {
-      "Sid": "AllowListAllBuckets",
-      "Effect": "Allow",
-      "Action": "s3:ListAllMyBuckets",
-      "Resource": "*"
-    },
-    {
-      "Sid": "AllowAccessBasedOnSessionTag",
-      "Effect": "Allow",
-      "Action": [
-        "s3:ListBucket",
-        "s3:GetObject",
-        "s3:PutObject"
-      ],
-      "Resource": [
-        "arn:aws:s3:::${BUCKET_NAME}",
-        "arn:aws:s3:::${BUCKET_NAME}/*"
-      ],
-      "Condition": {
-        "StringEquals": {
-          "aws:PrincipalTag/Environment": "\${aws:RequestTag/Environment}"
-        }
-      }
-    },
-    {
-      "Sid": "AllowSTSGetCallerIdentity",
-      "Effect": "Allow",
-      "Action": "sts:GetCallerIdentity",
-      "Resource": "*"
-    }
-  ]
-}
-EOF
-
-# Display the ABAC policy
-cat abac-policy.json
-
-# Create the ABAC policy
-ABAC_POLICY_ARN=$(aws iam create-policy \
-  --policy-name "$ABAC_POLICY_NAME" \
-  --policy-document file://abac-policy.json \
-  --description "ABAC policy using session tags for S3 access" \
-  --query 'Policy.Arn' \
-  --output text)
-echo "ABAC_POLICY_ARN=$ABAC_POLICY_ARN"
-
-# Attach ABAC policy to the role
-aws iam attach-role-policy \
-  --role-name "$ABAC_ROLE_NAME" \
-  --policy-arn "$ABAC_POLICY_ARN"
-
-# Verify policy attachment
-aws iam list-attached-role-policies \
-  --role-name "$ABAC_ROLE_NAME" \
-  --output table
-```
-
----
-
-## Step 8 – Create Role for Web Application Federation
-
-```bash
-# Set web app role name
-WEB_APP_ROLE_NAME="WebAppFederationRole"
-echo "WEB_APP_ROLE_NAME=$WEB_APP_ROLE_NAME"
-
-# Create generic OIDC trust policy for web applications
-cat > webapp-trust.json <<EOF
-{
-  "Version": "2012-10-17",
-  "Statement": [
-    {
-      "Effect": "Allow",
-      "Principal": {
-        "Federated": "${OIDC_PROVIDER_ARN}"
+        "Federated": "cognito-identity.amazonaws.com"
       },
       "Action": "sts:AssumeRoleWithWebIdentity",
       "Condition": {
         "StringEquals": {
-          "token.actions.githubusercontent.com:aud": "sts.amazonaws.com"
+          "cognito-identity.amazonaws.com:aud": "${IDENTITY_POOL_ID}"
+        },
+        "ForAnyValue:StringLike": {
+          "cognito-identity.amazonaws.com:amr": "unauthenticated"
         }
       }
     }
@@ -392,172 +419,30 @@ cat > webapp-trust.json <<EOF
 }
 EOF
 
-# Display the trust policy
-cat webapp-trust.json
+# Update unauthenticated role trust policy
+aws iam update-assume-role-policy \
+  --role-name "$UNAUTH_ROLE_NAME" \
+  --policy-document file://cognito-unauth-trust-updated.json
 
-# Create the web app role
-aws iam create-role \
-  --role-name "$WEB_APP_ROLE_NAME" \
-  --assume-role-policy-document file://webapp-trust.json \
-  --description "Role for web application federation" \
-  --max-session-duration 7200
+echo "Updated unauthenticated role trust policy"
 
-# Attach read-only S3 policy
-aws iam attach-role-policy \
-  --role-name "$WEB_APP_ROLE_NAME" \
-  --policy-arn arn:aws:iam::aws:policy/AmazonS3ReadOnlyAccess
-
-# Verify role creation
-aws iam get-role \
-  --role-name "$WEB_APP_ROLE_NAME" \
-  --query 'Role.[RoleName,Arn,CreateDate]' \
-  --output table
-```
-
----
-
-## Step 9 – Test Federation Configuration
-
-```bash
-# Display configuration summary
-echo ""
-echo "=========================================="
-echo "Federation Configuration Summary"
-echo "=========================================="
-echo "OIDC Provider ARN: $OIDC_PROVIDER_ARN"
-echo "GitHub Actions Role ARN: $GITHUB_ROLE_ARN"
-echo "S3 Bucket: $BUCKET_NAME"
-echo ""
-echo "GitHub Actions Workflow Configuration:"
-echo "=========================================="
-cat <<'WORKFLOW'
-name: AWS Federation Test
-
-on:
-  push:
-    branches: [ main ]
-
-permissions:
-  id-token: write
-  contents: read
-
-jobs:
-  deploy:
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v3
-      
-      - name: Configure AWS credentials from OIDC
-        uses: aws-actions/configure-aws-credentials@v2
-        with:
-          role-to-assume: arn:aws:iam::ACCOUNT_ID:role/GitHubActionsRole
-          aws-region: ap-southeast-2
-      
-      - name: Test S3 access
-        run: |
-          aws sts get-caller-identity
-          aws s3 ls s3://federation-test-bucket-ACCOUNT_ID/
-WORKFLOW
-
-echo ""
-echo "Replace ACCOUNT_ID with: $ACCOUNT_ID"
-```
-
----
-
-## Step 10 – Simulate Federated Access (Manual Test)
-
-```bash
-# Note: This step simulates what GitHub Actions would do
-# In production, GitHub Actions would provide the web identity token
-
-echo "=========================================="
-echo "Federation Access Simulation"
-echo "=========================================="
-echo ""
-echo "To test federated access, you would:"
-echo "1. Configure GitHub Actions workflow with the role ARN above"
-echo "2. GitHub Actions obtains OIDC token from GitHub"
-echo "3. AWS STS validates token and issues temporary credentials"
-echo "4. GitHub Actions uses temporary credentials to access S3"
-echo ""
-echo "Example AssumeRoleWithWebIdentity flow:"
-echo "=========================================="
-
-# Display example STS assume role command (requires actual OIDC token)
-cat <<'EXAMPLE'
-# This is what happens behind the scenes:
-# aws sts assume-role-with-web-identity \
-#   --role-arn arn:aws:iam::ACCOUNT_ID:role/GitHubActionsRole \
-#   --role-session-name github-actions-session \
-#   --web-identity-token $GITHUB_OIDC_TOKEN \
-#   --duration-seconds 3600
-
-# Response includes temporary credentials:
-# {
-#   "Credentials": {
-#     "AccessKeyId": "ASIA...",
-#     "SecretAccessKey": "...",
-#     "SessionToken": "...",
-#     "Expiration": "2024-..."
-#   },
-#   "SubjectFromWebIdentityToken": "repo:org/repo:ref:refs/heads/main",
-#   "AssumedRoleUser": {
-#     "AssumedRoleId": "...",
-#     "Arn": "arn:aws:sts::ACCOUNT_ID:assumed-role/GitHubActionsRole/..."
-#   }
-# }
-EXAMPLE
-
-echo ""
-echo "Federation trust is now configured!"
-```
-
----
-
-## Step 11 – Enable CloudTrail for Federation Auditing
-
-```bash
-# Set CloudTrail trail name
-TRAIL_NAME="federation-audit-trail"
-echo "TRAIL_NAME=$TRAIL_NAME"
-
-# Set CloudTrail S3 bucket name
-CLOUDTRAIL_BUCKET="cloudtrail-logs-${ACCOUNT_ID}"
-echo "CLOUDTRAIL_BUCKET=$CLOUDTRAIL_BUCKET"
-
-# Create S3 bucket for CloudTrail logs
-aws s3api create-bucket \
-  --bucket "$CLOUDTRAIL_BUCKET" \
-  --region "$REGION" \
-  --create-bucket-configuration LocationConstraint="$REGION"
-
-# Create bucket policy for CloudTrail
-cat > cloudtrail-bucket-policy.json <<EOF
+# Update authenticated role trust policy with actual Identity Pool ID
+cat > cognito-auth-trust-updated.json <<EOF
 {
   "Version": "2012-10-17",
   "Statement": [
     {
-      "Sid": "AWSCloudTrailAclCheck",
       "Effect": "Allow",
       "Principal": {
-        "Service": "cloudtrail.amazonaws.com"
+        "Federated": "cognito-identity.amazonaws.com"
       },
-      "Action": "s3:GetBucketAcl",
-      "Resource": "arn:aws:s3:::${CLOUDTRAIL_BUCKET}"
-    },
-    {
-      "Sid": "AWSCloudTrailWrite",
-      "Effect": "Allow",
-      "Principal": {
-        "Service": "cloudtrail.amazonaws.com"
-      },
-      "Action": "s3:PutObject",
-      "Resource": "arn:aws:s3:::${CLOUDTRAIL_BUCKET}/AWSLogs/${ACCOUNT_ID}/*",
+      "Action": "sts:AssumeRoleWithWebIdentity",
       "Condition": {
         "StringEquals": {
-          "s3:x-amz-acl": "bucket-owner-full-control"
+          "cognito-identity.amazonaws.com:aud": "${IDENTITY_POOL_ID}"
+        },
+        "ForAnyValue:StringLike": {
+          "cognito-identity.amazonaws.com:amr": "authenticated"
         }
       }
     }
@@ -565,160 +450,368 @@ cat > cloudtrail-bucket-policy.json <<EOF
 }
 EOF
 
-# Apply bucket policy
-aws s3api put-bucket-policy \
-  --bucket "$CLOUDTRAIL_BUCKET" \
-  --policy file://cloudtrail-bucket-policy.json
+# Update authenticated role trust policy
+aws iam update-assume-role-policy \
+  --role-name "$AUTH_ROLE_NAME" \
+  --policy-document file://cognito-auth-trust-updated.json
 
-# Create CloudTrail trail
-aws cloudtrail create-trail \
-  --name "$TRAIL_NAME" \
-  --s3-bucket-name "$CLOUDTRAIL_BUCKET" \
-  --is-multi-region-trail \
-  --enable-log-file-validation
-
-# Start logging
-aws cloudtrail start-logging \
-  --name "$TRAIL_NAME"
-
-# Verify trail status
-aws cloudtrail get-trail-status \
-  --name "$TRAIL_NAME" \
-  --output table
-
-echo ""
-echo "CloudTrail is now logging federated access events"
-echo "Events to monitor: AssumeRoleWithWebIdentity, AssumeRole, GetCallerIdentity"
+echo "Updated authenticated role trust policy"
 ```
 
 ---
 
-## Step 12 – Query Federation Events (Optional)
+## Step 10 – Attach IAM Roles to Cognito Identity Pool
 
 ```bash
-# Query recent AssumeRoleWithWebIdentity events
-echo "Querying recent federation events..."
+# Set IAM roles for the Cognito Identity Pool
+aws cognito-identity set-identity-pool-roles \
+  --identity-pool-id "$IDENTITY_POOL_ID" \
+  --roles authenticated="$AUTH_ROLE_ARN",unauthenticated="$UNAUTH_ROLE_ARN"
 
-# Look up events from the last hour
-aws cloudtrail lookup-events \
-  --lookup-attributes AttributeKey=EventName,AttributeValue=AssumeRoleWithWebIdentity \
-  --max-results 10 \
-  --query 'Events[*].[EventTime,Username,EventName,Resources[0].ResourceName]' \
-  --output table
+echo "Attached IAM roles to Cognito Identity Pool"
 
-# Query for specific role assumptions
-echo ""
-echo "Querying role assumption events..."
-aws cloudtrail lookup-events \
-  --lookup-attributes AttributeKey=ResourceName,AttributeValue="$GITHUB_ROLE_NAME" \
-  --max-results 10 \
-  --query 'Events[*].[EventTime,Username,EventName]' \
-  --output table || echo "No events found yet"
+# Verify role mappings
+aws cognito-identity get-identity-pool-roles \
+  --identity-pool-id "$IDENTITY_POOL_ID" \
+  --output json | jq '.'
 ```
 
 ---
 
-## Step 13 – Test OIDC Provider Configuration
+## Step 11 – Test Unauthenticated Access
 
 ```bash
-# Verify OIDC provider configuration
-echo "Verifying OIDC provider configuration..."
+# Get Identity ID for unauthenticated user
+echo "Testing unauthenticated access..."
 
-# Get OIDC provider details
-aws iam get-open-id-connect-provider \
-  --open-id-connect-provider-arn "$OIDC_PROVIDER_ARN" \
-  --query '{URL:Url,ClientIDList:ClientIDList,ThumbprintList:ThumbprintList,CreateDate:CreateDate}' \
-  --output table
+UNAUTH_IDENTITY=$(aws cognito-identity get-id \
+  --identity-pool-id "$IDENTITY_POOL_ID" \
+  --output json)
 
-# List all roles that trust this OIDC provider
+IDENTITY_ID=$(echo $UNAUTH_IDENTITY | jq -r '.IdentityId')
+echo "IDENTITY_ID=$IDENTITY_ID"
+
+# Get temporary credentials for unauthenticated user
+UNAUTH_CREDS=$(aws cognito-identity get-credentials-for-identity \
+  --identity-id "$IDENTITY_ID" \
+  --output json)
+
+# Extract credentials
+UNAUTH_ACCESS_KEY=$(echo $UNAUTH_CREDS | jq -r '.Credentials.AccessKeyId')
+UNAUTH_SECRET_KEY=$(echo $UNAUTH_CREDS | jq -r '.Credentials.SecretKey')
+UNAUTH_SESSION_TOKEN=$(echo $UNAUTH_CREDS | jq -r '.Credentials.SessionToken')
+UNAUTH_EXPIRATION=$(echo $UNAUTH_CREDS | jq -r '.Credentials.Expiration')
+
+echo "Unauthenticated temporary credentials obtained"
+echo "Expiration: $UNAUTH_EXPIRATION"
+
+# Export unauthenticated credentials
+export AWS_ACCESS_KEY_ID="$UNAUTH_ACCESS_KEY"
+export AWS_SECRET_ACCESS_KEY="$UNAUTH_SECRET_KEY"
+export AWS_SESSION_TOKEN="$UNAUTH_SESSION_TOKEN"
+
+# Test unauthenticated access to public folder (should succeed)
 echo ""
-echo "Roles trusting this OIDC provider:"
-aws iam list-roles \
-  --query "Roles[?contains(AssumeRolePolicyDocument.Statement[0].Principal.Federated, 'oidc-provider')].{RoleName:RoleName,CreateDate:CreateDate}" \
-  --output table
+echo "Testing access to public folder (should succeed)..."
+aws s3 ls "s3://${BUCKET_NAME}/public/" || echo "Access denied"
+aws s3 cp "s3://${BUCKET_NAME}/public/unauth-test.txt" - || echo "Access denied"
+
+# Test unauthenticated access to authenticated folder (should fail)
+echo ""
+echo "Testing access to authenticated folder (should fail)..."
+aws s3 ls "s3://${BUCKET_NAME}/authenticated/" || echo "Access denied (expected)"
+
+# Unset credentials
+unset AWS_ACCESS_KEY_ID
+unset AWS_SECRET_ACCESS_KEY
+unset AWS_SESSION_TOKEN
+
+echo ""
+echo "Unauthenticated access test complete"
 ```
 
 ---
 
-## Step 14 – Create Documentation for Team
+## Step 12 – Authenticate with Google and Test Federated Access
 
 ```bash
-# Generate documentation file
-cat > FEDERATION_SETUP.md <<EOF
-# AWS Federation Setup Documentation
+# Display instructions for Google authentication
+cat <<'AUTH_INSTRUCTIONS'
+========================================
+Google Authentication Flow
+========================================
 
-## Overview
-This document describes the OIDC federation setup for AWS access.
+To obtain a Google ID token for testing:
 
-## Configuration Details
+1. Use Google OAuth 2.0 Playground: https://developers.google.com/oauthplayground/
 
-### OIDC Provider
-- **Provider URL**: $GITHUB_OIDC_URL
-- **Provider ARN**: $OIDC_PROVIDER_ARN
-- **Audience**: sts.amazonaws.com
+2. Configure OAuth 2.0 settings:
+   - Click settings (gear icon)
+   - Check "Use your own OAuth credentials"
+   - Enter your OAuth Client ID and Client Secret
+   - Close settings
 
-### IAM Roles
+3. Select APIs:
+   - Find "Google OAuth2 API v2"
+   - Select "https://www.googleapis.com/auth/userinfo.email"
+   - Click "Authorize APIs"
 
-#### GitHub Actions Role
-- **Role Name**: $GITHUB_ROLE_NAME
-- **Role ARN**: $GITHUB_ROLE_ARN
-- **Purpose**: Allows GitHub Actions workflows to access AWS
-- **Permissions**: S3 read/write access to $BUCKET_NAME
+4. Sign in with Google account
 
-#### ABAC Role
-- **Role Name**: $ABAC_ROLE_NAME
-- **Purpose**: Demonstrates attribute-based access control with session tags
-- **Permissions**: S3 access based on session tag matching
+5. Click "Exchange authorization code for tokens"
 
-#### Web App Role
-- **Role Name**: $WEB_APP_ROLE_NAME
-- **Purpose**: Read-only S3 access for web applications
-- **Permissions**: Amazon S3 Read-Only Access
+6. Copy the "id_token" value (long JWT string)
 
-## Usage Instructions
+AUTH_INSTRUCTIONS
 
-### GitHub Actions Workflow
+echo ""
+read -p "Paste your Google ID token here: " GOOGLE_ID_TOKEN
 
-\`\`\`yaml
-permissions:
-  id-token: write
-  contents: read
+# Get Identity ID for authenticated user with Google token
+echo ""
+echo "Authenticating with Google..."
 
-jobs:
-  deploy:
-    steps:
-      - uses: aws-actions/configure-aws-credentials@v2
-        with:
-          role-to-assume: $GITHUB_ROLE_ARN
-          aws-region: $REGION
-\`\`\`
+AUTH_IDENTITY=$(aws cognito-identity get-id \
+  --identity-pool-id "$IDENTITY_POOL_ID" \
+  --logins accounts.google.com="$GOOGLE_ID_TOKEN" \
+  --output json)
 
-### Testing Access
+AUTH_IDENTITY_ID=$(echo $AUTH_IDENTITY | jq -r '.IdentityId')
+echo "AUTH_IDENTITY_ID=$AUTH_IDENTITY_ID"
 
-\`\`\`bash
-# Verify identity
+# Get temporary credentials for authenticated user
+AUTH_CREDS=$(aws cognito-identity get-credentials-for-identity \
+  --identity-id "$AUTH_IDENTITY_ID" \
+  --logins accounts.google.com="$GOOGLE_ID_TOKEN" \
+  --output json)
+
+# Extract authenticated credentials
+AUTH_ACCESS_KEY=$(echo $AUTH_CREDS | jq -r '.Credentials.AccessKeyId')
+AUTH_SECRET_KEY=$(echo $AUTH_CREDS | jq -r '.Credentials.SecretKey')
+AUTH_SESSION_TOKEN=$(echo $AUTH_CREDS | jq -r '.Credentials.SessionToken')
+AUTH_EXPIRATION=$(echo $AUTH_CREDS | jq -r '.Credentials.Expiration')
+
+echo "Authenticated temporary credentials obtained"
+echo "Expiration: $AUTH_EXPIRATION"
+
+# Export authenticated credentials
+export AWS_ACCESS_KEY_ID="$AUTH_ACCESS_KEY"
+export AWS_SECRET_ACCESS_KEY="$AUTH_SECRET_KEY"
+export AWS_SESSION_TOKEN="$AUTH_SESSION_TOKEN"
+
+# Test authenticated user identity
+echo ""
+echo "Verifying authenticated identity..."
 aws sts get-caller-identity
 
-# List S3 bucket
-aws s3 ls s3://$BUCKET_NAME/
-\`\`\`
+# Test authenticated access to public folder (should succeed)
+echo ""
+echo "Testing access to public folder (should succeed)..."
+aws s3 ls "s3://${BUCKET_NAME}/public/"
+aws s3 cp "s3://${BUCKET_NAME}/public/unauth-test.txt" -
 
-## Security Notes
-- Temporary credentials expire after 1 hour (3600 seconds)
-- All federation events are logged in CloudTrail
-- Trust policies restrict access to specific GitHub repositories
+# Test authenticated access to authenticated folder (should succeed)
+echo ""
+echo "Testing access to authenticated folder (should succeed)..."
+aws s3 ls "s3://${BUCKET_NAME}/authenticated/"
+aws s3 cp "s3://${BUCKET_NAME}/authenticated/auth-test.txt" -
 
-## Monitoring
-- CloudTrail Trail: $TRAIL_NAME
-- CloudTrail S3 Bucket: $CLOUDTRAIL_BUCKET
-- Monitor events: AssumeRoleWithWebIdentity
+# Test write access to authenticated folder (should succeed)
+echo ""
+echo "Testing write access to authenticated folder..."
+echo "Federated user upload at $(date)" > federated-upload.txt
+aws s3 cp federated-upload.txt "s3://${BUCKET_NAME}/authenticated/"
+
+# Verify upload
+aws s3 ls "s3://${BUCKET_NAME}/authenticated/"
+
+# Unset credentials
+unset AWS_ACCESS_KEY_ID
+unset AWS_SECRET_ACCESS_KEY
+unset AWS_SESSION_TOKEN
+
+echo ""
+echo "✅ Authenticated federated access test complete"
+```
 
 ---
-Generated: $(date)
-EOF
 
-echo "Documentation created: FEDERATION_SETUP.md"
-cat FEDERATION_SETUP.md
+## Step 13 – Validate Token Expiration
+
+```bash
+# Display token expiration information
+echo "=========================================="
+echo "Temporary Credentials Expiration"
+echo "=========================================="
+echo ""
+echo "Unauthenticated credentials expire at: $UNAUTH_EXPIRATION"
+echo "Authenticated credentials expire at: $AUTH_EXPIRATION"
+echo ""
+echo "Temporary credentials automatically expire after 1 hour"
+echo "Users must re-authenticate to obtain new credentials"
+echo ""
+echo "To verify expiration, wait until the expiration time and attempt to use the credentials"
+echo "Access will be denied with 'ExpiredToken' error"
+```
+
+---
+
+## Step 14 – Create Test Application (Python Example)
+
+```bash
+# Create a Python script to demonstrate federated access
+cat > cognito_federation_test.py <<'PYTHON_SCRIPT'
+#!/usr/bin/env python3
+"""
+AWS Cognito Federation Test Script
+Demonstrates federated access to S3 using Cognito Identity Pool
+"""
+
+import boto3
+import json
+import sys
+
+def test_unauthenticated_access(identity_pool_id, bucket_name, region='ap-southeast-2'):
+    """Test unauthenticated access to S3"""
+    print("=" * 50)
+    print("Testing Unauthenticated Access")
+    print("=" * 50)
+    
+    # Create Cognito Identity client
+    cognito_identity = boto3.client('cognito-identity', region_name=region)
+    
+    # Get Identity ID for unauthenticated user
+    response = cognito_identity.get_id(IdentityPoolId=identity_pool_id)
+    identity_id = response['IdentityId']
+    print(f"Identity ID: {identity_id}")
+    
+    # Get temporary credentials
+    creds_response = cognito_identity.get_credentials_for_identity(
+        IdentityId=identity_id
+    )
+    
+    credentials = creds_response['Credentials']
+    print(f"Access Key: {credentials['AccessKeyId']}")
+    print(f"Expiration: {credentials['Expiration']}")
+    
+    # Create S3 client with temporary credentials
+    s3 = boto3.client(
+        's3',
+        region_name=region,
+        aws_access_key_id=credentials['AccessKeyId'],
+        aws_secret_access_key=credentials['SecretKey'],
+        aws_session_token=credentials['SessionToken']
+    )
+    
+    # Test access to public folder
+    try:
+        print(f"\nListing s3://{bucket_name}/public/")
+        response = s3.list_objects_v2(Bucket=bucket_name, Prefix='public/')
+        if 'Contents' in response:
+            for obj in response['Contents']:
+                print(f"  - {obj['Key']}")
+        print("✅ Access to public folder: SUCCESS")
+    except Exception as e:
+        print(f"❌ Access to public folder: FAILED - {e}")
+    
+    # Test access to authenticated folder (should fail)
+    try:
+        print(f"\nListing s3://{bucket_name}/authenticated/")
+        response = s3.list_objects_v2(Bucket=bucket_name, Prefix='authenticated/')
+        print("❌ Access to authenticated folder: UNEXPECTED SUCCESS")
+    except Exception as e:
+        print(f"✅ Access to authenticated folder: DENIED (expected) - {type(e).__name__}")
+
+def test_authenticated_access(identity_pool_id, google_id_token, bucket_name, region='ap-southeast-2'):
+    """Test authenticated access to S3 with Google token"""
+    print("\n" + "=" * 50)
+    print("Testing Authenticated Access")
+    print("=" * 50)
+    
+    # Create Cognito Identity client
+    cognito_identity = boto3.client('cognito-identity', region_name=region)
+    
+    # Get Identity ID for authenticated user
+    response = cognito_identity.get_id(
+        IdentityPoolId=identity_pool_id,
+        Logins={'accounts.google.com': google_id_token}
+    )
+    identity_id = response['IdentityId']
+    print(f"Identity ID: {identity_id}")
+    
+    # Get temporary credentials
+    creds_response = cognito_identity.get_credentials_for_identity(
+        IdentityId=identity_id,
+        Logins={'accounts.google.com': google_id_token}
+    )
+    
+    credentials = creds_response['Credentials']
+    print(f"Access Key: {credentials['AccessKeyId']}")
+    print(f"Expiration: {credentials['Expiration']}")
+    
+    # Create S3 client with temporary credentials
+    s3 = boto3.client(
+        's3',
+        region_name=region,
+        aws_access_key_id=credentials['AccessKeyId'],
+        aws_secret_access_key=credentials['SecretKey'],
+        aws_session_token=credentials['SessionToken']
+    )
+    
+    # Test access to public folder
+    try:
+        print(f"\nListing s3://{bucket_name}/public/")
+        response = s3.list_objects_v2(Bucket=bucket_name, Prefix='public/')
+        if 'Contents' in response:
+            for obj in response['Contents']:
+                print(f"  - {obj['Key']}")
+        print("✅ Access to public folder: SUCCESS")
+    except Exception as e:
+        print(f"❌ Access to public folder: FAILED - {e}")
+    
+    # Test access to authenticated folder
+    try:
+        print(f"\nListing s3://{bucket_name}/authenticated/")
+        response = s3.list_objects_v2(Bucket=bucket_name, Prefix='authenticated/')
+        if 'Contents' in response:
+            for obj in response['Contents']:
+                print(f"  - {obj['Key']}")
+        print("✅ Access to authenticated folder: SUCCESS")
+    except Exception as e:
+        print(f"❌ Access to authenticated folder: FAILED - {e}")
+
+if __name__ == '__main__':
+    if len(sys.argv) < 3:
+        print("Usage:")
+        print(f"  {sys.argv[0]} <identity_pool_id> <bucket_name> [google_id_token]")
+        sys.exit(1)
+    
+    identity_pool_id = sys.argv[1]
+    bucket_name = sys.argv[2]
+    google_id_token = sys.argv[3] if len(sys.argv) > 3 else None
+    
+    # Test unauthenticated access
+    test_unauthenticated_access(identity_pool_id, bucket_name)
+    
+    # Test authenticated access if token provided
+    if google_id_token:
+        test_authenticated_access(identity_pool_id, google_id_token, bucket_name)
+    else:
+        print("\nSkipping authenticated access test (no Google ID token provided)")
+    
+    print("\n" + "=" * 50)
+    print("Federation Test Complete")
+    print("=" * 50)
+PYTHON_SCRIPT
+
+# Make script executable
+chmod +x cognito_federation_test.py
+
+echo "Python test script created: cognito_federation_test.py"
+echo ""
+echo "Usage:"
+echo "  ./cognito_federation_test.py $IDENTITY_POOL_ID $BUCKET_NAME"
+echo "  ./cognito_federation_test.py $IDENTITY_POOL_ID $BUCKET_NAME <google_id_token>"
 ```
 
 ---
@@ -726,96 +819,75 @@ cat FEDERATION_SETUP.md
 ## Step 15 – Cleanup Resources
 
 ```bash
-# Stop CloudTrail logging
-echo "Stopping CloudTrail logging..."
-aws cloudtrail stop-logging \
-  --name "$TRAIL_NAME" || true
-
-# Delete CloudTrail trail
-echo "Deleting CloudTrail trail..."
-aws cloudtrail delete-trail \
-  --name "$TRAIL_NAME" || true
-
-# Detach and delete policies from roles
-echo "Detaching policies from roles..."
-
-# GitHub Actions Role
+# Detach policies from roles
+echo "Detaching policies from IAM roles..."
 aws iam detach-role-policy \
-  --role-name "$GITHUB_ROLE_NAME" \
-  --policy-arn "$FEDERATION_POLICY_ARN" || true
+  --role-name "$UNAUTH_ROLE_NAME" \
+  --policy-arn "$UNAUTH_POLICY_ARN" || true
 
-# ABAC Role
 aws iam detach-role-policy \
-  --role-name "$ABAC_ROLE_NAME" \
-  --policy-arn "$ABAC_POLICY_ARN" || true
-
-# Web App Role
-aws iam detach-role-policy \
-  --role-name "$WEB_APP_ROLE_NAME" \
-  --policy-arn arn:aws:iam::aws:policy/AmazonS3ReadOnlyAccess || true
+  --role-name "$AUTH_ROLE_NAME" \
+  --policy-arn "$AUTH_POLICY_ARN" || true
 
 # Delete IAM roles
 echo "Deleting IAM roles..."
 aws iam delete-role \
-  --role-name "$GITHUB_ROLE_NAME" || true
+  --role-name "$UNAUTH_ROLE_NAME" || true
 
 aws iam delete-role \
-  --role-name "$ABAC_ROLE_NAME" || true
+  --role-name "$AUTH_ROLE_NAME" || true
 
-aws iam delete-role \
-  --role-name "$WEB_APP_ROLE_NAME" || true
-
-# Delete custom policies
-echo "Deleting custom policies..."
+# Delete IAM policies
+echo "Deleting IAM policies..."
 aws iam delete-policy \
-  --policy-arn "$FEDERATION_POLICY_ARN" || true
+  --policy-arn "$UNAUTH_POLICY_ARN" || true
 
 aws iam delete-policy \
-  --policy-arn "$ABAC_POLICY_ARN" || true
+  --policy-arn "$AUTH_POLICY_ARN" || true
 
-# Delete OIDC provider
-echo "Deleting OIDC provider..."
-aws iam delete-open-id-connect-provider \
-  --open-id-connect-provider-arn "$OIDC_PROVIDER_ARN" || true
+# Delete Cognito Identity Pool
+echo "Deleting Cognito Identity Pool..."
+aws cognito-identity delete-identity-pool \
+  --identity-pool-id "$IDENTITY_POOL_ID" || true
 
-# Empty and delete S3 buckets
-echo "Emptying and deleting S3 buckets..."
+# Empty and delete S3 bucket
+echo "Emptying and deleting S3 bucket..."
 aws s3 rm "s3://${BUCKET_NAME}" --recursive || true
 aws s3 rb "s3://${BUCKET_NAME}" || true
 
-aws s3 rm "s3://${CLOUDTRAIL_BUCKET}" --recursive || true
-aws s3 rb "s3://${CLOUDTRAIL_BUCKET}" || true
-
 # Delete local files
 echo "Cleaning up local files..."
-rm -f github-oidc-trust.json \
-  federation-s3-policy.json \
-  abac-trust.json \
-  abac-policy.json \
-  webapp-trust.json \
-  cloudtrail-bucket-policy.json \
-  federation-test.txt \
-  FEDERATION_SETUP.md
+rm -f cognito-unauth-trust.json \
+  cognito-auth-trust.json \
+  cognito-unauth-trust-updated.json \
+  cognito-auth-trust-updated.json \
+  cognito-unauth-policy.json \
+  cognito-auth-policy.json \
+  auth-test.txt \
+  unauth-test.txt \
+  federated-upload.txt \
+  cognito_federation_test.py
 
 # Verify cleanup
 echo ""
 echo "Verifying cleanup..."
 
-# Check OIDC providers
-aws iam list-open-id-connect-providers \
-  --query 'OpenIDConnectProviderList[?contains(Arn,`token.actions.githubusercontent.com`)]' \
-  --output table || echo "OIDC provider deleted"
+# Check Cognito Identity Pools
+aws cognito-identity list-identity-pools \
+  --max-results 10 \
+  --query "IdentityPools[?IdentityPoolName=='$IDENTITY_POOL_NAME']" \
+  --output table || echo "Identity Pool deleted"
 
-# Check roles
+# Check IAM roles
 aws iam list-roles \
-  --query "Roles[?RoleName=='$GITHUB_ROLE_NAME' || RoleName=='$ABAC_ROLE_NAME' || RoleName=='$WEB_APP_ROLE_NAME'].RoleName" \
+  --query "Roles[?contains(RoleName,'Cognito_${IDENTITY_POOL_NAME}')].RoleName" \
   --output table || echo "Roles deleted"
 
-# Check S3 buckets
-aws s3 ls | grep -E "${BUCKET_NAME}|${CLOUDTRAIL_BUCKET}" || echo "S3 buckets deleted"
+# Check S3 bucket
+aws s3 ls | grep "$BUCKET_NAME" || echo "S3 bucket deleted"
 
 echo ""
-echo "✅ Cleanup complete! All federation resources have been removed."
+echo "✅ Cleanup complete! All Cognito federation resources have been removed."
 ```
 
 ---
@@ -823,38 +895,47 @@ echo "✅ Cleanup complete! All federation resources have been removed."
 ## Summary
 
 In this lab, you have:
-- Created an OIDC identity provider for GitHub Actions federation
-- Configured IAM roles with OIDC trust policies for federated access
-- Implemented least-privilege permissions for federated identities
-- Set up attribute-based access control (ABAC) using session tags
-- Created multiple federation patterns (GitHub Actions, web apps)
-- Enabled CloudTrail logging for federation audit trails
-- Generated documentation for team usage
-- Successfully cleaned up all federation infrastructure
+- Created an Amazon Cognito Identity Pool for federated authentication
+- Configured Google as an external identity provider using OAuth 2.0
+- Created separate IAM roles for authenticated and unauthenticated users
+- Implemented least-privilege policies for each user type
+- Obtained temporary AWS credentials using STS AssumeRoleWithWebIdentity
+- Tested federated access to S3 with different permission levels
+- Validated temporary credential expiration (1 hour TTL)
+- Created a Python application demonstrating the federation workflow
+- Successfully cleaned up all Cognito and IAM resources
 
 **Key Takeaways:**
-- **No IAM Users Needed**: Federated identities eliminate the need for long-lived credentials
-- **Temporary Credentials**: STS provides short-lived credentials that auto-expire
-- **Trust Policies**: Define who can assume roles using OIDC conditions
-- **ABAC with Session Tags**: Enable fine-grained access control based on attributes
-- **CI/CD Integration**: Perfect for GitHub Actions, GitLab CI, and other pipelines
-- **Audit Trail**: CloudTrail logs all federation activities for compliance
-- **Least Privilege**: Each federated identity gets only the permissions it needs
+- **No IAM Users Required**: External identities authenticate through Cognito, not IAM users
+- **Temporary Credentials**: STS provides short-lived credentials (1 hour) that auto-expire
+- **Least Privilege**: Unauthenticated users get minimal access, authenticated get enhanced permissions
+- **Trust Policies**: Define which Cognito Identity Pool can assume each role
+- **Federation Flow**: IdP Token → Cognito Identity → STS Credentials → AWS Access
+- **Security Best Practices**: Separate roles for authenticated vs unauthenticated access
+- **OAuth 2.0 Integration**: Leverage existing Google/Facebook accounts for AWS access
 
 **Real-World Use Cases:**
-- GitHub Actions workflows deploying to AWS
-- Web/mobile applications accessing AWS services
-- Cross-account access without creating IAM users
-- Enterprise SSO integration with SAML 2.0
-- Third-party SaaS integrations requiring AWS access
+- Mobile applications requiring AWS access (iOS, Android)
+- Web applications with social login (Google, Facebook, Amazon)
+- Temporary guest access to specific AWS resources
+- Multi-tenant SaaS applications with customer data isolation
+- Serverless backends with user authentication
+
+**Cognito vs OIDC Direct:**
+- Cognito simplifies identity management and credential vending
+- Supports multiple IdPs (Google, Facebook, Amazon, SAML)
+- Handles credential caching and refresh automatically
+- Provides both authenticated and unauthenticated access patterns
 
 ---
 
 ## Additional Resources
-- [IAM OIDC Identity Providers](https://docs.aws.amazon.com/IAM/latest/UserGuide/id_roles_providers_create_oidc.html)
-- [AssumeRoleWithWebIdentity API](https://docs.aws.amazon.com/STS/latest/APIReference/API_AssumeRoleWithWebIdentity.html)
-- [GitHub Actions OIDC with AWS](https://docs.github.com/en/actions/deployment/security-hardening-your-deployments/configuring-openid-connect-in-amazon-web-services)
-- [Session Tags for ABAC](https://docs.aws.amazon.com/IAM/latest/UserGuide/id_session-tags.html)
-- [CloudTrail Event History](https://docs.aws.amazon.com/awscloudtrail/latest/userguide/view-cloudtrail-events.html)
+- [Amazon Cognito Identity Pools](https://docs.aws.amazon.com/cognito/latest/developerguide/cognito-identity.html)
+- [IAM Roles for Amazon Cognito](https://docs.aws.amazon.com/cognito/latest/developerguide/iam-roles.html)
+- [GetCredentialsForIdentity API](https://docs.aws.amazon.com/cognitoidentity/latest/APIReference/API_GetCredentialsForIdentity.html)
+- [Google OAuth 2.0 for Web](https://developers.google.com/identity/protocols/oauth2/web-server)
+- [AWS STS AssumeRoleWithWebIdentity](https://docs.aws.amazon.com/STS/latest/APIReference/API_AssumeRoleWithWebIdentity.html)
 
 ---
+
+```bash
