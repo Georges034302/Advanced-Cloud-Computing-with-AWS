@@ -1,6 +1,7 @@
 # Lab 1.B: Deploy Secure Multi-EC2 Python Jokes API with ALB Path-Based Routing
 
-<img width="1315" height="1024" alt="IMG" src="https://github.com/user-attachments/assets/b67f8928-9a7e-430b-8cd0-afab8d53128a" />
+<img width="1536" height="1024" alt="IMG" src="https://github.com/user-attachments/assets/afac0d9a-41c3-45f9-a9d4-c731195d87a5" />
+
 ---
 
 ## **Overview**
