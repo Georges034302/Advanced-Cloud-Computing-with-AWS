@@ -77,7 +77,8 @@ aws ec2 associate-route-table --route-table-id $RTB_ID --subnet-id $SUBNET2_ID
 # EC2 Security Group
 EC2_SG=$(aws ec2 create-security-group --group-name ec2-sg --description "EC2 SG" --vpc-id $VPC_ID --query 'GroupId' --output text)
 echo "EC2_SG=$EC2_SG"
-# Allow inbound from ALB SG to EC2 SG (port 5000)
+
+# Allow inbound Flask API traffic on port 5000 from anywhere
 aws ec2 authorize-security-group-ingress --group-id $EC2_SG --protocol tcp --port 5000 --cidr 0.0.0.0/0
 
 # Get your public IP for SSH rule
