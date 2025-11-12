@@ -2,7 +2,7 @@
 
 ## 📚 Technical Introduction
 
-This comprehensive lab series provides hands-on experience with Amazon Web Services (AWS), covering fundamental to advanced cloud computing concepts. Through 10 progressive sessions with 20 detailed labs, you'll gain practical skills in deploying, managing, and optimizing cloud infrastructure.
+This comprehensive lab series provides hands-on experience with Amazon Web Services (AWS), covering fundamental to advanced cloud computing concepts. Through 10 progressive sessions where you'll gain practical skills in deploying, managing, and optimizing cloud infrastructure.
 
 ---
 
@@ -15,15 +15,21 @@ This comprehensive lab series provides hands-on experience with Amazon Web Servi
 ---
 
 <details>
-  <summary>Lab Session 01: Provisioning and Securing EC2 in a Custom VPC</summary>
+  <summary>
+  Lab Session 01: AWS Compute Foundations – EC2, Networking, and Application Deployment 
+  </summary>
 
-  Learn how to create, secure, and manage EC2 instances inside a custom Virtual Private Cloud (VPC).
+  Gain hands-on experience across multiple AWS compute services by progressively building, securing, and deploying applications using EC2, Lightsail, and Elastic Beanstalk.
 
   **Labs for this session:**
-  - [lab_1_a_ec2-vpc.md](session01/lab_1_a_ec2-vpc.md):  
-    *Launch and configure a Linux EC2 instance in a custom VPC.*
+  - [lab_1_a_ec2-on-custom-vpc.md](session01/lab_1_a_ec2-on-custom-vpc.md):  
+    *Launch and configure a Linux EC2 instance in a custom VPC, including subnet, internet gateway, route table, and security group setup.*
   - [lab_1_b_alb-secure-routing.md](session01/lab_1_b_alb-secure-routing.md):  
-    *Secure web access using Security Groups, NACLs, and Route 53 DNS.*
+    *Deploy multiple Python Flask APIs on EC2, secure them with security groups and network ACLs, and use an Application Load Balancer (ALB) for path-based routing.*
+  - [Lab_1_c_host-static-website-lightsail.md](session01/Lab_1_c_host-static-website-lightsail.md):  
+    *Deploy and host a static website using AWS Lightsail.*
+  - [Lab_1_s_deploy-python-app-elastic-beanstalk.md](session01/Lab_1_s_deploy-python-app-elastic-beanstalk.md):  
+    *Deploy a Python application using AWS Elastic Beanstalk for managed scaling and deployment.*
 
 </details>
 
