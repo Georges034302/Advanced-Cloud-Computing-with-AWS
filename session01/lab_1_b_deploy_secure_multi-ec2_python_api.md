@@ -139,7 +139,7 @@ echo "AMI_ID=$AMI_ID"
 aws ec2 create-key-pair --key-name lab-key --query 'KeyMaterial' --output text > lab-key.pem
 chmod 600 lab-key.pem
 
-# User Data A
+# User Data A (Python Joke API)
 cat > user-data-a.sh <<'EOF'
 #!/bin/bash
 yum update -y
@@ -155,7 +155,7 @@ APP
 nohup python3 /home/ec2-user/app.py &
 EOF
 
-# User Data B
+# User Data B (Python Jokes API)
 cat > user-data-b.sh <<'EOF'
 #!/bin/bash
 yum update -y
