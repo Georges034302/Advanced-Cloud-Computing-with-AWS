@@ -1,5 +1,7 @@
 # Lab 1.C: Host a Static Website on AWS Lightsail
 
+<img width="1536" height="651" alt="IMG" src="https://github.com/user-attachments/assets/05ebeff7-8482-4b6c-816c-6e490d3f93a6" />
+
 ## Overview
 This lab introduces **AWS Lightsail**, a simplified platform for deploying and managing virtual private servers (VPS). You will create a Lightsail instance, install a web server, host a static HTML site, and verify its availability from the public internet.
 
