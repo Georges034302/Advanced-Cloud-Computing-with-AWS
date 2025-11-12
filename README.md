@@ -49,15 +49,19 @@ This comprehensive lab series provides hands-on experience with Amazon Web Servi
 </details>
 
 <details>
-  <summary>Lab Session 03: Managing Object and Block Storage</summary>
+  <summary>Lab Session 03: Cloud Storage Solutions – S3, EBS, and EFS</summary>
 
-  Explore storage management with Amazon S3 and EBS, including security and lifecycle automation.
+  Master AWS storage services by implementing object storage with S3, block storage with EBS, and shared file systems with EFS. Configure lifecycle policies, encryption, and multi-AZ architectures for high availability.
 
   **Labs for this session:**
   - [lab_3_a_s3-lifecycle.md](session03/lab_3_a_s3-lifecycle.md):  
-    *Manage S3 buckets with versioning, encryption, and lifecycle rules.*
+    *Configure S3 buckets with versioning, encryption (SSE-S3, SSE-KMS), bucket policies, and lifecycle rules for storage class transitions (STANDARD_IA, GLACIER, DEEP_ARCHIVE).*
   - [lab_3_b_ebs-snapshots.md](session03/lab_3_b_ebs-snapshots.md):  
-    *Attach and manage EBS volumes and snapshots for EC2 instances.*
+    *Create and manage EBS volumes, attach to EC2 instances, perform snapshots, restore volumes, and automate snapshot lifecycle with Data Lifecycle Manager (DLM).*
+  - [lab_3_c_s3-static-website-cloudfront.md](session03/lab_3_c_s3-static-website-cloudfront.md):  
+    *Deploy a static website on S3 with global distribution through CloudFront CDN. Configure Origin Access Identity (OAI), custom error pages, HTTPS delivery, cache behaviors, and invalidations.*
+  - [lab_3_d_efs-shared-file-system.md](session03/lab_3_d_efs-shared-file-system.md):  
+    *Create Amazon EFS file system with encryption and multi-AZ mount targets. Test concurrent access from multiple EC2 instances, implement lifecycle policies, configure access points, and perform performance testing.*
 
 </details>
 
