@@ -83,9 +83,9 @@ This comprehensive lab series provides hands-on experience with Amazon Web Servi
 </details>
 
 <details>
-  <summary>Lab Session 05: Load Balancing and Auto Scaling (Free Tier)</summary>
+  <summary>Lab Session 05: Load Balancing and Auto Scaling </summary>
 
-  Implement high availability and elasticity using free tier-eligible Classic Load Balancers and Auto Scaling Groups with CloudWatch integration. Learn automatic scaling based on demand, scheduled scaling patterns, and global traffic distribution with Route 53.
+  Implement high availability and elasticity using Classic Load Balancers and Auto Scaling Groups with CloudWatch integration. Learn automatic scaling based on demand, scheduled scaling patterns, and global traffic distribution with Route 53.
 
   **Labs for this session:**
   - [lab_5_a_clb-deployment.md](session05/lab_5_a_clb-deployment.md):  
@@ -102,17 +102,17 @@ This comprehensive lab series provides hands-on experience with Amazon Web Servi
 <details>
   <summary>Lab Session 06: Container Orchestration with ECS, Fargate, and EKS</summary>
 
-  Master container deployment on AWS through multiple orchestration platforms. Build Docker images, push to ECR, and deploy using ECS with EC2 (free tier), Elastic Beanstalk (free tier), ECS Fargate (serverless, paid), and Amazon EKS (Kubernetes, paid).
+  Master container deployment on AWS through multiple orchestration platforms. Build Docker images, push to ECR, and deploy using ECS with EC2, Elastic Beanstalk, ECS Fargate, and Amazon EKS.
 
   **Labs for this session:**
   - [lab_6_a_ecr-ecs-deployment.md](session06/lab_6_a_ecr-ecs-deployment.md):  
-    *Build Python Flask joke API Docker image, push to ECR, and deploy to ECS using EC2 launch type with t2.micro instance. Complete container workflow from build to deployment. **FREE TIER** (750 hours/month).*
+    *Build Python Flask joke API Docker image, push to ECR, and deploy to ECS using EC2 launch type with t2.micro instance. Complete container workflow from build to deployment. 
   - [lab_6_b_elastic-beanstalk-docker.md](session06/lab_6_b_elastic-beanstalk-docker.md):  
-    *Deploy containerized Python Flask API to Elastic Beanstalk with Docker. Automatic infrastructure management, health monitoring, and rolling updates. **FREE TIER** (t2.micro, 750 hours/month).*
+    *Deploy containerized Python Flask API to Elastic Beanstalk with Docker. Automatic infrastructure management, health monitoring, and rolling updates. 
   - [lab_6_c_ecs-fargate-deployment.md](session06/lab_6_c_ecs-fargate-deployment.md):  
-    *Deploy containerized joke API to ECS using Fargate serverless containers. No infrastructure management, pay per vCPU/GB-hour. **PAID** (~$0.04/hour minimum, delete immediately after lab).*
+    *Deploy containerized joke API to ECS using Fargate serverless containers. No infrastructure management, pay per vCPU/GB-hour. 
   - [lab_6_d_eks-microservices.md](session06/lab_6_d_eks-microservices.md):  
-    *Deploy microservices (dad-jokes and tech-jokes) to Amazon EKS with Kubernetes. Create cluster, deploy pods, configure services, and test inter-service communication. **PAID** (EKS $0.10/hour + worker nodes, delete immediately after lab).*
+    *Deploy microservices (dad-jokes and tech-jokes) to Amazon EKS with Kubernetes. Create cluster, deploy pods, configure services, and test inter-service communication. 
 
 </details>
 
@@ -152,7 +152,7 @@ This comprehensive lab series provides hands-on experience with Amazon Web Servi
 <details>
   <summary>Lab Session 09: Infrastructure as Code – CloudFormation, CDK, and Terraform</summary>
 
-  Master Infrastructure as Code (IaC) tools to define, deploy, and manage AWS resources using code. Learn CloudFormation advanced patterns, AWS CDK with Python, and Terraform multi-cloud basics. All labs are free tier compatible.
+  Master Infrastructure as Code (IaC) tools to define, deploy, and manage AWS resources using code. Learn CloudFormation advanced patterns, AWS CDK with Python, and Terraform multi-cloud basics. 
 
   **Labs for this session:**
   - [lab_9_a_cloudformation-vpc-2tier.md](session09/lab_9_a_cloudformation-vpc-2tier.md):  
@@ -169,7 +169,7 @@ This comprehensive lab series provides hands-on experience with Amazon Web Servi
 <details>
   <summary>Lab Session 10: CI/CD Pipelines – CodeCommit, CodeBuild, CodePipeline, and CodeDeploy</summary>
 
-  Build complete CI/CD pipelines using AWS native DevOps tools and integrate with GitHub Actions. Automate building, testing, and deploying applications with multi-stage pipelines, blue/green deployments, and automated rollbacks. All labs are free tier compatible.
+  Build complete CI/CD pipelines using AWS native DevOps tools and integrate with GitHub Actions. Automate building, testing, and deploying applications with multi-stage pipelines, blue/green deployments, and automated rollbacks.
 
   **Labs for this session:**
   - [lab_10_a_codecommit-codebuild-docker.md](session10/lab_10_a_codecommit-codebuild-docker.md):  
@@ -186,7 +186,7 @@ This comprehensive lab series provides hands-on experience with Amazon Web Servi
 <details>
   <summary>Lab Session 11: AI/ML Services – Rekognition, Comprehend, Translate, and SageMaker</summary>
 
-  Leverage AWS AI/ML services for computer vision, natural language processing, translation, and machine learning model deployment. Build intelligent applications without ML expertise using pre-trained models and APIs. All labs are free tier compatible with generous monthly limits.
+  Leverage AWS AI/ML services for computer vision, natural language processing, translation, and machine learning model deployment. Build intelligent applications without ML expertise using pre-trained models and APIs. 
 
   **Labs for this session:**
   - [lab_11_a_rekognition-image-analysis.md](session11/lab_11_a_rekognition-image-analysis.md):  
