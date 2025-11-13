@@ -117,46 +117,36 @@ This comprehensive lab series provides hands-on experience with Amazon Web Servi
 </details>
 
 <details>
-  <summary>Lab Session 07: Serverless Application with Lambda and API Gateway</summary>
+  <summary>Lab Session 07: Serverless Computing with Lambda </summary>
 
-  Build and test serverless REST APIs and background processing flows.
+  Build serverless applications using AWS Lambda with API Gateway, S3 triggers, SQS integration, and EventBridge automation. All labs are free tier compatible with 1M Lambda requests/month and no infrastructure management.
 
   **Labs for this session:**
   - [lab_7_a_lambda-api-gateway.md](session07/lab_7_a_lambda-api-gateway.md):  
-    *Build a REST API using API Gateway integrated with Lambda.*
+    *Build serverless REST API with Python Lambda joke API (GET /joke, GET /jokes, POST /joke) exposed through API Gateway HTTP API. Deploy function, configure routes, enable CORS, and test all endpoints. 
   - [lab_7_b_s3-lambda-trigger.md](session07/lab_7_b_s3-lambda-trigger.md):  
-    *Implement data processing pipelines triggered by S3 and Lambda.*
-
+    *Process CSV files with S3 trigger and Node.js Lambda. Upload student records (ID, NAME, MARK, GRADE) to S3, automatically trigger Lambda to parse CSV and store in DynamoDB. Event-driven data ingestion pipeline. 
+  - [lab_7_c_sqs-lambda-integration.md](session07/lab_7_c_sqs-lambda-integration.md):  
+    *Create event-driven order processing workflow using SQS and Python Lambda. Configure Dead Letter Queue (DLQ), event source mapping with batch processing, and test message handling with automatic retries. 
+  - [lab_7_d_sns-eventbridge-alerts.md](session07/lab_7_d_sns-eventbridge-alerts.md):  
+    *Monitor EC2 instances with SNS email alerts and EventBridge. Configure EventBridge rule to capture EC2 state changes (running, stopped, terminated), publish to SNS topic, and receive email notifications automatically. 
 </details>
 
 <details>
-  <summary>Lab Session 08: Event-Driven Messaging with SQS, SNS, and EventBridge</summary>
-
-  Integrate messaging and automation across AWS services for distributed workflows.
-
-  **Labs for this session:**
-  - [lab_8_a_sqs-lambda-integration.md](session08/lab_8_a_sqs-lambda-integration.md):  
-    *Create an event-driven workflow using SQS and Lambda consumers.*
-  - [lab_8_b_sns-eventbridge-alerts.md](session08/lab_8_b_sns-eventbridge-alerts.md):  
-    *Send multi-channel notifications using SNS and EventBridge rules.*
-
-</details>
-
-<details>
-  <summary>Lab Session 09: Monitoring and Logging Operations</summary>
+  <summary>Lab Session 08: Monitoring and Logging Operations</summary>
 
   Monitor, audit, and analyze your AWS environment using native observability tools.
 
   **Labs for this session:**
-  - [lab_9_a_cloudwatch-dashboard.md](session09/lab_9_a_cloudwatch-dashboard.md):  
+  - [lab_8_a_cloudwatch-dashboard.md](session08/lab_8_a_cloudwatch-dashboard.md):  
     *Configure CloudWatch dashboards, metrics, and alarms.*
-  - [lab_9_b_cloudtrail-logs.md](session09/lab_9_b_cloudtrail-logs.md):  
+  - [lab_8_b_cloudtrail-logs.md](session08/lab_8_b_cloudtrail-logs.md):  
     *Track and audit API calls using CloudTrail and Log Insights.*
 
 </details>
 
 <details>
-  <summary>Lab Session 10: Infrastructure as Code with CloudFormation and CDK</summary>
+  <summary>Lab Session 09: Infrastructure as Code with CloudFormation and CDK</summary>
 
   Automate AWS resource creation and management with Infrastructure as Code (IaC).
 
