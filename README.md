@@ -66,28 +66,32 @@ This comprehensive lab series provides hands-on experience with Amazon Web Servi
 </details>
 
 <details>
-  <summary>Lab Session 04: Deploying and Connecting AWS Databases</summary>
+  <summary>Lab Session 04: Database Services – RDS, DynamoDB, and ElastiCache</summary>
 
-  Learn to launch, connect, and manage relational and NoSQL databases in AWS.
+  Master AWS database services by implementing relational databases with Multi-AZ high availability, NoSQL databases with DynamoDB, and in-memory caching with ElastiCache Redis for session management.
 
   **Labs for this session:**
   - [lab_4_a_rds-mysql-private.md](session04/lab_4_a_rds-mysql-private.md):  
-    *Provision and connect to an RDS MySQL database in a private subnet.*
+    *Provision and connect to an RDS MySQL database in a private subnet. Configure security groups, connect from EC2, create tables, and perform basic SQL operations.*
   - [lab_4_b_dynamodb-cli.md](session04/lab_4_b_dynamodb-cli.md):  
-    *Build and query a DynamoDB table using AWS CLI and SDK.*
+    *Build and query a DynamoDB table using AWS CLI and SDK. Work with partition keys, sort keys, queries, scans, and global secondary indexes (GSI).*
+  - [lab_4_c_rds-multi-az-bastion.md](session04/lab_4_c_rds-multi-az-bastion.md):  
+    *Deploy RDS MySQL with Multi-AZ synchronous replication for high availability. Access database securely through bastion host, test automatic failover between availability zones, and validate data persistence.*
+  - [lab_4_d_elasticache-redis-sessions.md](session04/lab_4_d_elasticache-redis-sessions.md):  
+    *Create ElastiCache Redis cluster for high-performance in-memory caching. Integrate with Flask application for session management and test basic Redis operations (SET, GET, EXPIRE).*
 
 </details>
 
 <details>
-  <summary>Lab Session 05: Application Load Balancing and Auto Scaling</summary>
+  <summary>Lab Session 05: Load Balancing and Auto Scaling (Free Tier)</summary>
 
-  Implement high availability and elasticity using Load Balancers and Auto Scaling Groups.
+  Implement high availability and elasticity using free tier-eligible Classic Load Balancers and Auto Scaling Groups with CloudWatch integration. Learn automatic scaling based on demand and scheduled scaling patterns.
 
   **Labs for this session:**
-  - [lab_5_a_alb-deployment.md](session05/lab_5_a_alb-deployment.md):  
-    *Deploy a web application behind an Application Load Balancer (ALB).*
+  - [lab_5_a_clb-deployment.md](session05/lab_5_a_clb-deployment.md):  
+    *Deploy web application behind Classic Load Balancer (CLB) with free tier eligibility (750 hours/month). Configure multi-AZ deployment, health checks, load distribution, and test automatic failover.*
   - [lab_5_b_autoscaling-cloudwatch.md](session05/lab_5_b_autoscaling-cloudwatch.md):  
-    *Configure Auto Scaling policies and CloudWatch alarms for EC2.*
+    *Create Auto Scaling Group with Launch Template and configure target-tracking scaling policy (CPU-based) and scheduled scaling. Monitor scaling activities through CloudWatch metrics and test automatic capacity adjustment.*
 
 </details>
 

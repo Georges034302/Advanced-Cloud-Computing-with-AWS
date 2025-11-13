@@ -6,12 +6,10 @@ This lab demonstrates how to create an Auto Scaling Group (ASG) for EC2 instance
 ---
 
 ## Objectives
-- Create Launch Template with user data for web server
+- Create Launch Template with simple web server
 - Create Auto Scaling Group across multiple availability zones
 - Configure target-tracking scaling policy (CPU-based)
-- Configure step-scaling policy with CloudWatch alarms
 - Set up scheduled scaling for predictable load patterns
-- Test scaling behavior with load generation
 - Monitor scaling activities and CloudWatch metrics
 - Clean up all resources
 
@@ -159,7 +157,7 @@ aws ec2 describe-images \
 ## Step 4 – Create Launch Template with User Data
 
 ```bash
-# Create user data script for web server with CPU stress utility
+# Create simple user data script for web server
 cat > asg-userdata.sh <<'EOF'
 #!/bin/bash
 # Update system packages
@@ -168,46 +166,28 @@ dnf update -y
 # Install Apache web server
 dnf install -y httpd
 
-# Install stress utility for load testing
-dnf install -y stress-ng
-
 # Get instance metadata
 INSTANCE_ID=$(ec2-metadata --instance-id | cut -d " " -f 2)
 AVAILABILITY_ZONE=$(ec2-metadata --availability-zone | cut -d " " -f 2)
-LOCAL_IP=$(ec2-metadata --local-ipv4 | cut -d " " -f 2)
-HOSTNAME=$(hostname)
 
-# Create custom web page with instance information
+# Create simple web page showing instance information
 cat > /var/www/html/index.html <<HTML
 <!DOCTYPE html>
 <html>
 <head>
     <title>Auto Scaling Demo</title>
     <style>
-        body { font-family: Arial; text-align: center; padding: 50px; background: #f5f5f5; }
-        .container { background: white; padding: 30px; border-radius: 10px; display: inline-block; box-shadow: 0 2px 10px rgba(0,0,0,0.1); }
-        h1 { color: #FF9900; margin-bottom: 20px; }
-        .info { background: #232F3E; color: white; padding: 20px; margin: 15px 0; border-radius: 5px; }
-        .info p { margin: 10px 0; font-size: 16px; }
-        .label { font-weight: bold; color: #FF9900; }
-        .actions { margin-top: 20px; }
-        .button { display: inline-block; padding: 10px 20px; margin: 5px; background: #FF9900; color: white; text-decoration: none; border-radius: 5px; }
+        body { font-family: Arial; text-align: center; padding: 50px; background: #f0f0f0; }
+        .box { background: white; padding: 20px; border-radius: 5px; display: inline-block; }
+        h1 { color: #FF9900; }
     </style>
 </head>
 <body>
-    <div class="container">
-        <h1>🚀 Auto Scaling Group Demo</h1>
-        <div class="info">
-            <p><span class="label">Instance ID:</span> ${INSTANCE_ID}</p>
-            <p><span class="label">Availability Zone:</span> ${AVAILABILITY_ZONE}</p>
-            <p><span class="label">Private IP:</span> ${LOCAL_IP}</p>
-            <p><span class="label">Hostname:</span> ${HOSTNAME}</p>
-        </div>
-        <div class="actions">
-            <a href="/cpu-load" class="button">Generate CPU Load</a>
-            <a href="/status" class="button">Check Status</a>
-        </div>
-        <p style="margin-top: 20px; color: #666;">Refresh to see load distribution across instances</p>
+    <div class="box">
+        <h1>Auto Scaling Instance</h1>
+        <p><strong>Instance ID:</strong> ${INSTANCE_ID}</p>
+        <p><strong>Availability Zone:</strong> ${AVAILABILITY_ZONE}</p>
+        <p>Refresh to see load distribution</p>
     </div>
 </body>
 </html>
@@ -216,49 +196,12 @@ HTML
 # Create health check endpoint
 echo "OK" > /var/www/html/health.html
 
-# Create status page
-cat > /var/www/html/status.html <<HTML
-<!DOCTYPE html>
-<html>
-<head><title>Status</title></head>
-<body>
-<h1>Instance Status</h1>
-<p>Instance is healthy and serving requests</p>
-<p>Uptime: \$(uptime)</p>
-</body>
-</html>
-HTML
-
-# Create CPU load script endpoint
-cat > /var/www/html/cpu-load <<'SCRIPT'
-#!/bin/bash
-echo "Content-type: text/html"
-echo ""
-echo "<html><body><h1>Generating CPU Load...</h1>"
-echo "<p>Running stress test for 300 seconds (5 minutes)</p>"
-echo "<p>This will trigger Auto Scaling scale-out</p>"
-echo "</body></html>"
-
-# Run stress in background
-nohup stress-ng --cpu 2 --timeout 300s &> /dev/null &
-SCRIPT
-
-chmod +x /var/www/html/cpu-load
-
-# Configure Apache to execute CGI scripts
-cat >> /etc/httpd/conf/httpd.conf <<CONF
-<Directory "/var/www/html">
-    Options +ExecCGI
-    AddHandler cgi-script .cgi
-</Directory>
-CONF
-
 # Start and enable Apache
 systemctl start httpd
 systemctl enable httpd
 
 # Log completion
-echo "Web server and stress utility setup completed" > /var/log/userdata-complete.log
+echo "Web server setup completed" > /var/log/userdata-complete.log
 EOF
 
 echo "User data script created"
@@ -382,105 +325,7 @@ aws autoscaling describe-policies \
 
 ---
 
-## Step 7 – Create Step Scaling Policy with CloudWatch Alarms
-
-```bash
-# Create step scaling policy for aggressive scale-out on high CPU
-echo "Creating step scaling policy..."
-
-STEP_POLICY_ARN=$(aws autoscaling put-scaling-policy \
-  --auto-scaling-group-name "$ASG_NAME" \
-  --policy-name "high-cpu-step-scaling" \
-  --policy-type StepScaling \
-  --adjustment-type PercentChangeInCapacity \
-  --metric-aggregation-type Average \
-  --step-adjustments '[
-    {
-      "MetricIntervalLowerBound": 0,
-      "MetricIntervalUpperBound": 10,
-      "ScalingAdjustment": 10
-    },
-    {
-      "MetricIntervalLowerBound": 10,
-      "ScalingAdjustment": 20
-    }
-  ]' \
-  --region "$REGION" \
-  --query 'PolicyARN' \
-  --output text)
-echo "STEP_POLICY_ARN=$STEP_POLICY_ARN"
-
-echo "✅ Step scaling policy created"
-
-# Create CloudWatch alarm for high CPU (triggers step scaling)
-echo "Creating CloudWatch alarm for high CPU..."
-
-aws cloudwatch put-metric-alarm \
-  --alarm-name "${ASG_NAME}-HighCPU-StepScaling" \
-  --alarm-description "Trigger step scaling when CPU exceeds 70%" \
-  --metric-name CPUUtilization \
-  --namespace AWS/EC2 \
-  --statistic Average \
-  --period 60 \
-  --evaluation-periods 2 \
-  --threshold 70 \
-  --comparison-operator GreaterThanThreshold \
-  --dimensions Name=AutoScalingGroupName,Value="$ASG_NAME" \
-  --alarm-actions "$STEP_POLICY_ARN" \
-  --region "$REGION"
-
-echo "✅ CloudWatch alarm created (Threshold: 70% CPU)"
-
-# Create scale-in policy for low CPU
-echo "Creating scale-in policy..."
-
-SCALE_IN_POLICY_ARN=$(aws autoscaling put-scaling-policy \
-  --auto-scaling-group-name "$ASG_NAME" \
-  --policy-name "low-cpu-scale-in" \
-  --policy-type StepScaling \
-  --adjustment-type ChangeInCapacity \
-  --metric-aggregation-type Average \
-  --step-adjustments '[
-    {
-      "MetricIntervalUpperBound": 0,
-      "ScalingAdjustment": -1
-    }
-  ]' \
-  --region "$REGION" \
-  --query 'PolicyARN' \
-  --output text)
-echo "SCALE_IN_POLICY_ARN=$SCALE_IN_POLICY_ARN"
-
-# Create CloudWatch alarm for low CPU (triggers scale-in)
-aws cloudwatch put-metric-alarm \
-  --alarm-name "${ASG_NAME}-LowCPU-ScaleIn" \
-  --alarm-description "Trigger scale-in when CPU below 20%" \
-  --metric-name CPUUtilization \
-  --namespace AWS/EC2 \
-  --statistic Average \
-  --period 300 \
-  --evaluation-periods 2 \
-  --threshold 20 \
-  --comparison-operator LessThanThreshold \
-  --dimensions Name=AutoScalingGroupName,Value="$ASG_NAME" \
-  --alarm-actions "$SCALE_IN_POLICY_ARN" \
-  --region "$REGION"
-
-echo "✅ Scale-in alarm created (Threshold: 20% CPU)"
-
-# List all alarms
-echo ""
-echo "CloudWatch Alarms:"
-aws cloudwatch describe-alarms \
-  --alarm-name-prefix "$ASG_NAME" \
-  --query 'MetricAlarms[*].{AlarmName:AlarmName,Metric:MetricName,Threshold:Threshold,State:StateValue}' \
-  --output table \
-  --region "$REGION"
-```
-
----
-
-## Step 8 – Create Scheduled Scaling Action
+## Step 7 – Create Scheduled Scaling Action
 
 ```bash
 # Calculate future time for scheduled scaling (5 minutes from now)
@@ -528,7 +373,7 @@ aws autoscaling describe-scheduled-actions \
 
 ---
 
-## Step 9 – Test Auto Scaling with Load Generation
+## Step 8 – View Auto Scaling Group Status
 
 ```bash
 # Get instance IDs in ASG
@@ -552,56 +397,37 @@ echo "PUBLIC_IP=$PUBLIC_IP"
 
 echo ""
 echo "================================================"
-echo "LOAD TESTING INSTRUCTIONS"
+echo "AUTO SCALING GROUP STATUS"
 echo "================================================"
 echo ""
-echo "Instance URL: http://${PUBLIC_IP}"
+echo "Web Application URL: http://${PUBLIC_IP}"
 echo ""
-echo "Option 1: Manual testing (open in browser)"
-echo "  1. Visit: http://${PUBLIC_IP}"
-echo "  2. Click 'Generate CPU Load' button"
-echo "  3. Wait 2-3 minutes and watch Auto Scaling scale out"
+echo "Current ASG Configuration:"
+aws autoscaling describe-auto-scaling-groups \
+  --auto-scaling-group-names "$ASG_NAME" \
+  --query 'AutoScalingGroups[0].{Name:AutoScalingGroupName,MinSize:MinSize,MaxSize:MaxSize,DesiredCapacity:DesiredCapacity,CurrentInstances:length(Instances)}' \
+  --output table \
+  --region "$REGION"
+
 echo ""
-echo "Option 2: Automated testing (run command below)"
+echo "Instances in ASG:"
+aws autoscaling describe-auto-scaling-groups \
+  --auto-scaling-group-names "$ASG_NAME" \
+  --query 'AutoScalingGroups[0].Instances[*].{InstanceId:InstanceId,LifecycleState:LifecycleState,HealthStatus:HealthStatus,AZ:AvailabilityZone}' \
+  --output table \
+  --region "$REGION"
+
 echo ""
-cat > generate-load.sh <<LOADSCRIPT
-#!/bin/bash
-# Generate load on ASG instances to trigger scaling
-
-echo "Generating CPU load on instance $PUBLIC_IP..."
-echo "This will run for 5 minutes (300 seconds)"
-echo ""
-
-# SSH into instance and run stress (requires key pair)
-# ssh -i your-key.pem ec2-user@$PUBLIC_IP "stress-ng --cpu 2 --timeout 300s"
-
-# Alternative: Use AWS Systems Manager to run stress command
-INSTANCE_ID="$FIRST_INSTANCE_ID"
-COMMAND_ID=\$(aws ssm send-command \\
-  --document-name "AWS-RunShellScript" \\
-  --parameters 'commands=["stress-ng --cpu 2 --timeout 300s"]' \\
-  --instance-ids "\$INSTANCE_ID" \\
-  --region "$REGION" \\
-  --query 'Command.CommandId' \\
-  --output text)
-
-echo "Command ID: \$COMMAND_ID"
-echo "CPU load generation started on instance \$INSTANCE_ID"
-echo ""
-echo "Monitor scaling activity with:"
-echo "  aws autoscaling describe-scaling-activities --auto-scaling-group-name $ASG_NAME --region $REGION"
-LOADSCRIPT
-
-chmod +x generate-load.sh
-
-echo "Load generation script created: generate-load.sh"
+echo "Scaling will occur based on:"
+echo "  - Target tracking policy: Maintain 40% CPU"
+echo "  - Scheduled actions: Scale at specific times"
 echo ""
 echo "================================================"
 ```
 
 ---
 
-## Step 10 – Monitor Auto Scaling Activities
+## Step 9 – Monitor Auto Scaling Activities
 
 ```bash
 echo ""
@@ -636,21 +462,18 @@ aws cloudwatch describe-alarms \
   --region "$REGION"
 
 echo ""
-echo "To monitor in real-time, run these commands:"
+echo "To monitor scaling in real-time:"
 echo ""
 echo "Watch scaling activities:"
-echo "  watch -n 10 'aws autoscaling describe-scaling-activities --auto-scaling-group-name $ASG_NAME --max-records 5 --region $REGION --output table'"
+echo "  aws autoscaling describe-scaling-activities --auto-scaling-group-name $ASG_NAME --max-records 5 --region $REGION"
 echo ""
 echo "Watch instance count:"
-echo "  watch -n 10 'aws autoscaling describe-auto-scaling-groups --auto-scaling-group-names $ASG_NAME --region $REGION --query \"AutoScalingGroups[0].Instances[*].[InstanceId,LifecycleState,HealthStatus]\" --output table'"
-echo ""
-echo "Watch CloudWatch metrics:"
-echo "  watch -n 10 'aws cloudwatch get-metric-statistics --namespace AWS/EC2 --metric-name CPUUtilization --dimensions Name=AutoScalingGroupName,Value=$ASG_NAME --start-time \$(date -u -d \"10 minutes ago\" +%Y-%m-%dT%H:%M:%S) --end-time \$(date -u +%Y-%m-%dT%H:%M:%S) --period 60 --statistics Average --region $REGION --query \"Datapoints[-5:]\" --output table'"
+echo "  aws autoscaling describe-auto-scaling-groups --auto-scaling-group-names $ASG_NAME --region $REGION"
 ```
 
 ---
 
-## Step 11 – View CloudWatch Metrics
+## Step 10 – View CloudWatch Metrics
 
 ```bash
 # Get CPU utilization metrics
@@ -704,7 +527,7 @@ aws cloudwatch get-metric-statistics \
 
 ---
 
-## Step 12 – Cleanup Resources
+## Step 11 – Cleanup Resources
 
 ```bash
 echo "Starting cleanup..."
@@ -726,22 +549,6 @@ echo "Deleting scaling policies..."
 aws autoscaling delete-policy \
   --auto-scaling-group-name "$ASG_NAME" \
   --policy-name "cpu-target-tracking-40" \
-  --region "$REGION" 2>/dev/null || true
-
-aws autoscaling delete-policy \
-  --auto-scaling-group-name "$ASG_NAME" \
-  --policy-name "high-cpu-step-scaling" \
-  --region "$REGION" 2>/dev/null || true
-
-aws autoscaling delete-policy \
-  --auto-scaling-group-name "$ASG_NAME" \
-  --policy-name "low-cpu-scale-in" \
-  --region "$REGION" 2>/dev/null || true
-
-# Delete CloudWatch alarms
-echo "Deleting CloudWatch alarms..."
-aws cloudwatch delete-alarms \
-  --alarm-names "${ASG_NAME}-HighCPU-StepScaling" "${ASG_NAME}-LowCPU-ScaleIn" \
   --region "$REGION" 2>/dev/null || true
 
 # Update ASG to zero instances
@@ -783,7 +590,7 @@ aws ec2 delete-security-group \
 
 # Delete local files
 echo "Cleaning up local files..."
-rm -f asg-userdata.sh generate-load.sh
+rm -f asg-userdata.sh
 
 echo ""
 echo "✅ Cleanup completed successfully!"
@@ -791,8 +598,7 @@ echo ""
 echo "All resources deleted:"
 echo "- Auto Scaling Group"
 echo "- Launch Template"
-echo "- Scaling policies (3)"
-echo "- CloudWatch alarms (2)"
+echo "- Scaling policy (target-tracking)"
 echo "- Scheduled actions (2)"
 echo "- Security group"
 echo "- Local files"
@@ -803,44 +609,38 @@ echo "- Local files"
 ## Summary
 
 In this lab, you have:
-- Created Launch Template with user data for web server and load testing
+- Created Launch Template with simple web server
 - Created Auto Scaling Group across multiple availability zones
 - Configured target-tracking scaling policy based on CPU utilization
-- Set up step-scaling policies with CloudWatch alarms
 - Created scheduled scaling actions for predictable load patterns
-- Tested auto scaling behavior with load generation
 - Monitored scaling activities and CloudWatch metrics
 - Cleaned up all resources
 
 **Key Takeaways:**
 - **Auto Scaling**: Automatically adjusts capacity based on demand
 - **Target Tracking**: Maintains specific metric at target value (e.g., 40% CPU)
-- **Step Scaling**: Scales in steps based on alarm thresholds
 - **Scheduled Scaling**: Scales based on predictable time patterns
-- **CloudWatch Integration**: Alarms trigger scaling actions
 - **Health Checks**: Unhealthy instances automatically replaced
 - **Multi-AZ**: High availability across availability zones
 - **Cost Optimization**: Scale down during low demand periods
+- **Free Tier Compatible**: Uses t2.micro instances within free tier limits
 
 **Scaling Policy Types:**
-| Policy Type | Use Case | Response Time | Best For |
-|-------------|----------|---------------|----------|
-| **Target Tracking** | Maintain metric at target | Moderate | CPU, requests/target |
-| **Step Scaling** | Aggressive scaling | Fast | Sudden spikes |
-| **Scheduled** | Predictable patterns | Proactive | Daily/weekly patterns |
-| **Simple Scaling** | Single adjustment | Slow | Basic use cases |
+| Policy Type | Use Case | Best For |
+|-------------|----------|----------|
+| **Target Tracking** | Maintain metric at target | CPU, requests/target |
+| **Scheduled** | Predictable patterns | Daily/weekly patterns |
+| **Step Scaling** | Aggressive scaling | Sudden spikes (advanced) |
 
 **Best Practices:**
-- Use target-tracking for most common metrics (CPU, ALB requests)
-- Set appropriate cooldown periods to avoid flapping
-- Configure health check grace period for slow-starting applications
+- Use target-tracking for CPU-based scaling (simplest and most effective)
+- Set appropriate cooldown periods to avoid rapid scaling
+- Configure health check grace period for application startup time
 - Use multiple AZs for high availability
-- Monitor CloudWatch metrics and alarms regularly
-- Test scaling policies under controlled load
 - Set meaningful min/max capacity limits
-- Use lifecycle hooks for graceful instance termination
-- Enable detailed monitoring for faster response
-- Tag instances for cost tracking and management
+- Schedule scaling for known traffic patterns
+- Tag instances for cost tracking
+- Monitor CloudWatch metrics regularly
 
 **Real-World Use Cases:**
 - **Web Applications**: Handle variable traffic patterns
