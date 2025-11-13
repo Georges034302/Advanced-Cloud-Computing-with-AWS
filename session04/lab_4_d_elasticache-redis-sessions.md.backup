@@ -19,6 +19,7 @@ This lab demonstrates how to use Amazon ElastiCache Redis as a high-performance 
 - Default VPC with subnets in multiple availability zones
 - IAM permissions to manage ElastiCache, EC2, and VPC resources
 - Basic understanding of caching concepts and Redis commands
+- Python 3 and pip installed
 
 ---
 
@@ -35,9 +36,12 @@ echo "ACCOUNT_ID=$ACCOUNT_ID"
 REGION="ap-southeast-2"
 echo "REGION=$REGION"
 
-# Set cache cluster identifier
+# Set cache cluster identifiers
 CACHE_CLUSTER_ID="lab-redis-cluster"
 echo "CACHE_CLUSTER_ID=$CACHE_CLUSTER_ID"
+
+REPLICATION_GROUP_ID="lab-redis-replication"
+echo "REPLICATION_GROUP_ID=$REPLICATION_GROUP_ID"
 
 # Set cache configuration
 CACHE_NODE_TYPE="cache.t3.micro"
@@ -99,7 +103,7 @@ APP_SG_ID=$(aws ec2 create-security-group \
   --output text)
 echo "APP_SG_ID=$APP_SG_ID"
 
-# Allow SSH access to application servers
+# Allow SSH access to application servers from anywhere
 aws ec2 authorize-security-group-ingress \
   --group-id "$APP_SG_ID" \
   --protocol tcp \
@@ -107,7 +111,15 @@ aws ec2 authorize-security-group-ingress \
   --cidr 0.0.0.0/0 \
   --region "$REGION"
 
-# Allow Flask port access
+# Allow HTTP access to application servers
+aws ec2 authorize-security-group-ingress \
+  --group-id "$APP_SG_ID" \
+  --protocol tcp \
+  --port 80 \
+  --cidr 0.0.0.0/0 \
+  --region "$REGION"
+
+# Allow Flask default port
 aws ec2 authorize-security-group-ingress \
   --group-id "$APP_SG_ID" \
   --protocol tcp \
@@ -182,7 +194,7 @@ aws elasticache wait cache-cluster-available \
   --cache-cluster-id "$CACHE_CLUSTER_ID" \
   --region "$REGION"
 
-echo "✅ Redis cluster is now available!"
+echo "Redis cluster is now available!"
 
 # Get cluster details
 aws elasticache describe-cache-clusters \
@@ -242,22 +254,22 @@ echo "AMI_ID=$AMI_ID"
 # Display AMI details
 aws ec2 describe-images \
   --image-ids "$AMI_ID" \
-  --query 'Images[0].{ImageId:ImageId,Name:Name,CreationDate:CreationDate}' \
+  --query 'Images[0].{ImageId:ImageId,Name:Name,Description:Description,CreationDate:CreationDate}' \
   --output table \
   --region "$REGION"
 ```
 
 ---
 
-## Step 7 – Create Simple Flask Application
+## Step 7 – Create Flask Application with Redis Session Management
 
 ```bash
 # Create Flask application directory
 mkdir -p redis-app
 cd redis-app
 
-# Create simple Flask application with Redis session management
-cat > app.py <<'EOF'
+# Create Flask application with Redis session management
+cat > app.py <<EOF
 from flask import Flask, session, render_template_string
 from flask_session import Session
 import redis
@@ -280,6 +292,13 @@ app.config['SESSION_REDIS'] = redis.Redis(
 )
 
 Session(app)
+
+# Connect to Redis for cache operations
+cache = redis.Redis(
+    host=REDIS_HOST,
+    port=REDIS_PORT,
+    decode_responses=True
+)
 
 # HTML template
 TEMPLATE = '''
@@ -316,54 +335,134 @@ TEMPLATE = '''
 
 @app.route('/')
 def index():
+    # Track visits in session
     if 'visits' not in session:
         session['visits'] = 0
     session['visits'] += 1
     session['last_visit'] = datetime.now().isoformat()
     
-    return render_template_string(
-        TEMPLATE,
-        visits=session['visits'],
-        last_visit=session['last_visit'],
-        redis_host=REDIS_HOST,
-        test_result=None
-    )
-
-@app.route('/test')
-def test():
-    cache = redis.Redis(host=REDIS_HOST, port=REDIS_PORT, decode_responses=True)
+    # Get instance ID (hostname)
+    instance_id = os.environ.get('HOSTNAME', 'local')
     
-    # Simple Redis tests
-    cache.set('test:key', 'Hello Redis!', ex=60)
-    value = cache.get('test:key')
-    result = f"SET/GET test: {value}\n"
-    
-    cache.hset('test:user', mapping={'name': 'John', 'email': 'john@example.com'})
-    user = cache.hgetall('test:user')
-    result += f"Hash test: {user}"
+    # Get Redis info
+    try:
+        redis_info = cache.info('server')
+        redis_version = redis_info.get('redis_version', 'Unknown')
+        total_keys = cache.dbsize()
+    except Exception as e:
+        redis_version = f"Error: {str(e)}"
+        total_keys = 0
     
     return render_template_string(
         TEMPLATE,
+        session_id=session.get('_id', 'N/A'),
         visits=session['visits'],
         last_visit=session['last_visit'],
+        instance_id=instance_id,
         redis_host=REDIS_HOST,
-        test_result=result
+        redis_info=f"Redis {redis_version}",
+        total_keys=total_keys,
+        cache_result=None
     )
 
-@app.route('/clear')
-def clear():
+@app.route('/cache-test', methods=['POST'])
+def cache_test():
+    results = []
+    
+    # Test 1: String operations
+    cache.set('test:string', 'Hello Redis!', ex=60)
+    value = cache.get('test:string')
+    results.append(f"String SET/GET: {value}")
+    
+    # Test 2: Hash operations
+    cache.hset('test:user:1', mapping={
+        'name': 'John Doe',
+        'email': 'john@example.com',
+        'age': '30'
+    })
+    user = cache.hgetall('test:user:1')
+    results.append(f"Hash HSET/HGETALL: {user}")
+    
+    # Test 3: List operations
+    cache.delete('test:queue')
+    cache.rpush('test:queue', 'job1', 'job2', 'job3')
+    queue_len = cache.llen('test:queue')
+    results.append(f"List RPUSH/LLEN: {queue_len} items")
+    
+    # Test 4: Set operations
+    cache.sadd('test:tags', 'python', 'redis', 'aws', 'flask')
+    tags = cache.smembers('test:tags')
+    results.append(f"Set SADD/SMEMBERS: {tags}")
+    
+    # Test 5: Sorted Set operations
+    cache.zadd('test:leaderboard', {'player1': 100, 'player2': 200, 'player3': 150})
+    top_players = cache.zrevrange('test:leaderboard', 0, 2, withscores=True)
+    results.append(f"Sorted Set ZADD/ZREVRANGE: {top_players}")
+    
+    # Test 6: Expiration
+    cache.setex('test:expire', 5, 'This will expire in 5 seconds')
+    ttl = cache.ttl('test:expire')
+    results.append(f"Expiration TTL: {ttl} seconds remaining")
+    
+    # Get session info again
+    instance_id = os.environ.get('HOSTNAME', 'local')
+    redis_info = cache.info('server')
+    redis_version = redis_info.get('redis_version', 'Unknown')
+    total_keys = cache.dbsize()
+    
+    return render_template_string(
+        TEMPLATE,
+        session_id=session.get('_id', 'N/A'),
+        visits=session['visits'],
+        last_visit=session['last_visit'],
+        instance_id=instance_id,
+        redis_host=REDIS_HOST,
+        redis_info=f"Redis {redis_version}",
+        total_keys=total_keys,
+        cache_result='\\n'.join(results)
+    )
+
+@app.route('/clear-session')
+def clear_session():
     session.clear()
-    return '<html><body><h1>Session Cleared!</h1><a href="/">Go Back</a></body></html>'
+    return render_template_string(
+        '<html><body><h1>Session Cleared!</h1><a href="/">Go Back</a></body></html>'
+    )
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=5000, debug=True)
 EOF
 
 # Create requirements.txt
-cat > requirements.txt <<'EOF'
+cat > requirements.txt <<EOF
 Flask==3.0.0
 Flask-Session==0.5.0
 redis==5.0.1
+EOF
+
+# Create README
+cat > README.md <<EOF
+# Redis Session Management Demo
+
+Flask application demonstrating session management with ElastiCache Redis.
+
+## Setup
+\`\`\`bash
+pip install -r requirements.txt
+\`\`\`
+
+## Run
+\`\`\`bash
+export REDIS_HOST=your-redis-endpoint
+export REDIS_PORT=6379
+python app.py
+\`\`\`
+
+## Features
+- Session persistence across multiple servers
+- Cache operations (String, Hash, List, Set, Sorted Set)
+- Session statistics and monitoring
+- Expiration and TTL management
 EOF
 
 echo "Flask application created in redis-app/ directory"
@@ -384,7 +483,7 @@ cat > redis-app-userdata.sh <<EOF
 dnf update -y
 
 # Install Python 3 and pip
-dnf install -y python3 python3-pip
+dnf install -y python3 python3-pip git
 
 # Create application directory
 mkdir -p /home/ec2-user/app
@@ -402,6 +501,10 @@ PYREQ
 
 # Install Python dependencies
 pip3 install -r requirements.txt
+
+# Set Redis environment variables
+export REDIS_HOST="${REDIS_ENDPOINT}"
+export REDIS_PORT="${REDIS_PORT}"
 
 # Create systemd service for Flask app
 cat > /etc/systemd/system/flask-app.service <<'SERVICE'
@@ -433,6 +536,10 @@ systemctl start flask-app
 echo "Flask application started successfully" > /var/log/userdata-complete.log
 EOF
 
+# Display user data script
+cat redis-app-userdata.sh
+
+echo ""
 echo "User data script created for EC2 instance"
 ```
 
@@ -464,7 +571,7 @@ aws ec2 wait instance-running \
   --instance-ids "$INSTANCE_ID" \
   --region "$REGION"
 
-echo "✅ Instance is now running!"
+echo "Instance is now running!"
 
 # Get public IP address
 PUBLIC_IP=$(aws ec2 describe-instances \
@@ -482,66 +589,64 @@ aws ec2 describe-instances \
   --region "$REGION"
 
 echo ""
-echo "================================================"
-echo "APPLICATION ACCESS"
-echo "================================================"
-echo ""
-echo "Wait 2-3 minutes for application to start"
-echo ""
-echo "Then access the application at:"
-echo "  http://${PUBLIC_IP}:5000"
-echo ""
-echo "Test the following:"
-echo "  1. Refresh the page - visit count increases"
-echo "  2. Click 'Test Redis' - verify Redis operations"
-echo "  3. Click 'Clear Session' - reset visit count"
-echo "  4. Refresh again - visit count starts from 1"
-echo ""
-echo "================================================"
+echo "Wait 2-3 minutes for application to start, then access:"
+echo "http://${PUBLIC_IP}:5000"
 ```
 
 ---
 
-## Step 10 – Test Redis Connection (Optional)
+## Step 10 – Test Redis Connection from EC2
 
 ```bash
-# Create Redis connection test script
-cat > test-redis.sh <<EOF
+# Create Redis CLI test script
+cat > test-redis-connection.sh <<EOF
 #!/bin/bash
-# Test Redis connection from EC2 instance
+# This script tests Redis connectivity from EC2 instance
 
 echo "Testing Redis connection to ${REDIS_ENDPOINT}:${REDIS_PORT}"
 echo ""
 
-# Install redis-cli if needed
+# Test with redis-cli (install if needed)
 if ! command -v redis-cli &> /dev/null; then
     echo "Installing redis-cli..."
     sudo dnf install -y redis6
 fi
 
-echo "Testing PING..."
+echo "1. Testing PING command..."
 redis-cli -h ${REDIS_ENDPOINT} -p ${REDIS_PORT} PING
 
 echo ""
-echo "Setting test key..."
+echo "2. Setting test key..."
 redis-cli -h ${REDIS_ENDPOINT} -p ${REDIS_PORT} SET test:connection "success"
 
 echo ""
-echo "Getting test key..."
+echo "3. Getting test key..."
 redis-cli -h ${REDIS_ENDPOINT} -p ${REDIS_PORT} GET test:connection
+
+echo ""
+echo "4. Getting Redis INFO..."
+redis-cli -h ${REDIS_ENDPOINT} -p ${REDIS_PORT} INFO server | head -20
+
+echo ""
+echo "5. Listing all keys..."
+redis-cli -h ${REDIS_ENDPOINT} -p ${REDIS_PORT} KEYS "*"
 
 echo ""
 echo "Connection test completed!"
 EOF
 
-chmod +x test-redis.sh
+# Make script executable
+chmod +x test-redis-connection.sh
 
 echo ""
-echo "Redis test script created: test-redis.sh"
+echo "Redis connection test script created: test-redis-connection.sh"
 echo ""
 echo "To run on EC2 instance:"
-echo "  1. SSH to instance: ssh -i <key.pem> ec2-user@${PUBLIC_IP}"
-echo "  2. Copy and run the test script"
+echo "1. SSH to instance: ssh -i <key.pem> ec2-user@${PUBLIC_IP}"
+echo "2. Copy and run the test script"
+echo ""
+echo "Or use Systems Manager Session Manager:"
+echo "aws ssm start-session --target $INSTANCE_ID --region $REGION"
 ```
 
 ---
@@ -570,7 +675,7 @@ aws elasticache delete-cache-cluster \
   --region "$REGION"
 
 # Wait for cluster deletion
-echo "Waiting for cluster to be deleted (this may take a few minutes)..."
+echo "Waiting for cluster to be deleted..."
 sleep 60
 
 # Check cluster status
@@ -604,7 +709,7 @@ aws ec2 describe-security-groups \
 # Delete local files
 echo "Cleaning up local files..."
 rm -rf redis-app/
-rm -f redis-app-userdata.sh test-redis.sh
+rm -f redis-app-userdata.sh test-redis-connection.sh
 
 echo ""
 echo "✅ Cleanup completed successfully!"
@@ -630,33 +735,63 @@ In this lab, you have:
 
 **Key Takeaways:**
 - **In-Memory Performance**: Sub-millisecond latency for cache operations
-- **Session Management**: Persistent sessions using Redis as session store
-- **Simple Integration**: Easy to integrate Redis with web applications
-- **Fully Managed**: AWS handles infrastructure, patching, and backups
-- **Cost Effective**: cache.t3.micro is free tier eligible
+- **Session Management**: Persistent sessions across multiple application servers
+- **Data Structures**: Rich data types (strings, hashes, lists, sets, sorted sets)
+- **Scalability**: Horizontal scaling with read replicas
+- **High Availability**: Multi-AZ with automatic failover
+- **Cost Effective**: Pay only for resources used
+- **Fully Managed**: Automated backups, patching, and monitoring
 
-**Common Redis Use Cases:**
-| Use Case | Description |
-|----------|-------------|
-| **Session Store** | Web application session storage |
-| **Cache** | Database query result caching |
-| **Rate Limiting** | API request throttling |
-| **Real-time Analytics** | Counters and leaderboards |
-| **Message Queue** | Background job processing |
+**Redis Use Cases:**
+| Use Case | Description | Implementation |
+|----------|-------------|----------------|
+| **Session Store** | Web application sessions | Flask-Session with Redis backend |
+| **Cache** | Database query results | Cache-aside pattern |
+| **Real-time Analytics** | Counters, leaderboards | Sorted sets, HyperLogLog |
+| **Message Queue** | Job queues, pub/sub | Lists, Redis Streams |
+| **Rate Limiting** | API throttling | Counters with expiration |
+| **Geospatial** | Location-based services | Geo commands |
 
-**Best Practices:**
-- Use appropriate TTL (time-to-live) for cached data
+**ElastiCache vs Self-Managed Redis:**
+| Feature | ElastiCache | Self-Managed |
+|---------|-------------|--------------|
+| **Setup** | Minutes | Hours/Days |
+| **Scaling** | Automated | Manual |
+| **Patching** | Automatic | Manual |
+| **Monitoring** | CloudWatch integrated | Custom setup |
+| **Backups** | Automated | Manual scripts |
+| **Cost** | Pay-as-you-go | EC2 + overhead |
+| **Multi-AZ** | Built-in | Manual setup |
+
+**Performance Optimization:**
+- Use appropriate instance types for workload
+- Enable cluster mode for horizontal scaling
 - Implement connection pooling in applications
-- Monitor cache memory usage
-- Set maxmemory-policy for eviction strategy
-- Use Redis data structures efficiently
-- Secure Redis with VPC security groups
+- Set appropriate TTL for cached data
+- Monitor cache hit/miss ratios
+- Use pipelining for bulk operations
+- Configure maxmemory-policy for eviction
+
+**Cache Strategies:**
+- **Cache-Aside**: App checks cache, loads from DB on miss
+- **Write-Through**: Write to cache and DB simultaneously
+- **Write-Behind**: Write to cache, async write to DB
+- **Refresh-Ahead**: Proactively refresh before expiration
 
 **Real-World Architectures:**
-- **Web Applications**: Session storage for load-balanced servers
-- **E-commerce**: Shopping cart persistence
-- **Gaming**: Player sessions and leaderboards
-- **APIs**: Response caching and rate limiting
+- **Web Applications**: Session storage for stateless app servers
+- **E-commerce**: Product catalog caching, shopping carts
+- **Gaming**: Leaderboards, player sessions, real-time scores
+- **Social Media**: User feeds, trending topics, notifications
+- **IoT**: Device state management, time-series data
+- **API Gateway**: Rate limiting, response caching
+
+**Cost Optimization:**
+- Use cache.t3.micro for development/testing (free tier)
+- Right-size instance types based on memory needs
+- Delete unused clusters and snapshots
+- Use Reserved Nodes for production (up to 55% savings)
+- Monitor memory usage and optimize data structures
 
 ---
 
@@ -664,7 +799,8 @@ In this lab, you have:
 - [Amazon ElastiCache for Redis](https://docs.aws.amazon.com/AmazonElastiCache/latest/red-ug/WhatIs.html)
 - [Redis Commands Reference](https://redis.io/commands/)
 - [ElastiCache Best Practices](https://docs.aws.amazon.com/AmazonElastiCache/latest/red-ug/BestPractices.html)
-- [Flask-Session Documentation](https://flask-session.readthedocs.io/)
 - [Caching Strategies](https://docs.aws.amazon.com/AmazonElastiCache/latest/red-ug/Strategies.html)
+- [Monitoring ElastiCache](https://docs.aws.amazon.com/AmazonElastiCache/latest/red-ug/CacheMetrics.html)
+- [Flask-Session Documentation](https://flask-session.readthedocs.io/)
 
 ---
