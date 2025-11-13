@@ -133,15 +133,19 @@ This comprehensive lab series provides hands-on experience with Amazon Web Servi
 </details>
 
 <details>
-  <summary>Lab Session 08: Monitoring and Logging Operations</summary>
+  <summary>Lab Session 08: Monitoring, Logging, and Security Auditing</summary>
 
-  Monitor, audit, and analyze your AWS environment using native observability tools.
+  Monitor AWS resources, audit API activity, analyze network traffic, and track access patterns using native logging and observability services. All labs are free tier compatible with CloudWatch, CloudTrail, VPC Flow Logs, and Athena.
 
   **Labs for this session:**
-  - [lab_8_a_cloudwatch-dashboard.md](session08/lab_8_a_cloudwatch-dashboard.md):  
-    *Configure CloudWatch dashboards, metrics, and alarms.*
-  - [lab_8_b_cloudtrail-logs.md](session08/lab_8_b_cloudtrail-logs.md):  
-    *Track and audit API calls using CloudTrail and Log Insights.*
+  - [lab_8_a_cloudwatch-dashboard-alarms.md](session08/lab_8_a_cloudwatch-dashboard-alarms.md):  
+    *Monitor EC2 instances with CloudWatch dashboards showing CPU, network, and disk metrics. Create alarms for high CPU utilization with SNS email notifications. Test alarm triggers with stress testing. 
+  - [lab_8_b_cloudtrail-auditing.md](session08/lab_8_b_cloudtrail-auditing.md):  
+    *Enable CloudTrail for API activity logging to S3 and CloudWatch Logs. Query logs with Logs Insights (all calls, S3 operations, failed requests). Create metric filters and alarms for DeleteBucket operations. Security audit trail. 
+  - [lab_8_c_vpc-flow-logs.md](session08/lab_8_c_vpc-flow-logs.md):  
+    *Capture VPC network traffic with Flow Logs to CloudWatch. Analyze accepted and rejected connections with Logs Insights. Create alarms for suspicious activity (port scans, high rejected traffic). Network security monitoring. 
+  - [lab_8_d_s3-access-logging-athena.md](session08/lab_8_d_s3-access-logging-athena.md):  
+    *Enable S3 server access logging to track all bucket requests. Create Athena table to query logs with SQL (top IPs, status codes, bandwidth usage, errors). Identify unauthorized access attempts (403, 404). Compliance audit trails. 
 
 </details>
 
