@@ -85,13 +85,17 @@ This comprehensive lab series provides hands-on experience with Amazon Web Servi
 <details>
   <summary>Lab Session 05: Load Balancing and Auto Scaling (Free Tier)</summary>
 
-  Implement high availability and elasticity using free tier-eligible Classic Load Balancers and Auto Scaling Groups with CloudWatch integration. Learn automatic scaling based on demand and scheduled scaling patterns.
+  Implement high availability and elasticity using free tier-eligible Classic Load Balancers and Auto Scaling Groups with CloudWatch integration. Learn automatic scaling based on demand, scheduled scaling patterns, and global traffic distribution with Route 53.
 
   **Labs for this session:**
   - [lab_5_a_clb-deployment.md](session05/lab_5_a_clb-deployment.md):  
     *Deploy web application behind Classic Load Balancer (CLB) with free tier eligibility (750 hours/month). Configure multi-AZ deployment, health checks, load distribution, and test automatic failover.*
   - [lab_5_b_autoscaling-cloudwatch.md](session05/lab_5_b_autoscaling-cloudwatch.md):  
     *Create Auto Scaling Group with Launch Template and configure target-tracking scaling policy (CPU-based) and scheduled scaling. Monitor scaling activities through CloudWatch metrics and test automatic capacity adjustment.*
+  - [lab_5_c_clb-asg-integration.md](session05/lab_5_c_clb-asg-integration.md):  
+    *Integrate Classic Load Balancer with Auto Scaling Group for automatic traffic distribution across scaling instances. Configure health checks at both CLB and ASG levels, test automatic instance replacement on failure, and monitor load distribution during scaling events.*
+  - [lab_5_d_route53-multi-region.md](session05/lab_5_d_route53-multi-region.md):  
+    *Implement global high availability with Route 53 latency-based routing across two regions (ap-southeast-2, us-east-1). Deploy identical applications in both regions, configure Route 53 health checks for automatic failover, and test traffic routing to nearest region.*
 
 </details>
 
