@@ -2,13 +2,13 @@
 
 ## 📚 Technical Introduction
 
-This comprehensive lab series provides hands-on experience with Amazon Web Services (AWS), covering fundamental to advanced cloud computing concepts. Through 10 progressive sessions where you'll gain practical skills in deploying, managing, and optimizing cloud infrastructure.
+This comprehensive lab series provides hands-on experience with Amazon Web Services (AWS), covering fundamental to advanced cloud computing concepts. Through 16 progressive sessions, you'll gain practical skills in deploying, managing, and optimizing cloud infrastructure across compute, storage, databases, security, containers, serverless, DevOps, AI/ML, networking, and cost optimization.
 
 ---
 
 **Prerequisites:**
 - Basic understanding of cloud computing concepts
-- Familiarity with command line interfaces
+- Familiarity with command line interfaces (Bash, AWS CLI)
 - Programming knowledge (Python, Node.js, or similar)
 - AWS account (Free Tier eligible for most labs)
 
@@ -166,8 +166,129 @@ This comprehensive lab series provides hands-on experience with Amazon Web Servi
 
 </details>
 
+<details>
+  <summary>Lab Session 10: CI/CD Pipelines – CodeCommit, CodeBuild, CodePipeline, and CodeDeploy</summary>
+
+  Build complete CI/CD pipelines using AWS native DevOps tools and integrate with GitHub Actions. Automate building, testing, and deploying applications with multi-stage pipelines, blue/green deployments, and automated rollbacks. All labs are free tier compatible.
+
+  **Labs for this session:**
+  - [lab_10_a_codecommit-codebuild-docker.md](session10/lab_10_a_codecommit-codebuild-docker.md):  
+    *Create Git repository in CodeCommit, push Flask app code, build Docker image with CodeBuild using buildspec.yml, and push to ECR. Complete CI workflow with automated builds triggered by code commits. 
+  - [lab_10_b_codepipeline-multi-stage.md](session10/lab_10_b_codepipeline-multi-stage.md):  
+    *Build end-to-end CI/CD pipeline with CodePipeline (Source → Build → Deploy stages). Automatically detect CodeCommit changes, build with CodeBuild, deploy to Elastic Beanstalk. Visualize pipeline execution, handle failures, and implement manual approval gates. 
+  - [lab_10_c_github-actions-aws.md](session10/lab_10_c_github-actions-aws.md):  
+    *Deploy to AWS using GitHub Actions workflow. Configure OIDC authentication (no long-term credentials), build Docker image, push to ECR, and deploy to ECS. GitHub-native CI/CD alternative to AWS CodePipeline. 
+  - [lab_10_d_codedeploy-bluegreen.md](session10/lab_10_d_codedeploy-bluegreen.md):  
+    *Implement blue/green deployment with CodeDeploy and Auto Scaling Groups. Deploy new application version to "green" environment, test with health checks, automatically shift traffic from "blue" to "green", and rollback on failure. Zero-downtime deployments. 
+
+</details>
+
+<details>
+  <summary>Lab Session 11: AI/ML Services – Rekognition, Comprehend, Translate, and SageMaker</summary>
+
+  Leverage AWS AI/ML services for computer vision, natural language processing, translation, and machine learning model deployment. Build intelligent applications without ML expertise using pre-trained models and APIs. All labs are free tier compatible with generous monthly limits.
+
+  **Labs for this session:**
+  - [lab_11_a_rekognition-image-analysis.md](session11/lab_11_a_rekognition-image-analysis.md):  
+    *Analyze images with Amazon Rekognition: detect objects, text (OCR), faces with attributes (age, gender, emotions), celebrities, and compare faces. Upload images to S3 and call Rekognition APIs for computer vision insights. 
+  - [lab_11_b_comprehend-sentiment-analysis.md](session11/lab_11_b_comprehend-sentiment-analysis.md):  
+    *Perform sentiment analysis and NLP with Amazon Comprehend. Analyze customer reviews to detect sentiment (positive/negative/neutral/mixed), extract key phrases, identify entities (people, organizations, locations), and determine dominant language automatically. 
+  - [lab_11_c_translate-multi-language.md](session11/lab_11_c_translate-multi-language.md):  
+    *Build multi-language translation pipeline with Amazon Translate. Translate text between 75+ languages, detect source language automatically, batch translate documents in S3, handle custom terminology, and integrate with web applications for real-time translation. 
+  - [lab_11_d_sagemaker-model-deployment.md](session11/lab_11_d_sagemaker-model-deployment.md):  
+    *Deploy machine learning model with SageMaker. Train XGBoost classifier on iris dataset, create model artifact, deploy to real-time inference endpoint, test predictions via API, and monitor invocations. Complete ML workflow from training to production. 
+
+</details>
+
+<details>
+  <summary>Lab Session 12: Hybrid Cloud Networking – VPC Peering, Transit Gateway, VPN, and Direct Connect</summary>
+
+  Connect VPCs, on-premises networks, and multi-region architectures using AWS hybrid networking services. Implement VPC peering, centralized routing with Transit Gateway, site-to-site VPN, and simulated Direct Connect. Build scalable hub-and-spoke network topologies.
+
+  **Labs for this session:**
+  - [lab_12_a_vpc-peering.md](session12/lab_12_a_vpc-peering.md):  
+    *Connect two VPCs in same region with VPC Peering (free). Create peering connection, update route tables for bidirectional traffic, test connectivity between EC2 instances in different VPCs. Simple point-to-point VPC connectivity. 
+  - [lab_12_b_transit-gateway.md](session12/lab_12_b_transit-gateway.md):  
+    *Build hub-and-spoke network with AWS Transit Gateway (paid: $0.05/hour + data transfer). Connect three VPCs through central Transit Gateway, configure route propagation, test transitive routing between spoke VPCs, and visualize network topology. Scalable multi-VPC architecture. 
+  - [lab_12_c_site-to-site-vpn.md](session12/lab_12_c_site-to-site-vpn.md):  
+    *Create encrypted site-to-site VPN connection between on-premises network (simulated with VPC + EC2 as VPN client) and AWS VPC. Configure Virtual Private Gateway, Customer Gateway, VPN tunnels with BGP routing, test encrypted connectivity. Hybrid cloud foundation. 
+  - [lab_12_d_direct-connect-gateway.md](session12/lab_12_d_direct-connect-gateway.md):  
+    *Simulate AWS Direct Connect with VPC Peering and routing configuration (actual Direct Connect requires physical connection). Understand Direct Connect Gateway concepts for connecting on-premises to multiple VPCs across regions with private, dedicated network connection (1-100 Gbps). 
+
+</details>
+
+<details>
+  <summary>Lab Session 13: Security and Compliance – AWS Config, GuardDuty, Security Hub, and KMS</summary>
+
+  Implement comprehensive security monitoring, compliance auditing, threat detection, and encryption key management. Use AWS native security services to assess configuration compliance, detect malicious activity, centralize security findings, and manage encryption keys.
+
+  **Labs for this session:**
+  - [lab_13_a_aws-config.md](session13/lab_13_a_aws-config.md):  
+    *Track resource configuration changes and compliance with AWS Config. Enable Config recorder, configure S3 delivery channel, create compliance rules (encrypted EBS, public S3 buckets, required tags), view configuration timeline, remediate non-compliant resources, and export compliance reports. 
+  - [lab_13_b_guardduty.md](session13/lab_13_b_guardduty.md):  
+    *Detect security threats with Amazon GuardDuty intelligent threat detection. Enable GuardDuty, generate sample findings (cryptocurrency mining, port scanning, unauthorized access), configure SNS notifications for critical findings, analyze threats with severity levels, and implement automated remediation. 
+  - [lab_13_c_security-hub.md](session13/lab_13_c_security-hub.md):  
+    *Centralize security findings with AWS Security Hub. Aggregate findings from GuardDuty, Config, IAM Access Analyzer, and other services. View security score, assess compliance with AWS Foundational Security Best Practices, CIS benchmarks, and export findings for remediation. 
+  - [lab_13_d_kms-envelope-encryption.md](session13/lab_13_d_kms-envelope-encryption.md):  
+    *Manage encryption keys with AWS KMS and implement envelope encryption. Create customer managed keys (CMK), configure key policies and grants, encrypt/decrypt data with KMS API, implement envelope encryption pattern (encrypt data keys), rotate keys automatically, and audit key usage with CloudTrail. 
+
+</details>
+
+<details>
+  <summary>Lab Session 14: Disaster Recovery and Business Continuity – AWS Backup, Multi-Region, and Failover</summary>
+
+  Implement disaster recovery strategies with automated backups, cross-region replication, and failover architectures. Learn backup policies, point-in-time recovery, multi-region high availability, and automated disaster recovery workflows. Build resilient applications that survive regional failures.
+
+  **Labs for this session:**
+  - [lab_14_a_aws-backup.md](session14/lab_14_a_aws-backup.md):  
+    *Centralize backup management with AWS Backup service. Create backup vault with encryption, define backup plan with daily/weekly schedules and retention policies, protect EBS volumes and RDS databases, test restore procedures, configure cross-region backup copy, and implement lifecycle policies for cost optimization. 
+  - [lab_14_b_rds-cross-region-replica.md](session14/lab_14_b_rds-cross-region-replica.md):  
+    *Configure RDS cross-region read replica for disaster recovery. Create primary RDS MySQL in ap-southeast-2, set up asynchronous replica in us-east-1, test read operations from replica, simulate regional failure by promoting replica to standalone instance. Geographic redundancy for databases. 
+  - [lab_14_c_s3-cross-region-replication.md](session14/lab_14_c_s3-cross-region-replication.md):  
+    *Implement S3 Cross-Region Replication (CRR) for automatic object replication. Enable versioning on source and destination buckets, configure replication rule with IAM role, test automatic replication of new objects, verify replication status and metrics, replicate existing objects with S3 Batch Replication. Geographic data redundancy. 
+  - [lab_14_d_route53-failover-routing.md](session14/lab_14_d_route53-failover-routing.md):  
+    *Build active-passive disaster recovery with Route 53 failover routing. Deploy primary application in ap-southeast-2 and failover application in us-east-1, configure Route 53 health checks for automatic failure detection, create failover routing policy, simulate primary region failure and verify automatic traffic redirection to failover region. 
+
+</details>
+
+<details>
+  <summary>Lab Session 15: Migration and Modernization – DataSync, DMS, MGN, Containers, and Serverless</summary>
+
+  Migrate and modernize applications using AWS migration tools. Transfer large datasets with DataSync, migrate databases with DMS, migrate servers with Application Migration Service, containerize legacy applications with Docker/ECS, and refactor to serverless architectures with Lambda.
+
+  **Labs for this session:**
+  - [lab_15_a_datasync-migration.md](session15/lab_15_a_datasync-migration.md):  
+    *Transfer large datasets with AWS DataSync for automated migration. Create DataSync agent, configure source location (simulated NFS on EC2) and destination (S3/EFS), create migration task with scheduling, monitor transfer progress, verify data integrity, and compare DataSync performance vs traditional file copy. 
+  - [lab_15_b_dms-mysql-to-aurora.md](session15/lab_15_b_dms-mysql-to-aurora.md):  
+    *Migrate database with AWS Database Migration Service (DMS). Set up source MySQL and target Aurora MySQL databases, create replication instance, configure source and target endpoints, create migration task with full load + CDC (change data capture), monitor replication, verify data consistency, and minimize downtime. 
+  - [lab_15_c_server-migration-service.md](session15/lab_15_c_server-migration-service.md):  
+    *Migrate servers to AWS with Application Migration Service (AWS MGN). Install replication agent on source server, configure replication settings, monitor continuous data replication, launch test instance in AWS, validate application functionality, perform cutover to migrate production workload. Lift-and-shift migration. 
+  - [lab_15_d_containerize-legacy-app.md](session15/lab_15_d_containerize-legacy-app.md):  
+    *Containerize legacy application with Docker and deploy to ECS Fargate. Create Flask application, write Dockerfile with best practices, build and test locally, push to ECR, deploy to ECS Fargate with task definitions, configure networking and security groups, validate container deployment. Application modernization. 
+  - [lab_15_e_modernize-to-serverless.md](session15/lab_15_e_modernize-to-serverless.md):  
+    *Refactor legacy application to serverless architecture. Extract business logic from monolithic app, convert to Lambda function, create DynamoDB table for data storage, expose via API Gateway REST API, test serverless endpoints, analyze cost benefits and operational improvements. Complete modernization. 
+
+</details>
+
+<details>
+  <summary>Lab Session 16: Cost Management and Optimization – Cost Explorer, Trusted Advisor, Budgets, and Well-Architected</summary>
+
+  Master AWS cost management and optimization tools. Analyze spending patterns, identify cost-saving opportunities, set budget alerts, review security and performance best practices, and implement Well-Architected Framework principles for optimized cloud operations.
+
+  **Labs for this session:**
+  - [lab_16_a_cost-explorer.md](session16/lab_16_a_cost-explorer.md):  
+    *Analyze AWS spending with Cost Explorer API. Query daily and monthly costs, break down by service and region, identify top cost contributors, generate cost forecasts for budget planning, export data to JSON/CSV, calculate cost summaries and trends. Comprehensive cost visibility. 
+  - [lab_16_b_trusted-advisor.md](session16/lab_16_b_trusted-advisor.md):  
+    *Optimize AWS environment with Trusted Advisor best practice checks. List security, cost, performance, fault tolerance, and service limit checks, identify warnings and errors, filter by category, get detailed recommendations, refresh checks for latest status, export findings. Automated optimization recommendations. 
+  - [lab_16_c_aws-budgets.md](session16/lab_16_c_aws-budgets.md):  
+    *Set cost alerts with AWS Budgets. Create SNS topic for notifications, configure monthly cost budget with spending limit, add multiple alert thresholds (80%, 90%, 100%), subscribe email for alerts, verify notifications, track budget status. Proactive cost control. 
+  - [lab_16_d_well-architected-review.md](session16/lab_16_d_well-architected-review.md):  
+    *Review workloads with AWS Well-Architected Tool. Create workload definition, list available lenses (frameworks), review questions across six pillars (Operational Excellence, Security, Reliability, Performance Efficiency, Cost Optimization, Sustainability), answer best practice questions, generate improvement recommendations, create milestone for progress tracking. 
+
+</details>
+
 ---
 
 #### 🧑‍🏫 Author: Georges Bou Ghantous
-<sub><i>This repository delivers practical AWS training through structured, end-to-end lab sessions that progressively build cloud expertise across compute, networking, storage, databases, containers, serverless, and automation.</i></sub>
+<sub><i>This repository delivers practical AWS training through 16 structured lab sessions covering compute, networking, storage, databases, IAM, containers, serverless, monitoring, IaC, CI/CD, AI/ML, hybrid networking, security, disaster recovery, migration, and cost optimization.</i></sub>
 
