@@ -502,7 +502,7 @@ echo "================================================"
 
 ---
 
-## Step 10 – Test Redis Connection (Optional)
+## Step 10 – Test Redis Connection 
 
 ```bash
 # Create Redis connection test script
