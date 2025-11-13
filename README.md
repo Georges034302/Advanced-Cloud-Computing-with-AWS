@@ -150,15 +150,19 @@ This comprehensive lab series provides hands-on experience with Amazon Web Servi
 </details>
 
 <details>
-  <summary>Lab Session 09: Infrastructure as Code with CloudFormation and CDK</summary>
+  <summary>Lab Session 09: Infrastructure as Code – CloudFormation, CDK, and Terraform</summary>
 
-  Automate AWS resource creation and management with Infrastructure as Code (IaC).
+  Master Infrastructure as Code (IaC) tools to define, deploy, and manage AWS resources using code. Learn CloudFormation advanced patterns, AWS CDK with Python, and Terraform multi-cloud basics. All labs are free tier compatible.
 
   **Labs for this session:**
-  - [lab_10_a_cloudformation-stack.md](session10/lab_10_a_cloudformation-stack.md):  
-    *Deploy an automated EC2 and S3 stack using CloudFormation.*
-  - [lab_10_b_cdk-python-deploy.md](session10/lab_10_b_cdk-python-deploy.md):  
-    *Build and deploy infrastructure using AWS CDK (Python version).*
+  - [lab_9_a_cloudformation-vpc-2tier.md](session09/lab_9_a_cloudformation-vpc-2tier.md):  
+    *Deploy two-tier VPC architecture with CloudFormation (7 steps, 400 lines). Web server in public subnet, Flask API in private subnet, Classic Load Balancer, security group isolation, and complete network infrastructure from single YAML template. 
+  - [lab_9_b_cloudformation-nested-stacks.md](session09/lab_9_b_cloudformation-nested-stacks.md):  
+    *Build modular infrastructure with CloudFormation nested stacks. Create parent stack orchestrating child stacks (network.yaml, compute.yaml), use cross-stack references with Exports/Imports, preview changes with Change Sets before applying, detect configuration drift from manual changes. 
+  - [lab_9_c_cdk-python-serverless.md](session09/lab_9_c_cdk-python-serverless.md):  
+    *Deploy serverless API using AWS CDK with Python. Define Lambda functions, DynamoDB table, and API Gateway using CDK constructs instead of YAML/JSON. Experience CDK workflow: synth (generate CloudFormation), diff (preview changes), deploy, and destroy. Compare CDK advantages over raw CloudFormation. 
+  - [lab_9_d_terraform-vpc.md](session09/lab_9_d_terraform-vpc.md):  
+    *Learn Terraform basics with VPC deployment in ap-southeast-2. Write HCL configuration (providers, resources, variables, outputs), configure remote state in S3 with DynamoDB locking, use terraform plan/apply/destroy workflow, and import existing resources. Alternative IaC tool for multi-cloud environments. 
 
 </details>
 
