@@ -100,15 +100,19 @@ This comprehensive lab series provides hands-on experience with Amazon Web Servi
 </details>
 
 <details>
-  <summary>Lab Session 06: Containerizing Applications with ECS (Fargate)</summary>
+  <summary>Lab Session 06: Container Orchestration with ECS, Fargate, and EKS</summary>
 
-  Package and deploy containerized applications with Amazon ECS and ECR.
+  Master container deployment on AWS through multiple orchestration platforms. Build Docker images, push to ECR, and deploy using ECS with EC2 (free tier), Elastic Beanstalk (free tier), ECS Fargate (serverless, paid), and Amazon EKS (Kubernetes, paid).
 
   **Labs for this session:**
-  - [lab_6_a_ecr-docker-push.md](session06/lab_6_a_ecr-docker-push.md):  
-    *Build and push Docker images to Amazon Elastic Container Registry (ECR).*
-  - [lab_6_b_ecs-fargate-deploy.md](session06/lab_6_b_ecs-fargate-deploy.md):  
-    *Deploy a containerized app on Amazon ECS using Fargate.*
+  - [lab_6_a_ecr-ecs-deployment.md](session06/lab_6_a_ecr-ecs-deployment.md):  
+    *Build Python Flask joke API Docker image, push to ECR, and deploy to ECS using EC2 launch type with t2.micro instance. Complete container workflow from build to deployment. **FREE TIER** (750 hours/month).*
+  - [lab_6_b_elastic-beanstalk-docker.md](session06/lab_6_b_elastic-beanstalk-docker.md):  
+    *Deploy containerized Python Flask API to Elastic Beanstalk with Docker. Automatic infrastructure management, health monitoring, and rolling updates. **FREE TIER** (t2.micro, 750 hours/month).*
+  - [lab_6_c_ecs-fargate-deployment.md](session06/lab_6_c_ecs-fargate-deployment.md):  
+    *Deploy containerized joke API to ECS using Fargate serverless containers. No infrastructure management, pay per vCPU/GB-hour. **PAID** (~$0.04/hour minimum, delete immediately after lab).*
+  - [lab_6_d_eks-microservices.md](session06/lab_6_d_eks-microservices.md):  
+    *Deploy microservices (dad-jokes and tech-jokes) to Amazon EKS with Kubernetes. Create cluster, deploy pods, configure services, and test inter-service communication. **PAID** (EKS $0.10/hour + worker nodes, delete immediately after lab).*
 
 </details>
 
