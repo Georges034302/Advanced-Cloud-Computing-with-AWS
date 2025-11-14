@@ -1,4 +1,4 @@
-# Lab 4.A: Provision and connect to an RDS MySQL database in a private subnet
+# Lab 4.A: Provision and connect to an RDS MySQL database in a private subnet using Bastion host
 <img width="1536" height="1024" alt="IMG" src="https://github.com/user-attachments/assets/97ac4aaa-bf9b-4876-90a4-38ad219041f5" />
 
 ## Overview

@@ -71,7 +71,7 @@ This comprehensive lab series provides hands-on experience with Amazon Web Servi
   Master AWS database services by implementing relational databases with Multi-AZ high availability, NoSQL databases with DynamoDB, and in-memory caching with ElastiCache Redis for session management.
 
   **Labs for this session:**
-  - [lab_4_a_rds-mysql-private.md](session04/lab_4_a_rds-mysql-private.md):  
+  - [lab_4_a_rds-mysql-bastion.md](session04/lab_4_a_rds-mysql-bastion.md):  
     *Provision and connect to an RDS MySQL database in a private subnet. Configure security groups, connect from EC2, create tables, and perform basic SQL operations.*
   - [lab_4_b_dynamodb-cli.md](session04/lab_4_b_dynamodb-cli.md):  
     *Build and query a DynamoDB table using AWS CLI and SDK. Work with partition keys, sort keys, queries, scans, and global secondary indexes (GSI).*
