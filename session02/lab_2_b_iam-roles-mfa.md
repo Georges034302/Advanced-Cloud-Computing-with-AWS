@@ -1,4 +1,5 @@
 # Lab 2.B: IAM Roles and MFA for Secure Access
+<img width="1418" height="864" alt="IMG" src="https://github.com/user-attachments/assets/13012146-e2db-4898-9786-0a0e127a7b9d" />
 
 ## Overview
 This lab demonstrates how to create and configure IAM roles for cross-account or service access, require Multi-Factor Authentication (MFA) for privileged operations, and validate role assumption and MFA enforcement using the AWS CLI.
