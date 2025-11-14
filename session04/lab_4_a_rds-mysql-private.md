@@ -1,4 +1,5 @@
 # Lab 4.A: Provision and connect to an RDS MySQL database in a private subnet
+<img width="1536" height="1024" alt="IMG" src="https://github.com/user-attachments/assets/97ac4aaa-bf9b-4876-90a4-38ad219041f5" />
 
 ## Overview
 Provision an Amazon RDS for MySQL instance in private subnets, secure network access, store credentials in AWS Secrets Manager, and connect from a bastion host. Validate connectivity and perform basic SQL operations.
