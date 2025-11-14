@@ -1,4 +1,5 @@
 # Lab 3.C: S3 Static Website Hosting
+<img width="1536" height="1024" alt="IMG" src="https://github.com/user-attachments/assets/981e71f8-c942-4dc9-8d9c-4c5d1d19596f" />
 
 ## Overview
 This lab demonstrates how to deploy a static website using Amazon S3. You will configure public website access, custom error pages, and test the S3 static website endpoint.
