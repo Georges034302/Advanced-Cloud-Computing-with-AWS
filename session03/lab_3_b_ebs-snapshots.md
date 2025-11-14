@@ -21,17 +21,17 @@ Learn to create EC2 instances, attach and manage EBS volumes, create snapshots, 
 ### 1. Set Variables
 ```bash
 # Get AWS account ID
-export ACCOUNT_ID=$(aws sts get-caller-identity \
+ACCOUNT_ID=$(aws sts get-caller-identity \
   --query Account \
   --output text)
 echo "ACCOUNT_ID=$ACCOUNT_ID"
 
 # Set region
-export REGION="ap-southeast-2"
+REGION="ap-southeast-2"
 echo "REGION=$REGION"
 
 # Get default VPC
-export VPC_ID=$(aws ec2 describe-vpcs \
+VPC_ID=$(aws ec2 describe-vpcs \
   --region "$REGION" \
   --filters "Name=is-default,Values=true" \
   --query 'Vpcs[0].VpcId' \
@@ -40,7 +40,7 @@ echo "VPC_ID=$VPC_ID"
 
 # If no default VPC, create one
 if [ "$VPC_ID" = "None" ] || [ -z "$VPC_ID" ]; then
-  export VPC_ID=$(aws ec2 create-default-vpc \
+  VPC_ID=$(aws ec2 create-default-vpc \
     --region "$REGION" \
     --query 'Vpc.VpcId' \
     --output text)
@@ -48,14 +48,14 @@ if [ "$VPC_ID" = "None" ] || [ -z "$VPC_ID" ]; then
 fi
 
 # Get subnet and availability zone
-export SUBNET_ID=$(aws ec2 describe-subnets \
+SUBNET_ID=$(aws ec2 describe-subnets \
   --region "$REGION" \
   --filters "Name=vpc-id,Values=$VPC_ID" \
   --query 'Subnets[0].SubnetId' \
   --output text)
 echo "SUBNET_ID=$SUBNET_ID"
 
-export AVAILABILITY_ZONE=$(aws ec2 describe-subnets \
+AVAILABILITY_ZONE=$(aws ec2 describe-subnets \
   --region "$REGION" \
   --subnet-ids "$SUBNET_ID" \
   --query 'Subnets[0].AvailabilityZone' \
@@ -66,9 +66,9 @@ echo "AVAILABILITY_ZONE=$AVAILABILITY_ZONE"
 ### 2. Create Security Group
 ```bash
 # Create security group for SSH access
-export SG_NAME="ebs-lab-sg"
+SG_NAME="ebs-lab-sg"
 
-export SECURITY_GROUP_ID=$(aws ec2 create-security-group \
+SECURITY_GROUP_ID=$(aws ec2 create-security-group \
   --region "$REGION" \
   --group-name "$SG_NAME" \
   --description "Security group for EBS lab" \
@@ -79,7 +79,7 @@ export SECURITY_GROUP_ID=$(aws ec2 create-security-group \
 echo "SECURITY_GROUP_ID=$SECURITY_GROUP_ID"
 
 # Get your public IP
-export MY_IP=$(curl -s https://checkip.amazonaws.com)
+MY_IP=$(curl -s https://checkip.amazonaws.com)
 echo "MY_IP=$MY_IP"
 
 # Allow SSH from your IP
@@ -96,7 +96,7 @@ echo "SSH access allowed from $MY_IP"
 ### 3. Create Key Pair
 ```bash
 # Set key pair name
-export KEY_NAME="ebs-lab-key"
+KEY_NAME="ebs-lab-key"
 echo "KEY_NAME=$KEY_NAME"
 
 # Check if key exists
@@ -124,7 +124,7 @@ fi
 ### 4. Launch EC2 Instance
 ```bash
 # Get latest Amazon Linux 2023 AMI
-export AMI_ID=$(aws ec2 describe-images \
+AMI_ID=$(aws ec2 describe-images \
   --region "$REGION" \
   --owners amazon \
   --filters "Name=name,Values=al2023-ami-2023*-x86_64" \
@@ -134,7 +134,7 @@ export AMI_ID=$(aws ec2 describe-images \
 echo "AMI_ID=$AMI_ID"
 
 # Launch instance
-export INSTANCE_ID=$(aws ec2 run-instances \
+INSTANCE_ID=$(aws ec2 run-instances \
   --region "$REGION" \
   --image-id "$AMI_ID" \
   --instance-type t3.micro \
@@ -153,7 +153,7 @@ aws ec2 wait instance-running \
   --instance-ids "$INSTANCE_ID"
 
 # Get public IP
-export INSTANCE_IP=$(aws ec2 describe-instances \
+INSTANCE_IP=$(aws ec2 describe-instances \
   --region "$REGION" \
   --instance-ids "$INSTANCE_ID" \
   --query 'Reservations[0].Instances[0].PublicIpAddress' \
@@ -165,7 +165,7 @@ echo "SSH: ssh -i ${KEY_NAME}.pem ec2-user@${INSTANCE_IP}"
 ### 5. Create and Attach EBS Volume
 ```bash
 # Create 10 GiB EBS volume
-export VOLUME_ID=$(aws ec2 create-volume \
+VOLUME_ID=$(aws ec2 create-volume \
   --region "$REGION" \
   --availability-zone "$AVAILABILITY_ZONE" \
   --size 10 \
@@ -181,7 +181,7 @@ aws ec2 wait volume-available \
   --volume-ids "$VOLUME_ID"
 
 # Attach volume to instance
-export DEVICE_NAME="/dev/sdf"
+DEVICE_NAME="/dev/sdf"
 aws ec2 attach-volume \
   --region "$REGION" \
   --volume-id "$VOLUME_ID" \
@@ -246,7 +246,7 @@ echo "Then verify: df -h /mnt/ebs-data"
 ### 8. Create Snapshot
 ```bash
 # Create snapshot
-export SNAPSHOT_ID=$(aws ec2 create-snapshot \
+SNAPSHOT_ID=$(aws ec2 create-snapshot \
   --region "$REGION" \
   --volume-id "$VOLUME_ID" \
   --description "EBS lab snapshot $(date +%Y-%m-%d)" \
@@ -267,7 +267,7 @@ echo "Snapshot created successfully"
 ### 9. Restore Volume from Snapshot
 ```bash
 # Create volume from snapshot
-export RESTORED_VOLUME_ID=$(aws ec2 create-volume \
+RESTORED_VOLUME_ID=$(aws ec2 create-volume \
   --region "$REGION" \
   --availability-zone "$AVAILABILITY_ZONE" \
   --snapshot-id "$SNAPSHOT_ID" \
@@ -283,7 +283,7 @@ aws ec2 wait volume-available \
   --volume-ids "$RESTORED_VOLUME_ID"
 
 # Attach restored volume
-export RESTORED_DEVICE="/dev/sdg"
+RESTORED_DEVICE="/dev/sdg"
 aws ec2 attach-volume \
   --region "$REGION" \
   --volume-id "$RESTORED_VOLUME_ID" \
@@ -305,7 +305,7 @@ echo "  cat /mnt/restored-data/test.txt"
 ### 10. Automate Snapshots with DLM
 ```bash
 # Create DLM IAM role if needed
-export DLM_ROLE_NAME="AWSDataLifecycleManagerDefaultRole"
+DLM_ROLE_NAME="AWSDataLifecycleManagerDefaultRole"
 
 ROLE_EXISTS=$(aws iam get-role \
   --role-name "$DLM_ROLE_NAME" \
@@ -337,7 +337,7 @@ TRUST
 fi
 
 # Get role ARN
-export DLM_ROLE_ARN=$(aws iam get-role \
+DLM_ROLE_ARN=$(aws iam get-role \
   --role-name "$DLM_ROLE_NAME" \
   --query 'Role.Arn' \
   --output text)
@@ -369,7 +369,7 @@ cat > dlm-policy.json <<POLICY
 POLICY
 
 # Create lifecycle policy
-export POLICY_ID=$(aws dlm create-lifecycle-policy \
+POLICY_ID=$(aws dlm create-lifecycle-policy \
   --region "$REGION" \
   --cli-input-json file://dlm-policy.json \
   --query 'PolicyId' \
