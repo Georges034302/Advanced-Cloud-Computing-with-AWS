@@ -208,18 +208,17 @@ cd redis-app
 
 # Create Flask application with Redis session support
 cat > app.py <<'EOF'
-from flask import Flask, session, render_template_string
+from flask import Flask, session
 from flask_session import Session
 import redis
 import os
-from datetime import datetime
 
 app = Flask(__name__)
 app.config['SECRET_KEY'] = 'lab-secret-key'
 app.config['SESSION_TYPE'] = 'redis'
 app.config['SESSION_PERMANENT'] = False
 
-# Redis connection configuration
+# Redis connection from environment variables
 REDIS_HOST = os.environ.get('REDIS_HOST', 'localhost')
 REDIS_PORT = int(os.environ.get('REDIS_PORT', 6379))
 
@@ -231,83 +230,32 @@ app.config['SESSION_REDIS'] = redis.Redis(
 
 Session(app)
 
-# HTML template
-TEMPLATE = '''
-<!DOCTYPE html>
-<html>
-<head>
-    <title>Redis Session Demo</title>
-    <style>
-        body { font-family: Arial; max-width: 600px; margin: 50px auto; padding: 20px; }
-        .info { background: #f0f0f0; padding: 15px; margin: 10px 0; border-radius: 5px; }
-        .button { padding: 10px 20px; margin: 5px; background: #007bff; color: white; 
-                  text-decoration: none; border-radius: 5px; display: inline-block; }
-    </style>
-</head>
-<body>
-    <h1>Redis Session Demo</h1>
-    <div class="info">
-        <h2>Session Info</h2>
-        <p><strong>Visit Count:</strong> {{ visits }}</p>
-        <p><strong>Last Visit:</strong> {{ last_visit }}</p>
-        <p><strong>Redis Host:</strong> {{ redis_host }}</p>
-    </div>
-    <div>
-        <a href="/test" class="button">Test Redis</a>
-        <a href="/clear" class="button">Clear Session</a>
-        <a href="/" class="button">Refresh</a>
-    </div>
-    {% if test_result %}
-    <div class="info"><h3>Test Result</h3><pre>{{ test_result }}</pre></div>
-    {% endif %}
-</body>
-</html>
-'''
-
 @app.route('/')
 def index():
-    if 'visits' not in session:
-        session['visits'] = 0
-    session['visits'] += 1
-    session['last_visit'] = datetime.now().isoformat()
-    
-    return render_template_string(
-        TEMPLATE,
-        visits=session['visits'],
-        last_visit=session['last_visit'],
-        redis_host=REDIS_HOST,
-        test_result=None
-    )
+    # Track visits in session (stored in Redis)
+    session['visits'] = session.get('visits', 0) + 1
+    return f'''
+    <h1>Redis Session Demo</h1>
+    <p>Visit Count: {session["visits"]}</p>
+    <p>Redis: {REDIS_HOST}:{REDIS_PORT}</p>
+    <p><a href="/test">Test Redis</a> | <a href="/clear">Clear</a></p>
+    '''
 
 @app.route('/test')
 def test():
+    # Test basic Redis operations
     cache = redis.Redis(host=REDIS_HOST, port=REDIS_PORT, decode_responses=True)
-    
-    # Test SET/GET operations
     cache.set('test:key', 'Hello Redis!', ex=60)
     value = cache.get('test:key')
-    result = f"SET/GET test: {value}\n"
-    
-    # Test Hash operations
-    cache.hset('test:user', mapping={'name': 'John', 'email': 'john@example.com'})
-    user = cache.hgetall('test:user')
-    result += f"Hash test: {user}"
-    
-    return render_template_string(
-        TEMPLATE,
-        visits=session['visits'],
-        last_visit=session['last_visit'],
-        redis_host=REDIS_HOST,
-        test_result=result
-    )
+    return f'<h1>Redis Test</h1><p>Result: {value}</p><p><a href="/">Back</a></p>'
 
 @app.route('/clear')
 def clear():
     session.clear()
-    return '<html><body><h1>Session Cleared!</h1><a href="/">Go Back</a></body></html>'
+    return '<h1>Session Cleared!</h1><p><a href="/">Back</a></p>'
 
 if __name__ == '__main__':
-    app.run(host='0.0.0.0', port=5000, debug=True)
+    app.run(host='0.0.0.0', port=5000)
 EOF
 
 # Create requirements file
