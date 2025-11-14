@@ -32,10 +32,7 @@ DB_INSTANCE_CLASS=db.t3.micro
 ALLOCATED_STORAGE=20
 DB_SUBNET_GROUP=lab-db-subnet-group
 KEY_NAME=lab-multiaz-bastion-key
-
-# Generate secure password for RDS master user
-MASTER_PASSWORD=$(openssl rand -base64 16)
-echo "Master password: $MASTER_PASSWORD (save this!)"
+SECRET_NAME=lab/rds/multiaz/master
 ```
 
 ---
@@ -150,141 +147,6 @@ aws ec2 modify-subnet-attribute \
 echo "Auto-assign public IP enabled"
 ```
 
-## Step 3 – Create Subnets Across Two Availability Zones
-
-```bash
-# Get availability zones in the region
-AVAILABILITY_ZONES=$(aws ec2 describe-availability-zones \
-  --region "$REGION" \
-  --query 'AvailabilityZones[?State==`available`].ZoneName' \
-  --output text)
-echo "AVAILABILITY_ZONES=$AVAILABILITY_ZONES"
-
-# Get first availability zone
-AZ_1=$(echo "$AVAILABILITY_ZONES" | awk '{print $1}')
-echo "AZ_1=$AZ_1"
-
-# Get first two availability zones
-AZ_2=$(echo "$AVAILABILITY_ZONES" | awk '{print $2}')
-echo "AZ_2=$AZ_2"
-
-# Create public subnet in AZ1 for bastion host
-PUBLIC_SUBNET_ID=$(aws ec2 create-subnet \
-  --vpc-id "$VPC_ID" \
-  --cidr-block "$PUBLIC_SUBNET_CIDR" \
-  --availability-zone "$AZ_1" \
-  --tag-specifications "ResourceType=subnet,Tags=[{Key=Name,Value=lab-public-subnet},{Key=Lab,Value=4C}]" \
-  --region "$REGION" \
-  --query 'Subnet.SubnetId' \
-  --output text)
-echo "PUBLIC_SUBNET_ID=$PUBLIC_SUBNET_ID"
-
-# Create first private subnet in AZ1 for RDS primary
-PRIVATE_SUBNET_1_ID=$(aws ec2 create-subnet \
-  --vpc-id "$VPC_ID" \
-  --cidr-block "$PRIVATE_SUBNET_1_CIDR" \
-  --availability-zone "$AZ_1" \
-  --tag-specifications "ResourceType=subnet,Tags=[{Key=Name,Value=lab-private-subnet-1},{Key=Lab,Value=4C}]" \
-  --region "$REGION" \
-  --query 'Subnet.SubnetId' \
-  --output text)
-echo "PRIVATE_SUBNET_1_ID=$PRIVATE_SUBNET_1_ID"
-
-# Create second private subnet in AZ2 for RDS standby
-PRIVATE_SUBNET_2_ID=$(aws ec2 create-subnet \
-  --vpc-id "$VPC_ID" \
-  --cidr-block "$PRIVATE_SUBNET_2_CIDR" \
-  --availability-zone "$AZ_2" \
-  --tag-specifications "ResourceType=subnet,Tags=[{Key=Name,Value=lab-private-subnet-2},{Key=Lab,Value=4C}]" \
-  --region "$REGION" \
-  --query 'Subnet.SubnetId' \
-  --output text)
-echo "PRIVATE_SUBNET_2_ID=$PRIVATE_SUBNET_2_ID"
-
-echo ""
-echo "Subnets created:"
-echo "  Public subnet (AZ1): $PUBLIC_SUBNET_ID"
-echo "  Private subnet 1 (AZ1): $PRIVATE_SUBNET_1_ID"
-echo "  Private subnet 2 (AZ2): $PRIVATE_SUBNET_2_ID"
-
-# Enable auto-assign public IP for public subnet
-aws ec2 modify-subnet-attribute \
-  --subnet-id "$PUBLIC_SUBNET_ID" \
-  --map-public-ip-on-launch \
-  --region "$REGION"
-
-echo "Auto-assign public IP enabled for public subnet"
-```
-
----
-
-## Step 4 – Create and Attach Internet Gateway
-
-```bash
-# Create Internet Gateway
-IGW_ID=$(aws ec2 create-internet-gateway \
-  --tag-specifications "ResourceType=internet-gateway,Tags=[{Key=Name,Value=lab-igw},{Key=Lab,Value=4C}]" \
-  --region "$REGION" \
-  --query 'InternetGateway.InternetGatewayId' \
-  --output text)
-echo "IGW_ID=$IGW_ID"
-
-# Attach Internet Gateway to VPC
-aws ec2 attach-internet-gateway \
-  --internet-gateway-id "$IGW_ID" \
-  --vpc-id "$VPC_ID" \
-  --region "$REGION"
-
-echo "Internet Gateway attached to VPC"
-
-# Verify attachment
-aws ec2 describe-internet-gateways \
-  --internet-gateway-ids "$IGW_ID" \
-  --query 'InternetGateways[0].{InternetGatewayId:InternetGatewayId,State:Attachments[0].State,VpcId:Attachments[0].VpcId}' \
-  --output table \
-  --region "$REGION"
-```
-
----
-
-## Step 5 – Create Route Tables
-
-```bash
-# Create public route table
-PUBLIC_RT_ID=$(aws ec2 create-route-table \
-  --vpc-id "$VPC_ID" \
-  --tag-specifications "ResourceType=route-table,Tags=[{Key=Name,Value=lab-public-rt},{Key=Lab,Value=4C}]" \
-  --region "$REGION" \
-  --query 'RouteTable.RouteTableId' \
-  --output text)
-echo "PUBLIC_RT_ID=$PUBLIC_RT_ID"
-
-# Add route to Internet Gateway in public route table
-aws ec2 create-route \
-  --route-table-id "$PUBLIC_RT_ID" \
-  --destination-cidr-block 0.0.0.0/0 \
-  --gateway-id "$IGW_ID" \
-  --region "$REGION"
-
-echo "Route to Internet Gateway added to public route table"
-
-# Associate public subnet with public route table
-aws ec2 associate-route-table \
-  --route-table-id "$PUBLIC_RT_ID" \
-  --subnet-id "$PUBLIC_SUBNET_ID" \
-  --region "$REGION"
-
-echo "Public subnet associated with public route table"
-
-# Private subnets will use the default route table (no internet access)
-echo ""
-echo "Network routing configured:"
-echo "  Public subnet → Internet Gateway"
-echo "  Private subnets → No internet access (isolated)"
-```
-
----
-
 ---
 
 ## Step 2: Create Security Groups
@@ -331,7 +193,25 @@ echo "MySQL access authorized from bastion"
 
 ---
 
-## Step 3: Create DB Subnet Group and RDS Instance
+## Step 3: Store Credentials in Secrets Manager
+
+```bash
+# Generate secure password for RDS master user
+MASTER_PASSWORD=$(openssl rand -base64 16)
+echo "Master password generated (hidden for security)"
+
+# Store credentials in AWS Secrets Manager
+aws secretsmanager create-secret \
+  --name "$SECRET_NAME" \
+  --description "RDS MySQL Multi-AZ master credentials" \
+  --secret-string "{\"username\":\"$MASTER_USERNAME\",\"password\":\"$MASTER_PASSWORD\"}" \
+  --region "$REGION"
+echo "Secret created: $SECRET_NAME"
+```
+
+---
+
+## Step 4: Create DB Subnet Group and RDS Instance
 
 ```bash
 # Create DB subnet group with both private subnets (required for Multi-AZ)
@@ -394,7 +274,7 @@ echo "Standby AZ: $SECONDARY_AZ"
 
 ---
 
-## Step 4: Launch Bastion Host
+## Step 5: Launch Bastion Host
 
 ```bash
 # Create SSH key pair for bastion access
@@ -446,9 +326,17 @@ echo "Bastion public IP: $BASTION_PUBLIC_IP"
 
 ---
 
-## Step 5: Connect and Initialize Database
+## Step 6: Connect and Initialize Database
 
 ```bash
+# Retrieve password from Secrets Manager
+MASTER_PASSWORD=$(aws secretsmanager get-secret-value \
+  --secret-id "$SECRET_NAME" \
+  --query 'SecretString' \
+  --output text \
+  --region "$REGION" | jq -r '.password')
+echo "Password retrieved from Secrets Manager"
+
 # Install MySQL client on bastion host
 ssh -i "${KEY_NAME}.pem" -o StrictHostKeyChecking=no ec2-user@"$BASTION_PUBLIC_IP" \
   "sudo dnf install -y mariadb105"
@@ -479,256 +367,103 @@ echo "Database initialized"
 
 ---
 
-## Step 12 – Test Automatic Failover
+## Step 7: Test Multi-AZ Failover
 
 ```bash
-# Record current primary availability zone
-CURRENT_PRIMARY_AZ=$(aws rds describe-db-instances \
+# Record current primary and standby AZs before failover
+CURRENT_PRIMARY=$(aws rds describe-db-instances \
   --db-instance-identifier "$DB_INSTANCE_ID" \
   --query 'DBInstances[0].AvailabilityZone' \
   --output text \
   --region "$REGION")
-echo "CURRENT_PRIMARY_AZ=$CURRENT_PRIMARY_AZ"
+echo "Current primary AZ: $CURRENT_PRIMARY"
 
-CURRENT_SECONDARY_AZ=$(aws rds describe-db-instances \
+CURRENT_STANDBY=$(aws rds describe-db-instances \
   --db-instance-identifier "$DB_INSTANCE_ID" \
   --query 'DBInstances[0].SecondaryAvailabilityZone' \
   --output text \
   --region "$REGION")
-echo "CURRENT_SECONDARY_AZ=$CURRENT_SECONDARY_AZ"
+echo "Current standby AZ: $CURRENT_STANDBY"
 
-echo ""
-echo "================================================"
-echo "INITIATING MULTI-AZ FAILOVER TEST"
-echo "================================================"
-echo ""
-echo "Current configuration:"
-echo "  Primary AZ: $CURRENT_PRIMARY_AZ"
-echo "  Standby AZ: $CURRENT_SECONDARY_AZ"
-echo ""
-echo "Initiating reboot with failover..."
-echo "This will cause:"
-echo "  1. Brief connection interruption (30-60 seconds)"
-echo "  2. Standby becomes new primary"
-echo "  3. Previous primary becomes new standby"
-echo "  4. DNS endpoint remains the same"
-echo "  5. No data loss (synchronous replication)"
-echo ""
-
-# Initiate failover
+# Initiate failover (forces standby to become primary)
+echo "Initiating failover..."
 aws rds reboot-db-instance \
   --db-instance-identifier "$DB_INSTANCE_ID" \
   --force-failover \
   --region "$REGION"
 
-echo "Failover initiated. Monitoring status..."
-
-# Wait for instance to be available again
+# Wait for instance to be available after failover (30-60 seconds)
+echo "Waiting for failover to complete..."
 aws rds wait db-instance-available \
   --db-instance-identifier "$DB_INSTANCE_ID" \
   --region "$REGION"
+echo "Failover completed"
 
-echo ""
-echo "✅ Failover completed!"
-
-# Get new availability zones
-NEW_PRIMARY_AZ=$(aws rds describe-db-instances \
+# Get new primary and standby AZs after failover
+NEW_PRIMARY=$(aws rds describe-db-instances \
   --db-instance-identifier "$DB_INSTANCE_ID" \
   --query 'DBInstances[0].AvailabilityZone' \
   --output text \
   --region "$REGION")
-echo "NEW_PRIMARY_AZ=$NEW_PRIMARY_AZ"
+echo "New primary AZ: $NEW_PRIMARY (was standby)"
 
-NEW_SECONDARY_AZ=$(aws rds describe-db-instances \
+NEW_STANDBY=$(aws rds describe-db-instances \
   --db-instance-identifier "$DB_INSTANCE_ID" \
   --query 'DBInstances[0].SecondaryAvailabilityZone' \
   --output text \
   --region "$REGION")
-echo "NEW_SECONDARY_AZ=$NEW_SECONDARY_AZ"
+echo "New standby AZ: $NEW_STANDBY (was primary)"
 
-# Get endpoint (should be the same)
-NEW_ENDPOINT=$(aws rds describe-db-instances \
+# Verify endpoint remains the same after failover
+CURRENT_ENDPOINT=$(aws rds describe-db-instances \
   --db-instance-identifier "$DB_INSTANCE_ID" \
   --query 'DBInstances[0].Endpoint.Address' \
   --output text \
   --region "$REGION")
-echo "NEW_ENDPOINT=$NEW_ENDPOINT"
-
-echo ""
-echo "================================================"
-echo "FAILOVER RESULTS"
-echo "================================================"
-echo ""
-echo "Before failover:"
-echo "  Primary AZ: $CURRENT_PRIMARY_AZ"
-echo "  Standby AZ: $CURRENT_SECONDARY_AZ"
-echo ""
-echo "After failover:"
-echo "  Primary AZ: $NEW_PRIMARY_AZ (was standby)"
-echo "  Standby AZ: $NEW_SECONDARY_AZ (was primary)"
-echo ""
-echo "Endpoint (unchanged): $NEW_ENDPOINT"
-echo ""
-echo "================================================"
-echo ""
-echo "Next: Connect via bastion and verify data persistence"
-echo "  mysql -h $NEW_ENDPOINT -P $DB_PORT -u $MASTER_USERNAME -p"
-echo "  SELECT @@hostname;"
-echo "  USE $DB_NAME;"
-echo "  SELECT * FROM messages;  -- Data should still be intact"
+echo "Endpoint (unchanged): $CURRENT_ENDPOINT"
 ```
 
 ---
 
-## Step 13 – Validate Data Persistence After Failover
+## Step 8: Validate Data Persistence After Failover
 
 ```bash
-# Create validation SQL script
-cat > validate-failover.sql <<EOF
--- Show current database host
-SELECT @@hostname AS current_host;
+# Retrieve password from Secrets Manager again for validation
+MASTER_PASSWORD=$(aws secretsmanager get-secret-value \
+  --secret-id "$SECRET_NAME" \
+  --query 'SecretString' \
+  --output text \
+  --region "$REGION" | jq -r '.password')
 
--- Show current timestamp
-SELECT NOW() AS current_time;
-
--- Verify database exists
-SHOW DATABASES;
-
--- Use the lab database
-USE $DB_NAME;
-
--- Show tables
-SHOW TABLES;
-
--- Count records in messages table
-SELECT COUNT(*) AS total_messages FROM messages;
-
--- Display all messages to verify data integrity
-SELECT * FROM messages ORDER BY id;
-
--- Insert a new record post-failover
-INSERT INTO messages (msg) 
-VALUES ('Post-failover message - data persisted successfully');
-
--- Verify the new record
-SELECT * FROM messages WHERE msg LIKE 'Post-failover%';
-
--- Summary
-SELECT 
-    'Data persistence verified after failover' AS status,
-    COUNT(*) AS total_records 
-FROM messages;
-EOF
-
-echo ""
-echo "Failover validation script created: validate-failover.sql"
-echo ""
-echo "To validate data persistence:"
-echo "1. Connect to bastion host"
-echo "2. Run: mysql -h $DB_ENDPOINT -P $DB_PORT -u $MASTER_USERNAME -p$MASTER_PASSWORD < validate-failover.sql"
-echo ""
-echo "Expected results:"
-echo "  ✅ All original data intact"
-echo "  ✅ Can insert new data"
-echo "  ✅ No data loss during failover"
-echo "  ✅ Connection automatically redirected to new primary"
+# Query database to verify all data persisted through failover
+echo "Verifying data persistence after failover..."
+ssh -i "${KEY_NAME}.pem" -o StrictHostKeyChecking=no ec2-user@"$BASTION_PUBLIC_IP" \
+  "mysql -h $DB_ENDPOINT -u $MASTER_USERNAME -p'$MASTER_PASSWORD' $DB_NAME -e \"
+SELECT * FROM messages;
+INSERT INTO messages (msg) VALUES ('Post-failover record');
+SELECT * FROM messages;
+\""
+echo "Data persistence verified - all records intact"
 ```
 
 ---
 
-## Step 14 – Monitor RDS Performance Metrics
-
-```bash
-# Get CPU utilization
-echo "Retrieving RDS CPU utilization metrics..."
-
-aws cloudwatch get-metric-statistics \
-  --namespace AWS/RDS \
-  --metric-name CPUUtilization \
-  --dimensions Name=DBInstanceIdentifier,Value="$DB_INSTANCE_ID" \
-  --start-time "$(date -u -d '1 hour ago' +%Y-%m-%dT%H:%M:%S)" \
-  --end-time "$(date -u +%Y-%m-%dT%H:%M:%S)" \
-  --period 300 \
-  --statistics Average,Maximum \
-  --region "$REGION" \
-  --query 'Datapoints[*].{Timestamp:Timestamp,Average:Average,Maximum:Maximum}' \
-  --output table
-
-# Get database connections
-echo ""
-echo "Retrieving database connection metrics..."
-
-aws cloudwatch get-metric-statistics \
-  --namespace AWS/RDS \
-  --metric-name DatabaseConnections \
-  --dimensions Name=DBInstanceIdentifier,Value="$DB_INSTANCE_ID" \
-  --start-time "$(date -u -d '1 hour ago' +%Y-%m-%dT%H:%M:%S)" \
-  --end-time "$(date -u +%Y-%m-%dT%H:%M:%S)" \
-  --period 300 \
-  --statistics Average,Maximum \
-  --region "$REGION" \
-  --query 'Datapoints[*].{Timestamp:Timestamp,Average:Average,Maximum:Maximum}' \
-  --output table
-
-# Get freeable memory
-echo ""
-echo "Retrieving freeable memory metrics..."
-
-aws cloudwatch get-metric-statistics \
-  --namespace AWS/RDS \
-  --metric-name FreeableMemory \
-  --dimensions Name=DBInstanceIdentifier,Value="$DB_INSTANCE_ID" \
-  --start-time "$(date -u -d '1 hour ago' +%Y-%m-%dT%H:%M:%S)" \
-  --end-time "$(date -u +%Y-%m-%dT%H:%M:%S)" \
-  --period 300 \
-  --statistics Average \
-  --region "$REGION" \
-  --query 'Datapoints[*].{Timestamp:Timestamp,FreeMemoryBytes:Average}' \
-  --output table
-
-# List all available RDS metrics
-echo ""
-echo "Available CloudWatch metrics for RDS:"
-aws cloudwatch list-metrics \
-  --namespace AWS/RDS \
-  --dimensions Name=DBInstanceIdentifier,Value="$DB_INSTANCE_ID" \
-  --region "$REGION" \
-  --query 'Metrics[*].MetricName' \
-  --output text | tr '\t' '\n' | sort -u
-```
-
----
-
-## Step 15 – Cleanup Resources
+## Step 9: Cleanup
 
 ```bash
 # Terminate bastion host
-echo "Terminating bastion host..."
+echo "Terminating bastion..."
 aws ec2 terminate-instances \
   --instance-ids "$BASTION_INSTANCE_ID" \
   --region "$REGION"
 
-# Wait for instance to terminate
-echo "Waiting for bastion to terminate..."
+# Wait for instance termination
 aws ec2 wait instance-terminated \
   --instance-ids "$BASTION_INSTANCE_ID" \
   --region "$REGION"
+echo "Bastion terminated"
 
-echo "Bastion host terminated"
-
-# Disable deletion protection on RDS instance
-echo "Disabling deletion protection..."
-aws rds modify-db-instance \
-  --db-instance-identifier "$DB_INSTANCE_ID" \
-  --no-deletion-protection \
-  --apply-immediately \
-  --region "$REGION"
-
-# Wait for modification
-echo "Waiting for modification to complete..."
-sleep 10
-
-# Delete RDS instance
+# Delete RDS instance (skip final snapshot)
 echo "Deleting RDS instance..."
 aws rds delete-db-instance \
   --db-instance-identifier "$DB_INSTANCE_ID" \
@@ -736,167 +471,120 @@ aws rds delete-db-instance \
   --delete-automated-backups \
   --region "$REGION"
 
-# Wait for instance to be deleted
-echo "Waiting for RDS instance to be deleted..."
-echo "This may take several minutes..."
+# Wait for RDS deletion
+echo "Waiting for RDS deletion..."
 aws rds wait db-instance-deleted \
   --db-instance-identifier "$DB_INSTANCE_ID" \
-  --region "$REGION" || echo "RDS instance deleted"
+  --region "$REGION"
+echo "RDS instance deleted"
 
 # Delete DB subnet group
-echo "Deleting DB subnet group..."
 aws rds delete-db-subnet-group \
-  --db-subnet-group-name "lab-db-subnet-group" \
+  --db-subnet-group-name "$DB_SUBNET_GROUP" \
   --region "$REGION"
+echo "DB subnet group deleted"
+
+# Delete Secrets Manager secret
+aws secretsmanager delete-secret \
+  --secret-id "$SECRET_NAME" \
+  --force-delete-without-recovery \
+  --region "$REGION"
+echo "Secret deleted"
 
 # Delete security groups
-echo "Deleting security groups..."
-sleep 10
-
 aws ec2 delete-security-group \
   --group-id "$DB_SG_ID" \
   --region "$REGION"
+echo "RDS security group deleted"
 
 aws ec2 delete-security-group \
   --group-id "$BASTION_SG_ID" \
   --region "$REGION"
+echo "Bastion security group deleted"
 
-# Disassociate and delete route table
-echo "Cleaning up route tables..."
-aws ec2 delete-route-table \
-  --route-table-id "$PUBLIC_RT_ID" \
-  --region "$REGION" || echo "Route table may have associations"
-
-# Delete subnets
-echo "Deleting subnets..."
-sleep 5
-
-aws ec2 delete-subnet \
-  --subnet-id "$PUBLIC_SUBNET_ID" \
+# Delete key pair
+aws ec2 delete-key-pair \
+  --key-name "$KEY_NAME" \
   --region "$REGION"
-
-aws ec2 delete-subnet \
-  --subnet-id "$PRIVATE_SUBNET_1_ID" \
-  --region "$REGION"
-
-aws ec2 delete-subnet \
-  --subnet-id "$PRIVATE_SUBNET_2_ID" \
-  --region "$REGION"
+rm -f "${KEY_NAME}.pem"
+echo "Key pair deleted"
 
 # Detach and delete Internet Gateway
-echo "Detaching and deleting Internet Gateway..."
 aws ec2 detach-internet-gateway \
   --internet-gateway-id "$IGW_ID" \
   --vpc-id "$VPC_ID" \
   --region "$REGION"
+echo "Internet Gateway detached"
 
 aws ec2 delete-internet-gateway \
   --internet-gateway-id "$IGW_ID" \
   --region "$REGION"
+echo "Internet Gateway deleted"
+
+# Delete subnets
+aws ec2 delete-subnet \
+  --subnet-id "$PUBLIC_SUBNET_ID" \
+  --region "$REGION"
+echo "Public subnet deleted"
+
+aws ec2 delete-subnet \
+  --subnet-id "$PRIVATE_SUBNET_1_ID" \
+  --region "$REGION"
+echo "Private subnet 1 deleted"
+
+aws ec2 delete-subnet \
+  --subnet-id "$PRIVATE_SUBNET_2_ID" \
+  --region "$REGION"
+echo "Private subnet 2 deleted"
+
+# Delete route table
+aws ec2 delete-route-table \
+  --route-table-id "$PUBLIC_RT_ID" \
+  --region "$REGION"
+echo "Route table deleted"
 
 # Delete VPC
-echo "Deleting VPC..."
 aws ec2 delete-vpc \
   --vpc-id "$VPC_ID" \
   --region "$REGION"
+echo "VPC deleted"
 
-# Delete local files
-echo "Cleaning up local files..."
-rm -f bastion-userdata.sh \
-  init-database.sql \
-  validate-failover.sql
-
-echo ""
-echo "✅ Cleanup completed successfully!"
-echo ""
-echo "All resources deleted:"
-echo "- RDS MySQL Multi-AZ instance"
-echo "- Bastion host EC2 instance"
-echo "- DB subnet group"
-echo "- Security groups (2)"
-echo "- Subnets (3)"
-echo "- Route tables"
-echo "- Internet Gateway"
-echo "- VPC"
-echo "- Local SQL scripts"
+echo "Cleanup complete"
 ```
 
 ---
 
 ## Summary
 
-In this lab, you have:
-- Created custom VPC with public and private subnets across two availability zones
-- Deployed bastion host in public subnet for secure database access
-- Created RDS MySQL instance with Multi-AZ deployment in private subnets
-- Configured security groups for layered network security (bastion → database)
-- Connected to private RDS instance via bastion host
-- Created and populated database with sample data
-- Tested automatic failover between availability zones
-- Validated data persistence and connection recovery after failover
-- Monitored RDS performance with CloudWatch metrics
-- Verified endpoint stability during failover
+This lab demonstrated:
+- **Multi-AZ RDS deployment** with automatic synchronous replication
+- **Primary and standby** in different availability zones
+- **Automatic failover** (30-60 seconds downtime)
+- **Data persistence** through failover (no data loss)
+- **Endpoint stability** (DNS remains unchanged)
+- **Bastion host access** to private RDS instance
 
-**Key Takeaways:**
-- **Multi-AZ (Single Region)**: High availability within one region across multiple AZs
-- **Synchronous Replication**: Primary and standby synchronized in real-time (no data loss)
-- **Automatic Failover**: 30-60 seconds downtime, fully automated
-- **Endpoint Stability**: DNS endpoint remains unchanged during failover
-- **Private Deployment**: Databases in private subnets, accessed via bastion host
-- **Security Layers**: Bastion SG allows SSH, DB SG allows MySQL only from bastion
-- **Data Persistence**: All data intact after failover (synchronous replication)
+### Key Concepts
 
-**Multi-AZ vs Single-AZ:**
-| Feature | Single-AZ | Multi-AZ |
-|---------|-----------|----------|
-| **Availability** | ~99.5% | ~99.95% |
-| **Automatic Failover** | No | Yes (30-60s) |
-| **Standby Instance** | No | Yes (different AZ) |
-| **Replication** | N/A | Synchronous |
-| **Cost** | Standard | ~2x single AZ |
-| **Use Case** | Dev/Test | Production |
-| **Data Loss Risk** | Higher | None (sync) |
+**Multi-AZ Benefits:**
+- High availability (99.95% uptime)
+- Automatic failover on failure
+- Synchronous replication (zero data loss)
+- No manual intervention required
 
-**Multi-AZ Failover Scenarios:**
-1. **Infrastructure Failure**: AZ outage, hardware failure
-2. **Maintenance**: Patching, scaling operations
-3. **Manual**: Force failover for testing
-4. **Network Issues**: Loss of connectivity to primary
-
-**Failover Process:**
-1. Health check detects primary failure
-2. DNS automatically redirected to standby
-3. Standby promoted to primary
-4. Previous primary becomes new standby (when recovered)
-5. Applications reconnect automatically
-6. Total downtime: 30-60 seconds
+**Failover Triggers:**
+- Infrastructure failure (AZ outage)
+- Network issues
+- Compute/storage failure  
+- Maintenance operations
+- Manual failover testing
 
 **Best Practices:**
-- Always use Multi-AZ for production databases
-- Place databases in private subnets (no public access)
-- Use bastion hosts or SSM for administrative access
-- Enable automated backups (7-35 days retention)
-- Enable Enhanced Monitoring for detailed metrics
-- Test failover regularly in non-production environments
-- Use appropriate instance classes for workload
-- Enable encryption at rest and in transit
-- Monitor CloudWatch metrics for performance
-- Set up CloudWatch alarms for critical metrics
-
-**Real-World Use Cases:**
-- **Production Databases**: E-commerce, banking, healthcare applications
-- **Mission-Critical Apps**: Zero data loss tolerance
-- **Compliance Requirements**: High availability mandates
-- **24/7 Operations**: Minimal downtime requirements
-- **Disaster Recovery**: AZ-level fault tolerance
-
----
-
-## Additional Resources
-- [Amazon RDS Multi-AZ Deployments](https://docs.aws.amazon.com/AmazonRDS/latest/UserGuide/Concepts.MultiAZ.html)
-- [RDS Best Practices](https://docs.aws.amazon.com/AmazonRDS/latest/UserGuide/CHAP_BestPractices.html)
-- [Working with Backups](https://docs.aws.amazon.com/AmazonRDS/latest/UserGuide/USER_WorkingWithAutomatedBackups.html)
-- [Monitoring RDS](https://docs.aws.amazon.com/AmazonRDS/latest/UserGuide/monitoring-cloudwatch.html)
-- [VPC Security for RDS](https://docs.aws.amazon.com/AmazonRDS/latest/UserGuide/USER_VPC.html)
+- Use Multi-AZ for production databases
+- Place RDS in private subnets
+- Use bastion hosts for administrative access
+- Enable automated backups
+- Test failover regularly
+- Monitor with CloudWatch
 
 ---
