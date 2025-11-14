@@ -174,7 +174,7 @@ echo "DB Subnet Group created: $DB_SUBNET_GROUP"
 
 ```bash
 # Get your current public IP for SSH access
-MY_IP=$(curl -s https://ifconfig.co)/32
+MY_IP=$(curl -s checkip.amazonaws.com)/32
 echo "Your public IP: $MY_IP"
 
 # Create security group for bastion host
@@ -317,13 +317,13 @@ aws rds create-db-instance \
   --allocated-storage "$ALLOCATED_STORAGE" \
   --db-instance-class "$DB_INSTANCE_CLASS" \
   --engine mysql \
-  --engine-version 8.0.33 \
+  --engine-version 8.4.3 \
   --db-name "$DB_NAME" \
   --master-username "$MASTER_USERNAME" \
   --master-user-password "$MASTER_PASSWORD" \
   --db-subnet-group-name "$DB_SUBNET_GROUP" \
   --vpc-security-group-ids "$DB_SG_ID" \
-  --publicly-accessible false \
+  --no-publicly-accessible \
   --backup-retention-period 7 \
   --no-multi-az \
   --tags "Key=Name,Value=lab-mysql-db" "Key=Environment,Value=lab" "Key=Purpose,Value=RDS MySQL lab" \
@@ -348,41 +348,38 @@ echo "DB endpoint (private): $ENDPOINT"
 
 ### 7. Connect to the private DB via bastion host
 
-Create an SSH tunnel using the bastion host:
-
 ```bash
-# Create SSH tunnel to forward local port 3306 to RDS endpoint
-ssh -i "${KEY_NAME}.pem" \
-  -L 3306:"$ENDPOINT":3306 \
-  ec2-user@"$BASTION_PUBLIC_IP" \
-  -N
-```
+# Install MySQL client on bastion host
+ssh -i "${KEY_NAME}.pem" -o StrictHostKeyChecking=no ec2-user@"$BASTION_PUBLIC_IP" "sudo dnf install -y mariadb105"
 
-In another terminal, retrieve the password and connect to MySQL:
-
-```bash
-# Get the stored credentials from Secrets Manager
-aws secretsmanager get-secret-value \
-  --secret-id "$SECRET_NAME" \
-  --query 'SecretString' \
-  --output text \
-  --region "$REGION"
-
-# Connect to MySQL via the SSH tunnel
-mysql -h 127.0.0.1 \
-  -P 3306 \
-  -u "$MASTER_USERNAME" \
-  -p
+# Test connection to RDS from bastion
+ssh -i "${KEY_NAME}.pem" -o StrictHostKeyChecking=no ec2-user@"$BASTION_PUBLIC_IP" "mysql -h $ENDPOINT -u $MASTER_USERNAME -p'$MASTER_PASSWORD' -e 'SHOW DATABASES;'"
 ```
 
 ### 8. Basic validation SQL
-```sql
+
+```bash
+# Retrieve the master password from Secrets Manager
+MASTER_PASSWORD=$(aws secretsmanager get-secret-value \
+  --secret-id "$SECRET_NAME" \
+  --query 'SecretString' \
+  --output text \
+  --region "$REGION" | jq -r '.password')
+echo "Password retrieved from Secrets Manager"
+
+# Run validation SQL from bastion host (create table and insert data)
+ssh -i "${KEY_NAME}.pem" -o StrictHostKeyChecking=no ec2-user@"$BASTION_PUBLIC_IP" \
+  "mysql -h $ENDPOINT -u $MASTER_USERNAME -p'$MASTER_PASSWORD' $DB_NAME -e \"
 CREATE TABLE test_table(id INT PRIMARY KEY AUTO_INCREMENT, msg VARCHAR(255));
 INSERT INTO test_table(msg) VALUES('hello lab');
-SELECT * FROM test_table;
+\""
+
+# Query the test table to verify data
+ssh -i "${KEY_NAME}.pem" -o StrictHostKeyChecking=no ec2-user@"$BASTION_PUBLIC_IP" \
+  "mysql -h $ENDPOINT -u $MASTER_USERNAME -p'$MASTER_PASSWORD' $DB_NAME -e 'SELECT * FROM test_table;'"
 ```
 
-### 9. Backups and snapshots
+### 9. Backups and snapshots (Optional)
 
 > Automated backups are enabled (backup-retention-period). Create on-demand snapshot:
 
