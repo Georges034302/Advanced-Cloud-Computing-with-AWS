@@ -1,4 +1,5 @@
 # Lab 3.A: Manage S3 buckets with versioning, encryption, and lifecycle rules
+<img width="1024" height="1024" alt="IMG" src="https://github.com/user-attachments/assets/cfbe70fa-5a29-4ac5-b641-5efe4cea7992" />
 
 ## Overview
 This lab teaches how to create and manage Amazon S3 buckets with object versioning, server-side encryption (SSE-S3 and SSE-KMS), bucket policies to enforce secure uploads, and lifecycle rules to transition and expire objects. You'll validate versioning behavior, encrypted storage, and cost-saving lifecycle transitions.
