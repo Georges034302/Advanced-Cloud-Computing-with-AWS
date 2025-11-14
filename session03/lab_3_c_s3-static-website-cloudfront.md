@@ -549,35 +549,7 @@ echo "Check status: aws cloudfront get-invalidation --distribution-id $DISTRIBUT
 
 ---
 
-## Step 13 – Monitor CloudFront Metrics
-
-```bash
-# Get CloudFront statistics
-echo "Retrieving CloudFront distribution information..."
-
-# Get distribution configuration
-aws cloudfront get-distribution \
-  --id "$DISTRIBUTION_ID" \
-  --query 'Distribution.{Status:Status,DomainName:DomainName,Enabled:DistributionConfig.Enabled,PriceClass:DistributionConfig.PriceClass}' \
-  --output table
-
-# List all distributions
-echo ""
-echo "All CloudFront distributions:"
-aws cloudfront list-distributions \
-  --query 'DistributionList.Items[*].{Id:Id,DomainName:DomainName,Status:Status,Enabled:Enabled}' \
-  --output table
-
-# Note: CloudWatch metrics for CloudFront may take time to populate
-echo ""
-echo "CloudWatch metrics for CloudFront are available in us-east-1 region"
-echo "View metrics in CloudWatch console or use:"
-echo "aws cloudwatch get-metric-statistics --namespace AWS/CloudFront --metric-name Requests --dimensions Name=DistributionId,Value=$DISTRIBUTION_ID --start-time $(date -u -d '1 hour ago' +%Y-%m-%dT%H:%M:%S) --end-time $(date -u +%Y-%m-%dT%H:%M:%S) --period 3600 --statistics Sum --region us-east-1"
-```
-
----
-
-## Step 14 – Cleanup Resources
+## Step 13 – Cleanup Resources
 
 ```bash
 # Disable CloudFront distribution first
