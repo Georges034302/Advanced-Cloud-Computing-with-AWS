@@ -1,4 +1,5 @@
 # Lab 4.B: DynamoDB Employee Table with CLI and Python
+<img width="1536" height="1024" alt="IMG" src="https://github.com/user-attachments/assets/9c4ca845-9e74-44f3-9626-536e25b48fe2" />
 
 ## Overview
 Create and manage a DynamoDB employee table using AWS CLI and Python (boto3). Learn DynamoDB's flexible schema by adding employees with different attributes, then build a Python application to query the data.
