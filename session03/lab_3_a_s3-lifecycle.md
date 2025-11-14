@@ -22,145 +22,351 @@ This lab teaches how to create and manage Amazon S3 buckets with object versioni
 
 ## Steps (CLI examples)
 
-Replace placeholders: YOUR_BUCKET_NAME, REGION, ACCOUNT_ID, KMS_KEY_ALIAS (e.g., lab-s3-kms), DAYS_FOR_IA, DAYS_FOR_GLACIER.
-
-### 1. Create the bucket
+### 1. Set Variables and Create the Bucket
 ```bash
-export BUCKET=YOUR_BUCKET_NAME
-export REGION=us-east-1
+# Get AWS account ID
+export ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
+echo "ACCOUNT_ID=$ACCOUNT_ID"
 
-aws s3api create-bucket --bucket "$BUCKET" --region "$REGION" \
-  $( [ "$REGION" = "us-east-1" ] || echo "--create-bucket-configuration LocationConstraint=$REGION" )
+# Set region and bucket name
+export REGION="ap-southeast-2"
+echo "REGION=$REGION"
+
+export BUCKET="s3-lifecycle-lab-${ACCOUNT_ID}"
+echo "BUCKET=$BUCKET"
+
+# Create bucket
+if [ "$REGION" = "us-east-1" ]; then
+  aws s3api create-bucket --bucket "$BUCKET" --region "$REGION"
+else
+  aws s3api create-bucket --bucket "$BUCKET" --region "$REGION" \
+    --create-bucket-configuration LocationConstraint="$REGION"
+fi
+echo "Bucket created: $BUCKET"
 ```
 
 ### 2. Enable versioning
 ```bash
-aws s3api put-bucket-versioning --bucket "$BUCKET" --versioning-configuration Status=Enabled
+# Enable versioning on the bucket to keep multiple versions of objects
+aws s3api put-bucket-versioning \
+  --bucket "$BUCKET" \
+  --versioning-configuration Status=Enabled
+
+echo "Versioning enabled on bucket: $BUCKET"
 ```
 
 (Optional: MFA Delete requires root and console operations; not covered here.)
 
 ### 3. Create a KMS key (for SSE-KMS) and grant usage to S3
 ```bash
-# create CMK
-aws kms create-key --description "KMS for $BUCKET" --query KeyMetadata.KeyId --output text
-# create alias (replace returned KeyId as KEY_ID)
-aws kms create-alias --alias-name "alias/lab-s3-kms" --target-key-id KEY_ID
-# allow S3 to use the key (example key policy minimal snippet)
-cat > key-policy.json <<'EOF'
-{
-  "Version":"2012-10-17",
-  "Statement":[
-    {
-      "Sid":"Allow S3 Use",
-      "Effect":"Allow",
-      "Principal": { "Service": "s3.amazonaws.com" },
-      "Action":[ "kms:Encrypt","kms:Decrypt","kms:GenerateDataKey","kms:ReEncrypt*" ],
-      "Resource":"*"
-    }
-  ]
-}
-EOF
+# Create a Customer Managed Key (CMK) and capture the KeyId
+# This key will be used for server-side encryption of S3 objects
+export KEY_ID=$(aws kms create-key \
+  --description "KMS key for S3 bucket $BUCKET" \
+  --query KeyMetadata.KeyId \
+  --output text)
+echo "KEY_ID=$KEY_ID"
 
-aws kms put-key-policy --key-id KEY_ID --policy-name default --policy file://key-policy.json
-```
+# Create a human-readable alias for the KMS key
+# Makes it easier to reference the key instead of using the long KeyId
+aws kms create-alias \
+  --alias-name "alias/lab-s3-kms" \
+  --target-key-id "$KEY_ID"
 
-### 4. Set default bucket encryption (SSE-KMS example)
-```bash
-aws s3api put-bucket-encryption --bucket "$BUCKET" --server-side-encryption-configuration '{
-  "Rules":[
-    {
-      "ApplyServerSideEncryptionByDefault":{
-        "SSEAlgorithm":"aws:kms",
-        "KMSMasterKeyID":"arn:aws:kms:REGION:ACCOUNT_ID:key/KEY_ID"
-      }
-    }
-  ]
-}'
-```
+echo "KMS key created with alias: alias/lab-s3-kms"
 
-(For SSE-S3 use "SSEAlgorithm":"AES256".)
-
-### 5. Enforce HTTPS and encrypted uploads with a bucket policy
-```bash
-cat > bucket-policy.json <<'EOF'
+# Create a complete KMS key policy
+# This policy allows:
+#   1. Account root to manage the key (required for key administration)
+#   2. S3 service to use the key for encryption/decryption operations
+cat > key-policy.json <<EOF
 {
   "Version": "2012-10-17",
   "Statement": [
     {
-      "Sid": "DenyHttp",
-      "Effect": "Deny",
-      "Principal": "*",
-      "Action": "s3:*",
-      "Resource": [ "arn:aws:s3:::$BUCKET", "arn:aws:s3:::$BUCKET/*" ],
-      "Condition": { "Bool": { "aws:SecureTransport": "false" } }
+      "Sid": "Enable IAM User Permissions",
+      "Effect": "Allow",
+      "Principal": {
+        "AWS": "arn:aws:iam::${ACCOUNT_ID}:root"
+      },
+      "Action": "kms:*",
+      "Resource": "*"
     },
     {
-      "Sid": "RequireSSE",
-      "Effect": "Deny",
-      "Principal": "*",
-      "Action": "s3:PutObject",
-      "Resource": "arn:aws:s3:::$BUCKET/*",
+      "Sid": "Allow S3 to use the key",
+      "Effect": "Allow",
+      "Principal": {
+        "Service": "s3.amazonaws.com"
+      },
+      "Action": [
+        "kms:Encrypt",
+        "kms:Decrypt",
+        "kms:GenerateDataKey",
+        "kms:ReEncrypt*",
+        "kms:DescribeKey"
+      ],
+      "Resource": "*",
       "Condition": {
-        "StringNotEquals": { "s3:x-amz-server-side-encryption": "aws:kms" }
+        "StringEquals": {
+          "kms:ViaService": "s3.${REGION}.amazonaws.com"
+        }
       }
     }
   ]
 }
 EOF
 
-aws s3api put-bucket-policy --bucket "$BUCKET" --policy file://bucket-policy.json
+# Apply the key policy to the KMS key
+# The 'default' policy name is required for the primary key policy
+aws kms put-key-policy \
+  --key-id "$KEY_ID" \
+  --policy-name default \
+  --policy file://key-policy.json
+
+echo "KMS key policy updated"
 ```
 
-### 6. Add lifecycle configuration (transition + expiration)
-Example: transition to STANDARD_IA after 30 days, GLACIER after 90 days, expire current versions after 365 days, noncurrent versions after 90 days.
-
+### 4. Set default bucket encryption (SSE-KMS example)
 ```bash
-cat > lifecycle.json <<'EOF'
+# Set default encryption to SSE-KMS (Server-Side Encryption with KMS)
+# All objects uploaded to this bucket will be automatically encrypted
+# BucketKeyEnabled reduces KMS API calls and costs
+aws s3api put-bucket-encryption \
+  --bucket "$BUCKET" \
+  --server-side-encryption-configuration "{
+    \"Rules\": [
+      {
+        \"ApplyServerSideEncryptionByDefault\": {
+          \"SSEAlgorithm\": \"aws:kms\",
+          \"KMSMasterKeyID\": \"arn:aws:kms:${REGION}:${ACCOUNT_ID}:key/${KEY_ID}\"
+        },
+        \"BucketKeyEnabled\": true
+      }
+    ]
+  }"
+
+echo "Bucket encryption enabled with SSE-KMS"
+
+# Verify encryption configuration was applied correctly
+aws s3api get-bucket-encryption --bucket "$BUCKET"
+```
+
+**Note:** For SSE-S3 (simpler, no KMS key needed), use:
+```bash
+# Alternative: Use SSE-S3 (Amazon S3-managed encryption keys)
+# Simpler than SSE-KMS but less control over key management
+# AES256 is the S3-managed encryption algorithm
+aws s3api put-bucket-encryption \
+  --bucket "$BUCKET" \
+  --server-side-encryption-configuration '{
+    "Rules": [
+      {
+        "ApplyServerSideEncryptionByDefault": {
+          "SSEAlgorithm": "AES256"
+        },
+        "BucketKeyEnabled": false
+      }
+    ]
+  }'
+```
+
+### 5. Enforce HTTPS and encrypted uploads with a bucket policy
+```bash
+# Create a bucket policy that enforces security best practices:
+#   1. Deny all requests not using HTTPS (secure transport)
+#   2. Deny PutObject requests without KMS encryption
+# Variable interpolation uses double quotes in heredoc
+cat > bucket-policy.json <<EOF
 {
-  "Rules": [
+  "Version": "2012-10-17",
+  "Statement": [
     {
-      "ID": "TransitionToIAAndGlacier",
-      "Status": "Enabled",
-      "Filter": { "Prefix": "" },
-      "Transitions": [
-        { "Days": 30, "StorageClass": "STANDARD_IA" },
-        { "Days": 90, "StorageClass": "GLACIER" }
+      "Sid": "DenyInsecureTransport",
+      "Effect": "Deny",
+      "Principal": "*",
+      "Action": "s3:*",
+      "Resource": [
+        "arn:aws:s3:::${BUCKET}",
+        "arn:aws:s3:::${BUCKET}/*"
       ],
-      "Expiration": { "Days": 365 },
-      "NoncurrentVersionTransitions": [
-        { "NoncurrentDays": 30, "StorageClass": "STANDARD_IA" },
-        { "NoncurrentDays": 90, "StorageClass": "GLACIER" }
-      ],
-      "NoncurrentVersionExpiration": { "NoncurrentDays": 180 }
+      "Condition": {
+        "Bool": {
+          "aws:SecureTransport": "false"
+        }
+      }
+    },
+    {
+      "Sid": "RequireKMSEncryption",
+      "Effect": "Deny",
+      "Principal": "*",
+      "Action": "s3:PutObject",
+      "Resource": "arn:aws:s3:::${BUCKET}/*",
+      "Condition": {
+        "StringNotEquals": {
+          "s3:x-amz-server-side-encryption": "aws:kms"
+        }
+      }
     }
   ]
 }
 EOF
 
-aws s3api put-bucket-lifecycle-configuration --bucket "$BUCKET" --lifecycle-configuration file://lifecycle.json
+# Apply the bucket policy to enforce security requirements
+aws s3api put-bucket-policy \
+  --bucket "$BUCKET" \
+  --policy file://bucket-policy.json
+
+echo "Bucket policy applied (enforces HTTPS and KMS encryption)"
+
+# Verify bucket policy was applied correctly
+# Parse JSON output with jq for better readability
+aws s3api get-bucket-policy --bucket "$BUCKET" --query Policy --output text | jq .
 ```
 
-Notes:
-- Use GLACIER or DEEP_ARCHIVE storage classes depending on retrieval needs; GLACIER retrieval has cost and delay implications.
-- For AWS regions with different class names, consult docs.
+### 6. Add lifecycle configuration (transition + expiration)
+Example: transition to STANDARD_IA after 30 days, GLACIER_IR after 90 days, expire current versions after 730 days (2 years), noncurrent versions after 365 days.
+
+```bash
+# Create lifecycle policy to automatically manage object storage classes
+# This reduces costs by moving older objects to cheaper storage tiers
+# Single quotes in heredoc prevent variable interpolation
+cat > lifecycle.json <<'EOF'
+{
+  "Rules": [
+    {
+      "ID": "TransitionAndExpireObjects",
+      "Status": "Enabled",
+      "Filter": {
+        "Prefix": ""
+      },
+      "Transitions": [
+        {
+          "Days": 30,
+          "StorageClass": "STANDARD_IA"
+        },
+        {
+          "Days": 90,
+          "StorageClass": "GLACIER_IR"
+        },
+        {
+          "Days": 180,
+          "StorageClass": "DEEP_ARCHIVE"
+        }
+      ],
+      "Expiration": {
+        "Days": 730
+      },
+      "NoncurrentVersionTransitions": [
+        {
+          "NoncurrentDays": 30,
+          "StorageClass": "STANDARD_IA"
+        },
+        {
+          "NoncurrentDays": 90,
+          "StorageClass": "GLACIER_IR"
+        }
+      ],
+      "NoncurrentVersionExpiration": {
+        "NoncurrentDays": 365
+      }
+    }
+  ]
+}
+EOF
+
+# Apply the lifecycle configuration to the bucket
+# Changes take effect immediately but transitions are asynchronous
+aws s3api put-bucket-lifecycle-configuration \
+  --bucket "$BUCKET" \
+  --lifecycle-configuration file://lifecycle.json
+
+echo "Lifecycle configuration applied"
+
+# Verify lifecycle configuration was applied correctly
+aws s3api get-bucket-lifecycle-configuration --bucket "$BUCKET"
+```
+
+**Notes:**
+- **STANDARD_IA**: Infrequent Access (cheaper than STANDARD, min 30 days)
+- **GLACIER_IR**: Glacier Instant Retrieval (min 90 days, instant access)
+- **DEEP_ARCHIVE**: Lowest cost (min 180 days, 12-48 hour retrieval)
+- Transitions must be in increasing order of days
+- Expiration must be after all transitions
+- Lifecycle actions are asynchronous and can take 24-48 hours
 
 ### 7. Test versioning and encryption
 ```bash
-# upload object v1
-aws s3 cp README.md s3://$BUCKET/README.md
-# upload v2
-aws s3 cp README.md s3://$BUCKET/README.md --metadata comment="v2"
-# list versions
-aws s3api list-object-versions --bucket "$BUCKET" --prefix README.md
-# check encryption metadata
-aws s3api head-object --bucket "$BUCKET" --key README.md --query '[ServerSideEncryption, SSEKMSKeyId]' --output text
+# Create test files with different content
+# These will be used to test versioning behavior
+echo "Version 1 of test file" > test-file.txt
+echo "Version 2 of test file" > test-file-v2.txt
+echo "Version 3 of test file" > test-file-v3.txt
+
+# Upload version 1 - creates initial object
+aws s3 cp test-file.txt s3://$BUCKET/test-file.txt
+echo "Uploaded version 1"
+
+# Upload version 2 - overwrites v1, but v1 is preserved as noncurrent version
+# This demonstrates how versioning keeps all versions of an object
+aws s3 cp test-file-v2.txt s3://$BUCKET/test-file.txt
+echo "Uploaded version 2"
+
+# Upload version 3 - v2 becomes noncurrent, v3 is the latest version
+aws s3 cp test-file-v3.txt s3://$BUCKET/test-file.txt
+echo "Uploaded version 3"
+
+# List all versions of the test file
+# Should show 3 versions with different VersionIds
+# IsLatest=true for the most recent version
+echo "\nListing all versions:"
+aws s3api list-object-versions \
+  --bucket "$BUCKET" \
+  --prefix test-file.txt \
+  --query 'Versions[].{Key:Key,VersionId:VersionId,IsLatest:IsLatest,LastModified:LastModified,Size:Size}' \
+  --output table
+
+# Check encryption metadata of the latest version
+# Should show SSE-KMS encryption with the KMS key ARN
+echo "\nChecking encryption:"
+aws s3api head-object \
+  --bucket "$BUCKET" \
+  --key test-file.txt \
+  --query '{Encryption:ServerSideEncryption,KMSKeyId:SSEKMSKeyId,StorageClass:StorageClass}' \
+  --output table
+
+# Verify versioning status is still enabled
+echo "\nVerifying versioning status:"
+aws s3api get-bucket-versioning --bucket "$BUCKET"
 ```
 
 ### 8. Observe lifecycle behavior
-- Lifecycle transitions and expirations are asynchronous (can take up to 24+ hours).
-- Use S3 Storage Lens / Inventory or S3 analytics to validate transitions.
-- Check object storage class with head-object and list-objects-v2.
+```bash
+# Check current storage class of all objects in the bucket
+# Initially, all objects will be in STANDARD storage class
+# Re-run this command periodically to observe lifecycle transitions
+echo "Checking storage class:"
+aws s3api list-objects-v2 \
+  --bucket "$BUCKET" \
+  --query 'Contents[].{Key:Key,StorageClass:StorageClass,LastModified:LastModified}' \
+  --output table
+
+# Note: Objects start in STANDARD storage class
+# Lifecycle transitions happen asynchronously (24-48 hours after rule conditions are met)
+
+echo "\n⏰ Lifecycle transitions are asynchronous and take 24-48 hours"
+echo "Objects will transition according to these rules:"
+echo "  - Day 30: STANDARD → STANDARD_IA"
+echo "  - Day 90: STANDARD_IA → GLACIER_IR"
+echo "  - Day 180: GLACIER_IR → DEEP_ARCHIVE"
+echo "  - Day 730: Objects expire and are deleted"
+echo "\nTo monitor transitions over time, re-run the list-objects-v2 command above"
+```
+
+**Monitoring Tips:**
+- Use S3 Storage Lens for storage class analytics
+- Use S3 Inventory for detailed object reports
+- Check storage class with `head-object` for specific objects
+- Lifecycle metrics available in CloudWatch after transitions occur
 
 ## Validation Checklist
 - [ ] Bucket created and versioning enabled
@@ -173,29 +379,96 @@ aws s3api head-object --bucket "$BUCKET" --key README.md --query '[ServerSideEnc
 
 ## Cleanup
 ```bash
-# Remove lifecycle, policy, and encryption, then empty and delete bucket
-aws s3api delete-bucket-lifecycle --bucket "$BUCKET" || true
-aws s3api delete-bucket-policy --bucket "$BUCKET" || true
-aws s3api put-bucket-encryption --bucket "$BUCKET" --server-side-encryption-configuration '{}' || true
+echo "Starting cleanup..."
 
-# To delete bucket with versions, remove versions first:
-aws s3api list-object-versions --bucket "$BUCKET" --query 'Versions[].{Key:Key,VersionId:VersionId}' --output json |
-  jq -c '.[]' | while read v; do
-    k=$(echo $v | jq -r .Key)
-    vid=$(echo $v | jq -r .VersionId)
-    aws s3api delete-object --bucket "$BUCKET" --key "$k" --version-id "$vid"
+# Remove bucket policy first to avoid conflicts during deletion
+# Redirect errors to /dev/null and show friendly message if no policy exists
+echo "Removing bucket policy..."
+aws s3api delete-bucket-policy --bucket "$BUCKET" 2>/dev/null || echo "No bucket policy to remove"
+
+# Remove lifecycle configuration before deleting objects
+echo "Removing lifecycle configuration..."
+aws s3api delete-bucket-lifecycle --bucket "$BUCKET" 2>/dev/null || echo "No lifecycle configuration to remove"
+
+# Suspend versioning to prevent new versions during cleanup
+# This doesn't delete existing versions, just stops creating new ones
+echo "Suspending versioning..."
+aws s3api put-bucket-versioning \
+  --bucket "$BUCKET" \
+  --versioning-configuration Status=Suspended
+
+# Delete all object versions (required before bucket deletion)
+# List all versions and parse with jq
+echo "Deleting all object versions..."
+VERSIONS=$(aws s3api list-object-versions \
+  --bucket "$BUCKET" \
+  --query 'Versions[].{Key:Key,VersionId:VersionId}' \
+  --output json)
+
+# Check if there are any versions to delete
+if [ "$VERSIONS" != "null" ] && [ "$VERSIONS" != "[]" ]; then
+  # Loop through each version and delete it
+  echo "$VERSIONS" | jq -c '.[]' | while read -r version; do
+    KEY=$(echo "$version" | jq -r '.Key')
+    VERSION_ID=$(echo "$version" | jq -r '.VersionId')
+    echo "Deleting: $KEY (version: $VERSION_ID)"
+    # Delete specific version by VersionId
+    aws s3api delete-object \
+      --bucket "$BUCKET" \
+      --key "$KEY" \
+      --version-id "$VERSION_ID" > /dev/null
   done
+else
+  echo "No versions to delete"
+fi
 
-# delete delete markers
-aws s3api list-object-versions --bucket "$BUCKET" --query 'DeleteMarkers[].{Key:Key,VersionId:VersionId}' --output json |
-  jq -c '.[]' | while read v; do
-    k=$(echo $v | jq -r .Key)
-    vid=$(echo $v | jq -r .VersionId)
-    aws s3api delete-object --bucket "$BUCKET" --key "$k" --version-id "$vid"
+# Delete all delete markers (created when objects are deleted in versioned buckets)
+# Delete markers are special version markers, not actual objects
+echo "Deleting all delete markers..."
+DELETE_MARKERS=$(aws s3api list-object-versions \
+  --bucket "$BUCKET" \
+  --query 'DeleteMarkers[].{Key:Key,VersionId:VersionId}' \
+  --output json)
+
+# Check if there are any delete markers
+if [ "$DELETE_MARKERS" != "null" ] && [ "$DELETE_MARKERS" != "[]" ]; then
+  # Loop through each delete marker and remove it
+  echo "$DELETE_MARKERS" | jq -c '.[]' | while read -r marker; do
+    KEY=$(echo "$marker" | jq -r '.Key')
+    VERSION_ID=$(echo "$marker" | jq -r '.VersionId')
+    echo "Deleting delete marker: $KEY (version: $VERSION_ID)"
+    # Remove delete marker by VersionId
+    aws s3api delete-object \
+      --bucket "$BUCKET" \
+      --key "$KEY" \
+      --version-id "$VERSION_ID" > /dev/null
   done
+else
+  echo "No delete markers to delete"
+fi
 
+# Delete the empty bucket
+# Bucket must be empty (no versions or delete markers) before deletion
+echo "Deleting bucket..."
 aws s3api delete-bucket --bucket "$BUCKET"
-# Optionally delete CMK (careful: requires disabling and policy updates)
+echo "Bucket deleted: $BUCKET"
+
+# Schedule KMS key deletion with mandatory 7-30 day waiting period
+# This is a safety feature to prevent accidental key deletion
+if [ -n "$KEY_ID" ]; then
+  echo "Scheduling KMS key deletion..."
+  aws kms schedule-key-deletion \
+    --key-id "$KEY_ID" \
+    --pending-window-in-days 7
+  echo "KMS key scheduled for deletion in 7 days: $KEY_ID"
+  echo "To cancel: aws kms cancel-key-deletion --key-id $KEY_ID"
+fi
+
+# Clean up local JSON and test files
+echo "Cleaning up local files..."
+rm -f bucket-policy.json lifecycle.json key-policy.json test-file*.txt
+
+echo "\n✅ Cleanup complete!"
 ```
 
 ## Summary
