@@ -68,52 +68,24 @@ cat > website-files/index.html <<'EOF'
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>AWS S3 Static Website</title>
-    <link rel="stylesheet" href="css/style.css">
+    <link rel="stylesheet" href="style.css">
 </head>
 <body>
     <div class="container">
-        <header>
-            <h1>🚀 AWS S3 Static Website</h1>
-            <p>Deployed with S3 and CloudFront CDN</p>
-        </header>
-        
-        <main>
-            <section class="features">
-                <div class="feature">
-                    <h2>📦 Amazon S3</h2>
-                    <p>Serverless static website hosting with high durability and availability</p>
-                </div>
-                
-                <div class="feature">
-                    <h2>🌐 CloudFront CDN</h2>
-                    <p>Global content delivery network with low latency and high transfer speeds</p>
-                </div>
-                
-                <div class="feature">
-                    <h2>🔒 Secure & Scalable</h2>
-                    <p>HTTPS delivery with automatic scaling for any traffic volume</p>
-                </div>
-            </section>
-            
-            <section class="info">
-                <h2>About This Website</h2>
-                <p>This static website is hosted on Amazon S3 and distributed globally through CloudFront CDN.</p>
-                <p>It demonstrates:</p>
-                <ul>
-                    <li>S3 bucket configuration for static website hosting</li>
-                    <li>CloudFront distribution for global content delivery</li>
-                    <li>Origin Access Identity (OAI) for secure access</li>
-                    <li>Custom error pages and cache behaviors</li>
-                </ul>
-            </section>
-        </main>
-        
-        <footer>
-            <p>© 2024 AWS Static Website Demo | Session 03 - Lab 3.C</p>
-        </footer>
+        <h1>AWS S3 Static Website</h1>
+        <p>Hosted on S3 and distributed via CloudFront CDN</p>
+        <div class="info">
+            <h2>Lab 3.C Demo</h2>
+            <p>This simple static website demonstrates:</p>
+            <ul>
+                <li>S3 static website hosting</li>
+                <li>CloudFront CDN distribution</li>
+                <li>HTTPS delivery</li>
+            </ul>
+        </div>
+        <footer>© 2024 AWS Static Website Demo</footer>
     </div>
-    
-    <script src="js/script.js"></script>
+    <script src="script.js"></script>
 </body>
 </html>
 EOF
@@ -126,205 +98,81 @@ cat > website-files/error.html <<'EOF'
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>404 - Page Not Found</title>
-    <link rel="stylesheet" href="css/style.css">
+    <link rel="stylesheet" href="style.css">
 </head>
 <body>
-    <div class="container error-page">
-        <header>
-            <h1>404 - Page Not Found</h1>
-            <p>The page you're looking for doesn't exist</p>
-        </header>
-        
-        <main>
-            <p>Sorry, we couldn't find the page you were looking for.</p>
-            <a href="index.html" class="button">Return to Home</a>
-        </main>
-        
-        <footer>
-            <p>© 2024 AWS Static Website Demo</p>
-        </footer>
+    <div class="container">
+        <h1>404 - Page Not Found</h1>
+        <p>Sorry, the page you're looking for doesn't exist.</p>
+        <a href="index.html">Return to Home</a>
     </div>
 </body>
 </html>
 EOF
 
-# Create CSS directory and stylesheet
-mkdir -p website-files/css
-cat > website-files/css/style.css <<'EOF'
-* {
-    margin: 0;
-    padding: 0;
-    box-sizing: border-box;
-}
-
+# Create CSS stylesheet
+cat > website-files/style.css <<'EOF'
 body {
-    font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+    font-family: Arial, sans-serif;
     line-height: 1.6;
-    color: #333;
-    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-    min-height: 100vh;
-    display: flex;
-    justify-content: center;
-    align-items: center;
+    margin: 0;
     padding: 20px;
+    background: #f4f4f4;
 }
 
 .container {
-    max-width: 1000px;
+    max-width: 800px;
+    margin: 50px auto;
     background: white;
-    border-radius: 10px;
-    box-shadow: 0 10px 40px rgba(0,0,0,0.2);
-    padding: 40px;
-    margin: 20px auto;
+    padding: 30px;
+    border-radius: 5px;
+    box-shadow: 0 2px 5px rgba(0,0,0,0.1);
 }
 
-header {
-    text-align: center;
-    margin-bottom: 40px;
-    padding-bottom: 20px;
-    border-bottom: 3px solid #667eea;
-}
-
-header h1 {
-    font-size: 2.5em;
-    color: #667eea;
-    margin-bottom: 10px;
-}
-
-header p {
-    font-size: 1.2em;
-    color: #666;
-}
-
-.features {
-    display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
-    gap: 30px;
-    margin-bottom: 40px;
-}
-
-.feature {
-    background: #f8f9fa;
-    padding: 25px;
-    border-radius: 8px;
-    text-align: center;
-    transition: transform 0.3s ease;
-}
-
-.feature:hover {
-    transform: translateY(-5px);
-    box-shadow: 0 5px 20px rgba(0,0,0,0.1);
-}
-
-.feature h2 {
-    color: #667eea;
-    margin-bottom: 15px;
-    font-size: 1.5em;
+h1 {
+    color: #333;
+    border-bottom: 3px solid #007bff;
+    padding-bottom: 10px;
 }
 
 .info {
+    margin: 20px 0;
+    padding: 20px;
     background: #f8f9fa;
-    padding: 30px;
-    border-radius: 8px;
-    margin-top: 30px;
+    border-radius: 5px;
 }
 
-.info h2 {
-    color: #667eea;
-    margin-bottom: 15px;
-}
-
-.info ul {
-    margin-left: 30px;
-    margin-top: 15px;
-}
-
-.info li {
-    margin-bottom: 10px;
+ul {
+    margin-left: 20px;
 }
 
 footer {
     text-align: center;
-    margin-top: 40px;
+    margin-top: 30px;
     padding-top: 20px;
-    border-top: 2px solid #eee;
+    border-top: 1px solid #ddd;
     color: #666;
 }
 
-.error-page {
-    text-align: center;
-}
-
-.button {
-    display: inline-block;
-    margin-top: 20px;
-    padding: 12px 30px;
-    background: #667eea;
-    color: white;
+a {
+    color: #007bff;
     text-decoration: none;
-    border-radius: 5px;
-    transition: background 0.3s ease;
 }
 
-.button:hover {
-    background: #764ba2;
-}
-
-@media (max-width: 768px) {
-    .container {
-        padding: 20px;
-    }
-    
-    header h1 {
-        font-size: 2em;
-    }
-    
-    .features {
-        grid-template-columns: 1fr;
-    }
+a:hover {
+    text-decoration: underline;
 }
 EOF
 
-# Create JavaScript directory and file
-mkdir -p website-files/js
-cat > website-files/js/script.js <<'EOF'
-// Simple JavaScript for interactive elements
+# Create JavaScript file
+cat > website-files/script.js <<'EOF'
+// Simple JavaScript
+console.log('AWS S3 Static Website loaded!');
+
 document.addEventListener('DOMContentLoaded', function() {
-    console.log('AWS S3 Static Website loaded successfully!');
-    
-    // Add smooth scrolling
-    document.querySelectorAll('a[href^="#"]').forEach(anchor => {
-        anchor.addEventListener('click', function (e) {
-            e.preventDefault();
-            const target = document.querySelector(this.getAttribute('href'));
-            if (target) {
-                target.scrollIntoView({ behavior: 'smooth' });
-            }
-        });
-    });
-    
-    // Add animation to features on scroll
-    const features = document.querySelectorAll('.feature');
-    const observer = new IntersectionObserver((entries) => {
-        entries.forEach(entry => {
-            if (entry.isIntersecting) {
-                entry.target.style.opacity = '1';
-                entry.target.style.transform = 'translateY(0)';
-            }
-        });
-    });
-    
-    features.forEach(feature => {
-        feature.style.opacity = '0';
-        feature.style.transform = 'translateY(20px)';
-        feature.style.transition = 'all 0.5s ease';
-        observer.observe(feature);
-    });
+    console.log('Page ready at:', new Date().toISOString());
 });
 EOF
-
-# Create sample image directory
-mkdir -p website-files/images
 
 echo "Website files created in website-files/ directory"
 ls -lR website-files/
@@ -371,11 +219,11 @@ aws s3 cp "s3://${WEBSITE_BUCKET}/error.html" "s3://${WEBSITE_BUCKET}/error.html
   --content-type "text/html" \
   --metadata-directive REPLACE
 
-aws s3 cp "s3://${WEBSITE_BUCKET}/css/style.css" "s3://${WEBSITE_BUCKET}/css/style.css" \
+aws s3 cp "s3://${WEBSITE_BUCKET}/style.css" "s3://${WEBSITE_BUCKET}/style.css" \
   --content-type "text/css" \
   --metadata-directive REPLACE
 
-aws s3 cp "s3://${WEBSITE_BUCKET}/js/script.js" "s3://${WEBSITE_BUCKET}/js/script.js" \
+aws s3 cp "s3://${WEBSITE_BUCKET}/script.js" "s3://${WEBSITE_BUCKET}/script.js" \
   --content-type "application/javascript" \
   --metadata-directive REPLACE
 
@@ -455,7 +303,6 @@ aws s3api get-bucket-policy \
 ```bash
 # Test website accessibility
 echo "Testing S3 website endpoint..."
-echo "Website URL: $WEBSITE_URL"
 echo ""
 
 # Test with curl
@@ -465,7 +312,8 @@ curl -I "$WEBSITE_URL" || echo "Website accessible via S3 endpoint"
 curl -I "${WEBSITE_URL}/nonexistent-page.html" || echo "404 error page configured"
 
 echo ""
-echo "Open in browser: $WEBSITE_URL"
+echo "Website URL: $WEBSITE_URL"
+"$BROWSER" "$WEBSITE_URL"
 ```
 
 ---
@@ -613,22 +461,14 @@ DISTRIBUTION_OUTPUT=$(aws cloudfront create-distribution \
 
 # Extract distribution ID and domain name
 DISTRIBUTION_ID=$(echo "$DISTRIBUTION_OUTPUT" | jq -r '.Distribution.Id')
-echo "DISTRIBUTION_ID=$DISTRIBUTION_ID"
-
-CLOUDFRONT_DOMAIN=$(echo "$DISTRIBUTION_OUTPUT" | jq -r '.Distribution.DomainName')
-echo "CLOUDFRONT_DOMAIN=$CLOUDFRONT_DOMAIN"
-
 echo ""
 echo "CloudFront distribution created successfully!"
 echo "Distribution ID: $DISTRIBUTION_ID"
-echo "CloudFront URL: https://${CLOUDFRONT_DOMAIN}"
-echo ""
-echo "Note: Distribution deployment takes 15-20 minutes"
 ```
 
 ---
 
-## Step 11 – Wait for CloudFront Distribution Deployment
+## Step 11 – Test CloudFront Distribution
 
 ```bash
 # Check distribution status
@@ -646,23 +486,10 @@ echo "Status: InProgress → Deployed"
 echo ""
 echo "You can check status with:"
 echo "aws cloudfront get-distribution --id $DISTRIBUTION_ID --query 'Distribution.Status'"
-
-# Note: aws cloudfront wait distribution-deployed is available but slow
-# Uncomment below to wait (can take 15-20 minutes)
-# aws cloudfront wait distribution-deployed --id "$DISTRIBUTION_ID"
-
+echo "Note: Distribution deployment takes 15-20 minutes"
 echo ""
-echo "Once deployed, access your website at: https://${CLOUDFRONT_DOMAIN}"
-```
-
----
-
-## Step 12 – Test CloudFront Distribution
-
-```bash
-# Wait a moment, then test CloudFront endpoint
-echo "Testing CloudFront distribution..."
-echo "URL: https://${CLOUDFRONT_DOMAIN}"
+CLOUDFRONT_DOMAIN=$(echo "$DISTRIBUTION_OUTPUT" | jq -r '.Distribution.DomainName')
+echo "CLOUDFRONT_DOMAIN=$CLOUDFRONT_DOMAIN"
 echo ""
 
 # Test with curl (may fail if not deployed yet)
@@ -671,17 +498,13 @@ curl -I "https://${CLOUDFRONT_DOMAIN}" || echo "Distribution still deploying..."
 # Test 404 error page
 curl -I "https://${CLOUDFRONT_DOMAIN}/nonexistent.html" || echo "Custom error page configured"
 
-echo ""
-echo "Open in browser: https://${CLOUDFRONT_DOMAIN}"
-echo ""
-echo "Compare performance:"
-echo "S3 Direct:   $WEBSITE_URL"
-echo "CloudFront:  https://${CLOUDFRONT_DOMAIN}"
+echo "Once deployed, access your s3 static website at: https://${CLOUDFRONT_DOMAIN}"
+"$BROWSER" "https://${CLOUDFRONT_DOMAIN}"
 ```
 
 ---
 
-## Step 13 – Create CloudFront Invalidation
+## Step 12 – Create CloudFront Invalidation
 
 ```bash
 # Make a change to the website
@@ -726,7 +549,7 @@ echo "Check status: aws cloudfront get-invalidation --distribution-id $DISTRIBUT
 
 ---
 
-## Step 14 – Monitor CloudFront Metrics
+## Step 13 – Monitor CloudFront Metrics
 
 ```bash
 # Get CloudFront statistics
@@ -754,7 +577,7 @@ echo "aws cloudwatch get-metric-statistics --namespace AWS/CloudFront --metric-n
 
 ---
 
-## Step 15 – Cleanup Resources
+## Step 14 – Cleanup Resources
 
 ```bash
 # Disable CloudFront distribution first
