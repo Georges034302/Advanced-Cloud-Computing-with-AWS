@@ -1,123 +1,154 @@
 # Lab 4.C: RDS Multi-AZ High Availability with Bastion Host
 
 ## Overview
-This lab demonstrates Amazon RDS Multi-AZ deployment for high availability within a single region. You will deploy an RDS MySQL instance with synchronous replication to a standby in another availability zone, access it securely through a bastion host in a public subnet, test automatic failover, and validate data persistence across failover events.
-
----
+Deploy an RDS MySQL instance with Multi-AZ for high availability, access it via bastion host, test automatic failover, and validate data persistence.
 
 ## Objectives
-- Create custom VPC with public and private subnets across two availability zones
-- Deploy bastion host in public subnet for secure database access
-- Create RDS MySQL instance with Multi-AZ deployment in private subnets
-- Configure security groups for layered network security
-- Connect to private RDS instance via bastion host
-- Create and populate database with sample data
+- Create VPC with public and private subnets in two availability zones
+- Deploy RDS MySQL with Multi-AZ (primary + standby in different AZs)
+- Launch bastion host for secure database access
 - Test automatic failover between availability zones
-- Validate data persistence and connection recovery after failover
-- Monitor RDS performance and availability metrics
-- Clean up all resources
-
----
+- Validate data persistence after failover
 
 ## Prerequisites
-- AWS CLI configured (`aws configure`)
-- IAM permissions to manage VPC, RDS, EC2, and related resources
-- Basic understanding of VPC networking and SQL
-- SSH key pair for bastion host access
+- AWS CLI v2 configured
+- Permissions: RDS, EC2, VPC
+- Basic understanding of MySQL and networking
 
 ---
 
-## Step 1 – Set Variables and Verify Prerequisites
+## Variables
 
 ```bash
-# Get AWS account ID dynamically
-ACCOUNT_ID=$(aws sts get-caller-identity \
-  --query Account \
-  --output text)
-echo "ACCOUNT_ID=$ACCOUNT_ID"
-
-# Set region
-REGION="ap-southeast-2"
-echo "REGION=$REGION"
-
-# Set VPC CIDR
-VPC_CIDR="10.0.0.0/16"
-echo "VPC_CIDR=$VPC_CIDR"
-
-# Set subnet CIDRs
-PUBLIC_SUBNET_CIDR="10.0.1.0/24"
-echo "PUBLIC_SUBNET_CIDR=$PUBLIC_SUBNET_CIDR"
-
-PRIVATE_SUBNET_1_CIDR="10.0.10.0/24"
-echo "PRIVATE_SUBNET_1_CIDR=$PRIVATE_SUBNET_1_CIDR"
-
-PRIVATE_SUBNET_2_CIDR="10.0.20.0/24"
-echo "PRIVATE_SUBNET_2_CIDR=$PRIVATE_SUBNET_2_CIDR"
-
-# Set database identifier
-DB_INSTANCE_ID="lab-mysql-multiaz"
-echo "DB_INSTANCE_ID=$DB_INSTANCE_ID"
-
-# Set database configuration
-DB_NAME="labdb"
-echo "DB_NAME=$DB_NAME"
-
-MASTER_USERNAME="labadmin"
-echo "MASTER_USERNAME=$MASTER_USERNAME"
-
-# Generate secure password
-MASTER_PASSWORD=$(openssl rand -base64 16 | tr -d "=+/" | cut -c1-16)
-echo "MASTER_PASSWORD=$MASTER_PASSWORD"
-echo "⚠️  Save this password for later use!"
-
-# Set instance class (free tier eligible)
-DB_INSTANCE_CLASS="db.t3.micro"
-echo "DB_INSTANCE_CLASS=$DB_INSTANCE_CLASS"
-
-# Set allocated storage
+REGION=ap-southeast-2
+VPC_CIDR=10.0.0.0/16
+PUBLIC_SUBNET_CIDR=10.0.1.0/24
+PRIVATE_SUBNET_1_CIDR=10.0.10.0/24
+PRIVATE_SUBNET_2_CIDR=10.0.20.0/24
+DB_INSTANCE_ID=lab-mysql-multiaz
+DB_NAME=labdb
+MASTER_USERNAME=labadmin
+DB_INSTANCE_CLASS=db.t3.micro
 ALLOCATED_STORAGE=20
-echo "ALLOCATED_STORAGE=$ALLOCATED_STORAGE"
+DB_SUBNET_GROUP=lab-db-subnet-group
+KEY_NAME=lab-multiaz-bastion-key
 
-# Verify AWS CLI is configured
-aws sts get-caller-identity
+# Generate secure password for RDS master user
+MASTER_PASSWORD=$(openssl rand -base64 16)
+echo "Master password: $MASTER_PASSWORD (save this!)"
 ```
 
 ---
 
-## Step 2 – Create Custom VPC
+## Step 1: Create VPC and Subnets
 
 ```bash
-# Create custom VPC
+# Create VPC for Multi-AZ RDS deployment
 VPC_ID=$(aws ec2 create-vpc \
   --cidr-block "$VPC_CIDR" \
-  --tag-specifications "ResourceType=vpc,Tags=[{Key=Name,Value=lab-rds-vpc},{Key=Lab,Value=4C}]" \
-  --region "$REGION" \
+  --tag-specifications "ResourceType=vpc,Tags=[{Key=Name,Value=lab-multiaz-vpc}]" \
   --query 'Vpc.VpcId' \
-  --output text)
-echo "VPC_ID=$VPC_ID"
+  --output text \
+  --region "$REGION")
+echo "VPC created: $VPC_ID"
 
-# Enable DNS hostnames and DNS support
+# Enable DNS hostnames (required for RDS endpoint resolution)
 aws ec2 modify-vpc-attribute \
   --vpc-id "$VPC_ID" \
   --enable-dns-hostnames \
   --region "$REGION"
+echo "DNS hostnames enabled"
 
-aws ec2 modify-vpc-attribute \
+# Get two availability zones for Multi-AZ deployment
+AZ1=$(aws ec2 describe-availability-zones \
+  --query 'AvailabilityZones[0].ZoneName' \
+  --output text \
+  --region "$REGION")
+AZ2=$(aws ec2 describe-availability-zones \
+  --query 'AvailabilityZones[1].ZoneName' \
+  --output text \
+  --region "$REGION")
+echo "Using availability zones: $AZ1, $AZ2"
+
+# Create public subnet in AZ1 for bastion host
+PUBLIC_SUBNET_ID=$(aws ec2 create-subnet \
   --vpc-id "$VPC_ID" \
-  --enable-dns-support \
-  --region "$REGION"
+  --cidr-block "$PUBLIC_SUBNET_CIDR" \
+  --availability-zone "$AZ1" \
+  --tag-specifications "ResourceType=subnet,Tags=[{Key=Name,Value=lab-public-subnet}]" \
+  --query 'Subnet.SubnetId' \
+  --output text \
+  --region "$REGION")
+echo "Public subnet created: $PUBLIC_SUBNET_ID in $AZ1"
 
-echo "VPC created with DNS support enabled"
+# Create first private subnet in AZ1 for RDS primary
+PRIVATE_SUBNET_1_ID=$(aws ec2 create-subnet \
+  --vpc-id "$VPC_ID" \
+  --cidr-block "$PRIVATE_SUBNET_1_CIDR" \
+  --availability-zone "$AZ1" \
+  --tag-specifications "ResourceType=subnet,Tags=[{Key=Name,Value=lab-private-subnet-1}]" \
+  --query 'Subnet.SubnetId' \
+  --output text \
+  --region "$REGION")
+echo "Private subnet 1 created: $PRIVATE_SUBNET_1_ID in $AZ1"
 
-# Describe VPC
-aws ec2 describe-vpcs \
-  --vpc-ids "$VPC_ID" \
-  --query 'Vpcs[0].{VpcId:VpcId,CidrBlock:CidrBlock,State:State}' \
-  --output table \
+# Create second private subnet in AZ2 for RDS standby
+PRIVATE_SUBNET_2_ID=$(aws ec2 create-subnet \
+  --vpc-id "$VPC_ID" \
+  --cidr-block "$PRIVATE_SUBNET_2_CIDR" \
+  --availability-zone "$AZ2" \
+  --tag-specifications "ResourceType=subnet,Tags=[{Key=Name,Value=lab-private-subnet-2}]" \
+  --query 'Subnet.SubnetId' \
+  --output text \
+  --region "$REGION")
+echo "Private subnet 2 created: $PRIVATE_SUBNET_2_ID in $AZ2"
+
+# Create and attach Internet Gateway for public subnet connectivity
+IGW_ID=$(aws ec2 create-internet-gateway \
+  --tag-specifications "ResourceType=internet-gateway,Tags=[{Key=Name,Value=lab-igw}]" \
+  --query 'InternetGateway.InternetGatewayId' \
+  --output text \
+  --region "$REGION")
+echo "Internet Gateway created: $IGW_ID"
+
+# Attach Internet Gateway to VPC
+aws ec2 attach-internet-gateway \
+  --internet-gateway-id "$IGW_ID" \
+  --vpc-id "$VPC_ID" \
   --region "$REGION"
+echo "Internet Gateway attached"
+
+# Create route table for public subnet
+PUBLIC_RT_ID=$(aws ec2 create-route-table \
+  --vpc-id "$VPC_ID" \
+  --tag-specifications "ResourceType=route-table,Tags=[{Key=Name,Value=lab-public-rt}]" \
+  --query 'RouteTable.RouteTableId' \
+  --output text \
+  --region "$REGION")
+echo "Route table created: $PUBLIC_RT_ID"
+
+# Add route to Internet Gateway (enables internet access for public subnet)
+aws ec2 create-route \
+  --route-table-id "$PUBLIC_RT_ID" \
+  --destination-cidr-block 0.0.0.0/0 \
+  --gateway-id "$IGW_ID" \
+  --region "$REGION"
+echo "Route to Internet Gateway added"
+
+# Associate public subnet with route table
+aws ec2 associate-route-table \
+  --route-table-id "$PUBLIC_RT_ID" \
+  --subnet-id "$PUBLIC_SUBNET_ID" \
+  --region "$REGION"
+echo "Public subnet associated with route table"
+
+# Enable auto-assign public IP for instances in public subnet
+aws ec2 modify-subnet-attribute \
+  --subnet-id "$PUBLIC_SUBNET_ID" \
+  --map-public-ip-on-launch \
+  --region "$REGION"
+echo "Auto-assign public IP enabled"
 ```
-
----
 
 ## Step 3 – Create Subnets Across Two Availability Zones
 
@@ -129,10 +160,11 @@ AVAILABILITY_ZONES=$(aws ec2 describe-availability-zones \
   --output text)
 echo "AVAILABILITY_ZONES=$AVAILABILITY_ZONES"
 
-# Get first two availability zones
+# Get first availability zone
 AZ_1=$(echo "$AVAILABILITY_ZONES" | awk '{print $1}')
 echo "AZ_1=$AZ_1"
 
+# Get first two availability zones
 AZ_2=$(echo "$AVAILABILITY_ZONES" | awk '{print $2}')
 echo "AZ_2=$AZ_2"
 
@@ -253,38 +285,39 @@ echo "  Private subnets → No internet access (isolated)"
 
 ---
 
-## Step 6 – Create Security Groups
+---
+
+## Step 2: Create Security Groups
 
 ```bash
-# Create security group for bastion host
+# Create security group for bastion host (allows SSH access)
 BASTION_SG_ID=$(aws ec2 create-security-group \
   --group-name "lab-bastion-sg" \
-  --description "Security group for bastion host - SSH access" \
+  --description "SSH access to bastion host" \
   --vpc-id "$VPC_ID" \
-  --region "$REGION" \
   --query 'GroupId' \
-  --output text)
-echo "BASTION_SG_ID=$BASTION_SG_ID"
+  --output text \
+  --region "$REGION")
+echo "Bastion security group created: $BASTION_SG_ID"
 
-# Allow SSH access from anywhere (restrict to your IP in production)
+# Allow SSH from anywhere (restrict to your IP in production)
 aws ec2 authorize-security-group-ingress \
   --group-id "$BASTION_SG_ID" \
   --protocol tcp \
   --port 22 \
   --cidr 0.0.0.0/0 \
   --region "$REGION"
+echo "SSH access authorized"
 
-echo "Bastion security group created with SSH access"
-
-# Create security group for RDS database
+# Create security group for RDS (allows MySQL only from bastion)
 DB_SG_ID=$(aws ec2 create-security-group \
   --group-name "lab-rds-sg" \
-  --description "Security group for RDS MySQL - private access only" \
+  --description "MySQL access from bastion only" \
   --vpc-id "$VPC_ID" \
-  --region "$REGION" \
   --query 'GroupId' \
-  --output text)
-echo "DB_SG_ID=$DB_SG_ID"
+  --output text \
+  --region "$REGION")
+echo "RDS security group created: $DB_SG_ID"
 
 # Allow MySQL access only from bastion security group
 aws ec2 authorize-security-group-ingress \
@@ -293,272 +326,155 @@ aws ec2 authorize-security-group-ingress \
   --port 3306 \
   --source-group "$BASTION_SG_ID" \
   --region "$REGION"
-
-echo "Database security group created with MySQL access from bastion only"
-
-# Describe security groups
-echo ""
-echo "Security groups created:"
-aws ec2 describe-security-groups \
-  --group-ids "$BASTION_SG_ID" "$DB_SG_ID" \
-  --query 'SecurityGroups[*].{GroupId:GroupId,GroupName:GroupName,Description:Description}' \
-  --output table \
-  --region "$REGION"
+echo "MySQL access authorized from bastion"
 ```
 
 ---
 
-## Step 7 – Create DB Subnet Group
+## Step 3: Create DB Subnet Group and RDS Instance
 
 ```bash
-# Create DB subnet group with both private subnets
+# Create DB subnet group with both private subnets (required for Multi-AZ)
 aws rds create-db-subnet-group \
-  --db-subnet-group-name "lab-db-subnet-group" \
-  --db-subnet-group-description "Subnet group for RDS Multi-AZ deployment across AZ1 and AZ2" \
+  --db-subnet-group-name "$DB_SUBNET_GROUP" \
+  --db-subnet-group-description "Subnet group for Multi-AZ RDS" \
   --subnet-ids "$PRIVATE_SUBNET_1_ID" "$PRIVATE_SUBNET_2_ID" \
+  --tags "Key=Name,Value=lab-db-subnet-group" \
   --region "$REGION"
+echo "DB subnet group created: $DB_SUBNET_GROUP"
 
-echo "DB subnet group created with subnets in both availability zones"
-
-# Describe DB subnet group
-aws rds describe-db-subnet-groups \
-  --db-subnet-group-name "lab-db-subnet-group" \
-  --query 'DBSubnetGroups[0].{Name:DBSubnetGroupName,VpcId:VpcId,Subnets:Subnets[*].{SubnetId:SubnetIdentifier,AZ:SubnetAvailabilityZone.Name}}' \
-  --output json \
-  --region "$REGION" | jq '.'
-```
-
----
-
-## Step 8 – Create RDS MySQL Instance with Multi-AZ
-
-```bash
 # Create RDS MySQL instance with Multi-AZ enabled
-echo "Creating RDS MySQL instance with Multi-AZ deployment..."
-
 aws rds create-db-instance \
   --db-instance-identifier "$DB_INSTANCE_ID" \
   --db-instance-class "$DB_INSTANCE_CLASS" \
   --engine mysql \
-  --engine-version "8.0.35" \
+  --engine-version 8.4.3 \
   --master-username "$MASTER_USERNAME" \
   --master-user-password "$MASTER_PASSWORD" \
   --allocated-storage "$ALLOCATED_STORAGE" \
   --db-name "$DB_NAME" \
   --vpc-security-group-ids "$DB_SG_ID" \
-  --db-subnet-group-name "lab-db-subnet-group" \
+  --db-subnet-group-name "$DB_SUBNET_GROUP" \
   --backup-retention-period 7 \
-  --preferred-backup-window "03:00-04:00" \
-  --preferred-maintenance-window "sun:04:00-sun:05:00" \
   --multi-az \
   --no-publicly-accessible \
-  --storage-type gp3 \
-  --storage-encrypted \
-  --enable-cloudwatch-logs-exports '["error","general","slowquery"]' \
-  --deletion-protection \
+  --tags "Key=Name,Value=lab-multiaz-db" \
   --region "$REGION"
+echo "RDS instance creation initiated (Multi-AZ enabled)"
 
-echo ""
-echo "RDS instance creation initiated with Multi-AZ enabled"
-echo "Primary will be in $AZ_1, Standby will be in $AZ_2"
-echo "This will take 10-15 minutes..."
-
-# Wait for instance to be available
-echo ""
-echo "Waiting for RDS instance to become available..."
+# Wait for RDS instance to become available (10-15 minutes)
+echo "Waiting for RDS instance to be available..."
 aws rds wait db-instance-available \
   --db-instance-identifier "$DB_INSTANCE_ID" \
   --region "$REGION"
+echo "RDS instance is available"
 
-echo "✅ RDS instance is now available!"
-
-# Get instance details
-aws rds describe-db-instances \
-  --db-instance-identifier "$DB_INSTANCE_ID" \
-  --query 'DBInstances[0].{Endpoint:Endpoint.Address,Port:Endpoint.Port,MultiAZ:MultiAZ,Status:DBInstanceStatus,PrimaryAZ:AvailabilityZone,SecondaryAZ:SecondaryAvailabilityZone}' \
-  --output table \
-  --region "$REGION"
-```
-
----
-
-## Step 9 – Get Database Endpoint
-
-```bash
-# Get database endpoint
+# Get database endpoint and availability zone information
 DB_ENDPOINT=$(aws rds describe-db-instances \
   --db-instance-identifier "$DB_INSTANCE_ID" \
   --query 'DBInstances[0].Endpoint.Address' \
   --output text \
   --region "$REGION")
-echo "DB_ENDPOINT=$DB_ENDPOINT"
+echo "DB endpoint: $DB_ENDPOINT"
 
-# Get port
-DB_PORT=$(aws rds describe-db-instances \
-  --db-instance-identifier "$DB_INSTANCE_ID" \
-  --query 'DBInstances[0].Endpoint.Port' \
-  --output text \
-  --region "$REGION")
-echo "DB_PORT=$DB_PORT"
-
-# Get availability zones
 PRIMARY_AZ=$(aws rds describe-db-instances \
   --db-instance-identifier "$DB_INSTANCE_ID" \
   --query 'DBInstances[0].AvailabilityZone' \
   --output text \
   --region "$REGION")
-echo "PRIMARY_AZ=$PRIMARY_AZ"
+echo "Primary AZ: $PRIMARY_AZ"
 
 SECONDARY_AZ=$(aws rds describe-db-instances \
   --db-instance-identifier "$DB_INSTANCE_ID" \
   --query 'DBInstances[0].SecondaryAvailabilityZone' \
   --output text \
   --region "$REGION")
-echo "SECONDARY_AZ=$SECONDARY_AZ"
-
-echo ""
-echo "Database connection details:"
-echo "  Endpoint: $DB_ENDPOINT"
-echo "  Port: $DB_PORT"
-echo "  Username: $MASTER_USERNAME"
-echo "  Password: $MASTER_PASSWORD"
-echo ""
-echo "Multi-AZ Configuration:"
-echo "  Primary AZ: $PRIMARY_AZ"
-echo "  Secondary AZ (Standby): $SECONDARY_AZ"
-echo ""
-echo "Note: Database is in private subnets - accessible only via bastion host"
+echo "Standby AZ: $SECONDARY_AZ"
 ```
 
 ---
 
-## Step 10 – Launch Bastion Host
+## Step 4: Launch Bastion Host
 
 ```bash
+# Create SSH key pair for bastion access
+aws ec2 create-key-pair \
+  --key-name "$KEY_NAME" \
+  --query 'KeyMaterial' \
+  --output text \
+  --region "$REGION" > "${KEY_NAME}.pem"
+chmod 400 "${KEY_NAME}.pem"
+echo "SSH key created: ${KEY_NAME}.pem"
+
 # Get latest Amazon Linux 2023 AMI
 AMI_ID=$(aws ec2 describe-images \
   --owners amazon \
-  --filters "Name=name,Values=al2023-ami-2023.*-x86_64" \
-    "Name=state,Values=available" \
+  --filters "Name=name,Values=al2023-ami-2023.*-x86_64" "Name=state,Values=available" \
   --query 'sort_by(Images, &CreationDate)[-1].ImageId' \
   --output text \
   --region "$REGION")
-echo "AMI_ID=$AMI_ID"
-
-# Create user data script to install MySQL client
-cat > bastion-userdata.sh <<'EOF'
-#!/bin/bash
-# Update system packages
-dnf update -y
-
-# Install MySQL client
-dnf install -y mysql
-
-# Install additional tools
-dnf install -y jq wget
-
-echo "MySQL client installed successfully" > /var/log/userdata-complete.log
-EOF
+echo "Using AMI: $AMI_ID"
 
 # Launch bastion host in public subnet
-echo "Launching bastion host..."
-
-BASTION_OUTPUT=$(aws ec2 run-instances \
+BASTION_INSTANCE_ID=$(aws ec2 run-instances \
   --image-id "$AMI_ID" \
   --instance-type t2.micro \
+  --key-name "$KEY_NAME" \
   --subnet-id "$PUBLIC_SUBNET_ID" \
   --security-group-ids "$BASTION_SG_ID" \
-  --user-data file://bastion-userdata.sh \
-  --tag-specifications "ResourceType=instance,Tags=[{Key=Name,Value=lab-bastion-host},{Key=Lab,Value=4C}]" \
-  --count 1 \
+  --tag-specifications "ResourceType=instance,Tags=[{Key=Name,Value=lab-bastion-host}]" \
+  --query 'Instances[0].InstanceId' \
+  --output text \
   --region "$REGION")
-
-# Extract instance ID
-BASTION_INSTANCE_ID=$(echo "$BASTION_OUTPUT" | jq -r '.Instances[0].InstanceId')
-echo "BASTION_INSTANCE_ID=$BASTION_INSTANCE_ID"
+echo "Bastion instance launched: $BASTION_INSTANCE_ID"
 
 # Wait for instance to be running
-echo "Waiting for bastion host to be running..."
+echo "Waiting for bastion to be running..."
 aws ec2 wait instance-running \
   --instance-ids "$BASTION_INSTANCE_ID" \
   --region "$REGION"
+echo "Bastion is running"
 
-echo "Bastion host is now running!"
-
-# Get public IP address
+# Get bastion public IP address
 BASTION_PUBLIC_IP=$(aws ec2 describe-instances \
   --instance-ids "$BASTION_INSTANCE_ID" \
   --query 'Reservations[0].Instances[0].PublicIpAddress' \
   --output text \
   --region "$REGION")
-echo "BASTION_PUBLIC_IP=$BASTION_PUBLIC_IP"
-
-# Display instance details
-aws ec2 describe-instances \
-  --instance-ids "$BASTION_INSTANCE_ID" \
-  --query 'Reservations[0].Instances[0].{InstanceId:InstanceId,PublicIP:PublicIpAddress,PrivateIP:PrivateIpAddress,State:State.Name,AZ:Placement.AvailabilityZone}' \
-  --output table \
-  --region "$REGION"
-
-echo ""
-echo "Wait 2-3 minutes for MySQL client installation to complete"
+echo "Bastion public IP: $BASTION_PUBLIC_IP"
 ```
 
 ---
 
-## Step 11 – Connect to Database via Bastion Host
+## Step 5: Connect and Initialize Database
 
 ```bash
-# Create SQL script for database initialization
-cat > init-database.sql <<EOF
--- Create sample table
+# Install MySQL client on bastion host
+ssh -i "${KEY_NAME}.pem" -o StrictHostKeyChecking=no ec2-user@"$BASTION_PUBLIC_IP" \
+  "sudo dnf install -y mariadb105"
+echo "MySQL client installed on bastion"
+
+# Test database connection from bastion
+echo "Testing database connection..."
+ssh -i "${KEY_NAME}.pem" -o StrictHostKeyChecking=no ec2-user@"$BASTION_PUBLIC_IP" \
+  "mysql -h $DB_ENDPOINT -u $MASTER_USERNAME -p'$MASTER_PASSWORD' -e 'SHOW DATABASES;'"
+
+# Create sample table and insert data
+echo "Creating sample table and data..."
+ssh -i "${KEY_NAME}.pem" -o StrictHostKeyChecking=no ec2-user@"$BASTION_PUBLIC_IP" \
+  "mysql -h $DB_ENDPOINT -u $MASTER_USERNAME -p'$MASTER_PASSWORD' $DB_NAME -e \"
 CREATE TABLE IF NOT EXISTS messages (
     id INT AUTO_INCREMENT PRIMARY KEY,
-    msg VARCHAR(100) NOT NULL,
+    msg VARCHAR(100),
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
-
--- Insert sample data
 INSERT INTO messages (msg) VALUES 
-('Hello from $PRIMARY_AZ'),
-('Multi-AZ test message'),
-('Data persists across failover');
-
--- Verify data
-SELECT 'Database initialized successfully' AS status;
-SELECT COUNT(*) AS message_count FROM messages;
+('Message from $PRIMARY_AZ'),
+('Multi-AZ test data'),
+('Pre-failover record');
 SELECT * FROM messages;
-EOF
-
-# Display connection instructions
-echo ""
-echo "================================================"
-echo "DATABASE CONNECTION INSTRUCTIONS"
-echo "================================================"
-echo ""
-echo "1. Connect to bastion host via SSH:"
-echo "   ssh -i <your-key.pem> ec2-user@${BASTION_PUBLIC_IP}"
-echo ""
-echo "2. Or use Systems Manager Session Manager (no SSH key needed):"
-echo "   aws ssm start-session --target $BASTION_INSTANCE_ID --region $REGION"
-echo ""
-echo "3. Once on bastion host, connect to database:"
-echo "   mysql -h $DB_ENDPOINT -P $DB_PORT -u $MASTER_USERNAME -p"
-echo "   (Password: $MASTER_PASSWORD)"
-echo ""
-echo "4. Run sample queries:"
-echo "   SHOW DATABASES;"
-echo "   USE $DB_NAME;"
-echo "   CREATE TABLE messages (id INT PRIMARY KEY, msg VARCHAR(100));"
-echo "   INSERT INTO messages VALUES(1, 'Hello from AZ $PRIMARY_AZ');"
-echo "   SELECT * FROM messages;"
-echo ""
-echo "================================================"
-echo ""
-echo "SQL initialization script created: init-database.sql"
-echo "Copy to bastion and run:"
-echo "  scp -i <key.pem> init-database.sql ec2-user@${BASTION_PUBLIC_IP}:~/"
-echo "  mysql -h $DB_ENDPOINT -P $DB_PORT -u $MASTER_USERNAME -p$MASTER_PASSWORD < init-database.sql"
+\""
+echo "Database initialized"
 ```
 
 ---
