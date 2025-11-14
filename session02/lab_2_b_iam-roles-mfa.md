@@ -16,7 +16,6 @@ This lab demonstrates how to create and configure IAM roles for cross-account or
 ---
 
 ## Prerequisites
-- AWS CLI configured (`aws configure`)
 - IAM permissions to create roles and policies
 - MFA device (virtual or hardware) for testing
 - Browser access for console MFA setup
