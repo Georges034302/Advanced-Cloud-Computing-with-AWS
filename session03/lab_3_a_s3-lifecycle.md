@@ -36,13 +36,12 @@ echo "REGION=$REGION"
 export BUCKET="s3-lifecycle-lab-${ACCOUNT_ID}"
 echo "BUCKET=$BUCKET"
 
-# Create bucket
-if [ "$REGION" = "us-east-1" ]; then
-  aws s3api create-bucket --bucket "$BUCKET" --region "$REGION"
-else
-  aws s3api create-bucket --bucket "$BUCKET" --region "$REGION" \
-    --create-bucket-configuration LocationConstraint="$REGION"
-fi
+# Create bucket in ap-southeast-2
+aws s3api create-bucket \
+  --bucket "$BUCKET" \
+  --region "$REGION" \
+  --create-bucket-configuration LocationConstraint="$REGION"
+
 echo "Bucket created: $BUCKET"
 ```
 
@@ -303,23 +302,38 @@ echo "Version 1 of test file" > test-file.txt
 echo "Version 2 of test file" > test-file-v2.txt
 echo "Version 3 of test file" > test-file-v3.txt
 
-# Upload version 1 - creates initial object
-aws s3 cp test-file.txt s3://$BUCKET/test-file.txt
+# Upload version 1 with KMS encryption explicitly specified
+aws s3api put-object \
+  --bucket "$BUCKET" \
+  --key test-file.txt \
+  --body test-file.txt \
+  --server-side-encryption aws:kms \
+  --ssekms-key-id "$KEY_ID"
 echo "Uploaded version 1"
 
 # Upload version 2 - overwrites v1, but v1 is preserved as noncurrent version
 # This demonstrates how versioning keeps all versions of an object
-aws s3 cp test-file-v2.txt s3://$BUCKET/test-file.txt
+# Upload version 2 with KMS encryption
+aws s3api put-object \
+  --bucket "$BUCKET" \
+  --key test-file.txt \
+  --body test-file-v2.txt \
+  --server-side-encryption aws:kms \
+  --ssekms-key-id "$KEY_ID"
 echo "Uploaded version 2"
 
 # Upload version 3 - v2 becomes noncurrent, v3 is the latest version
-aws s3 cp test-file-v3.txt s3://$BUCKET/test-file.txt
+# Upload version 3 with KMS encryption
+aws s3api put-object \
+  --bucket "$BUCKET" \
+  --key test-file.txt \
+  --body test-file-v3.txt \
+  --server-side-encryption aws:kms \
+  --ssekms-key-id "$KEY_ID"
 echo "Uploaded version 3"
 
 # List all versions of the test file
-# Should show 3 versions with different VersionIds
-# IsLatest=true for the most recent version
-echo "\nListing all versions:"
+echo "Listing all versions:"
 aws s3api list-object-versions \
   --bucket "$BUCKET" \
   --prefix test-file.txt \
@@ -327,8 +341,7 @@ aws s3api list-object-versions \
   --output table
 
 # Check encryption metadata of the latest version
-# Should show SSE-KMS encryption with the KMS key ARN
-echo "\nChecking encryption:"
+echo "Checking encryption:"
 aws s3api head-object \
   --bucket "$BUCKET" \
   --key test-file.txt \
