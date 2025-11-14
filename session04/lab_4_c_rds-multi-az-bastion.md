@@ -1,4 +1,5 @@
 # Lab 4.C: RDS Multi-AZ High Availability with Bastion Host
+<img width="1536" height="1024" alt="IMG" src="https://github.com/user-attachments/assets/c92aed41-f283-452c-8802-693061410653" />
 
 ## Overview
 Deploy an RDS MySQL instance with Multi-AZ for high availability, access it via bastion host, test automatic failover, and validate data persistence.
