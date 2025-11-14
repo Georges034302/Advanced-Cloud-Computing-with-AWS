@@ -1,4 +1,5 @@
 # Lab 3.B: EBS Volumes, Snapshots, and Lifecycle Management
+<img width="1536" height="1024" alt="IMG" src="https://github.com/user-attachments/assets/8f9410fe-6ffe-42a9-bb7b-7f8fbd868594" />
 
 ## Overview
 Learn to create EC2 instances, attach and manage EBS volumes, create snapshots, restore from backups, and automate snapshot lifecycle with AWS Data Lifecycle Manager (DLM).
