@@ -364,8 +364,9 @@ PUBLIC_IP=$(aws ec2 describe-instances \
 echo "PUBLIC_IP=$PUBLIC_IP"
 
 echo ""
-echo "Wait 2-3 minutes for Flask app to start, then access:"
-echo "  http://${PUBLIC_IP}:5000"
+echo "Wait 2-3 minutes for Flask app to start, then opening browser..."
+sleep 180
+"$BROWSER" "http://${PUBLIC_IP}:5000"
 ```
 
 ---
