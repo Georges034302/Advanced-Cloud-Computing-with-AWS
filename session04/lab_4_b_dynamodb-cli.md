@@ -1,192 +1,356 @@
-# Lab 4.B: Build and query a DynamoDB table using AWS CLI and SDK
+# Lab 4.B: DynamoDB Employee Table with CLI and Python
 
 ## Overview
-Hands-on lab to design, create, populate, and query an Amazon DynamoDB table using the AWS CLI and SDK (boto3). You will practice schema design (partition & sort keys), efficient queries, secondary indexes, pagination, TTL, backups, and basic IAM permissions.
+Create and manage a DynamoDB employee table using AWS CLI and Python (boto3). Learn DynamoDB's flexible schema by adding employees with different attributes, then build a Python application to query the data.
 
 ## Objectives
-- Design a DynamoDB table schema for read/write patterns
-- Create a table with CLI and SDK
-- Insert items (PutItem, BatchWriteItem)
-- Query and scan efficiently, use pagination
-- Add a Global Secondary Index (GSI) and query it
-- Use TTL, on-demand backups, and point-in-time recovery (PITR)
+- Create a DynamoDB table with partition and sort keys
+- Insert employee records with varying attributes (flexible schema)
+- Query employees using CLI
+- Build a Python application to query DynamoDB
 - Clean up resources
 
 ## Prerequisites
-- AWS CLI v2 configured (aws configure)
-- Python 3 with boto3 installed (pip install boto3) for SDK examples
-- IAM permissions for dynamodb:* for lab account (or scoped as shown below)
+- AWS CLI v2 configured
+- Python 3 with boto3 installed
+- IAM permissions for DynamoDB operations
 
 ---
 
-## Table design notes
-- Choose a partition key (hash) for even distribution; add a sort key for query filtering.
-- Reserve GSIs for alternate access patterns.
-- Keep item size small and avoid hot keys under high write traffic.
+## Variables
 
-Example model for a simple event store:
-- Table name: LabEvents
-- Partition key: pk (string) — e.g., USER#123
-- Sort key: sk (string) — e.g., EVENT#2025-11-10T12:00:00Z
-- GSI: GSI1 with partition gsi1pk and sort gsi1sk for querying by event type or status
-
----
-
-## CLI: Create table (on-demand or provisioned capacity)
-Replace REGION, ACCOUNT, TABLE_NAME as needed.
-
-On-demand (simpler for labs):
 ```bash
+REGION=ap-southeast-2
+TABLE_NAME=Employees
+```
+
+---
+
+## Step 1: Create DynamoDB Table
+
+```bash
+# Create Employees table with EmployeeID as partition key and Department as sort key
 aws dynamodb create-table \
-  --table-name LabEvents \
-  --attribute-definitions AttributeName=pk,AttributeType=S AttributeName=sk,AttributeType=S AttributeName=gsi1pk,AttributeType=S \
-  --key-schema AttributeName=pk,KeyType=HASH AttributeName=sk,KeyType=RANGE \
+  --table-name "$TABLE_NAME" \
+  --attribute-definitions \
+    AttributeName=EmployeeID,AttributeType=S \
+    AttributeName=Department,AttributeType=S \
+  --key-schema \
+    AttributeName=EmployeeID,KeyType=HASH \
+    AttributeName=Department,KeyType=RANGE \
   --billing-mode PAY_PER_REQUEST \
-  --global-secondary-indexes '[{"IndexName":"GSI1","KeySchema":[{"AttributeName":"gsi1pk","KeyType":"HASH"},{"AttributeName":"gsi1sk","KeyType":"RANGE"}],"Projection":{"ProjectionType":"ALL"}}]' \
-  --region us-east-1
+  --region "$REGION"
+echo "Table creation initiated"
+
+# Wait for table to be active
+aws dynamodb wait table-exists \
+  --table-name "$TABLE_NAME" \
+  --region "$REGION"
+echo "Table is active"
 ```
 
-Wait for table:
+---
+
+## Step 2: Insert Employee Records
+
 ```bash
-aws dynamodb wait table-exists --table-name LabEvents --region us-east-1
+# Insert employee 1 - Software Engineer with full attributes
+aws dynamodb put-item \
+  --table-name "$TABLE_NAME" \
+  --item '{
+    "EmployeeID": {"S": "E001"},
+    "Department": {"S": "Engineering"},
+    "Name": {"S": "Alice Johnson"},
+    "Role": {"S": "Software Engineer"},
+    "Salary": {"N": "95000"},
+    "Age": {"N": "28"}
+  }' \
+  --region "$REGION"
+echo "Employee E001 added"
+
+# Insert employee 2 - HR Manager (no age attribute)
+aws dynamodb put-item \
+  --table-name "$TABLE_NAME" \
+  --item '{
+    "EmployeeID": {"S": "E002"},
+    "Department": {"S": "HR"},
+    "Name": {"S": "Bob Smith"},
+    "Role": {"S": "HR Manager"},
+    "Salary": {"N": "85000"}
+  }' \
+  --region "$REGION"
+echo "Employee E002 added"
+
+# Insert employee 3 - DevOps Engineer with all attributes
+aws dynamodb put-item \
+  --table-name "$TABLE_NAME" \
+  --item '{
+    "EmployeeID": {"S": "E003"},
+    "Department": {"S": "Engineering"},
+    "Name": {"S": "Carol Martinez"},
+    "Role": {"S": "DevOps Engineer"},
+    "Salary": {"N": "105000"},
+    "Age": {"N": "32"}
+  }' \
+  --region "$REGION"
+echo "Employee E003 added"
+
+# Insert employee 4 - Financial Analyst (no salary attribute for privacy)
+aws dynamodb put-item \
+  --table-name "$TABLE_NAME" \
+  --item '{
+    "EmployeeID": {"S": "E004"},
+    "Department": {"S": "Finance"},
+    "Name": {"S": "David Lee"},
+    "Role": {"S": "Financial Analyst"},
+    "Age": {"N": "35"}
+  }' \
+  --region "$REGION"
+echo "Employee E004 added"
 ```
 
-## CLI: Insert items
-Single item:
+---
+
+## Step 3: Query Employees with CLI
+
 ```bash
-aws dynamodb put-item --table-name LabEvents --item '{"pk":{"S":"USER#123"},"sk":{"S":"EVENT#2025-11-10T12:00:00Z"},"type":{"S":"login"},"payload":{"S":"{\"ip\":\"1.2.3.4\"}"}}' --region us-east-1
+# Get specific employee by EmployeeID and Department
+aws dynamodb get-item \
+  --table-name "$TABLE_NAME" \
+  --key '{
+    "EmployeeID": {"S": "E001"},
+    "Department": {"S": "Engineering"}
+  }' \
+  --region "$REGION"
+echo "Retrieved employee E001"
+
+# Scan all employees in the table
+aws dynamodb scan \
+  --table-name "$TABLE_NAME" \
+  --region "$REGION"
+echo "Scanned all employees"
+
+# Filter employees by department (Engineering)
+aws dynamodb scan \
+  --table-name "$TABLE_NAME" \
+  --filter-expression "Department = :dept" \
+  --expression-attribute-values '{":dept":{"S":"Engineering"}}' \
+  --region "$REGION"
+echo "Filtered employees in Engineering department"
+
+# Filter employees by salary (above $90,000)
+aws dynamodb scan \
+  --table-name "$TABLE_NAME" \
+  --filter-expression "Salary >= :minSalary" \
+  --expression-attribute-values '{":minSalary":{"N":"90000"}}' \
+  --region "$REGION"
+echo "Filtered high earners"
 ```
 
-Batch write (up to 25 items per request):
+---
+
+## Step 4: Create Python Application
+
 ```bash
-aws dynamodb batch-write-item --request-items file://batch-items.json --region us-east-1
-```
+# Create application directory structure
+mkdir -p employee-app
+cd employee-app
 
-## CLI: Query and Scan
-Query by pk and range on sk:
-```bash
-aws dynamodb query --table-name LabEvents --key-condition-expression "pk = :p and begins_with(sk, :s)" --expression-attribute-values '{":p":{"S":"USER#123"},":s":{"S":"EVENT#2025-11"}}' --region us-east-1
-```
-
-Query GSI:
-```bash
-aws dynamodb query --table-name LabEvents --index-name GSI1 --key-condition-expression "gsi1pk = :g" --expression-attribute-values '{":g":{"S":"EVENTTYPE#login"}}' --region us-east-1
-```
-
-Scan with pagination (use sparingly):
-```bash
-aws dynamodb scan --table-name LabEvents --max-items 100 --region us-east-1
-```
-
-## TTL, Backups, and PITR
-Enable TTL on attribute "expiresAt" (epoch seconds):
-```bash
-aws dynamodb update-time-to-live --table-name LabEvents --time-to-live-specification "Enabled=true,AttributeName=expiresAt" --region us-east-1
-```
-
-Create on-demand backup:
-```bash
-aws dynamodb create-backup --table-name LabEvents --backup-name LabEvents-backup-$(date -u +%Y%m%d) --region us-east-1
-```
-
-Enable PITR:
-```bash
-aws dynamodb update-continuous-backups --table-name LabEvents --point-in-time-recovery-specification PointInTimeRecoveryEnabled=true --region us-east-1
-```
-
-## SDK examples (Python / boto3)
-
-Create table (boto3):
-```python
-# filepath: examples/dynamodb_create_table.py
+# Create query_employees.py file
+cat > query_employees.py << 'EOF'
+#!/usr/bin/env python3
+"""Query employees from DynamoDB table"""
 import boto3
+from boto3.dynamodb.conditions import Attr
+from decimal import Decimal
 
-dynamodb = boto3.client('dynamodb', region_name='us-east-1')
-dynamodb.create_table(
-    TableName='LabEvents',
-    AttributeDefinitions=[
-        {'AttributeName': 'pk', 'AttributeType': 'S'},
-        {'AttributeName': 'sk', 'AttributeType': 'S'},
-        {'AttributeName': 'gsi1pk', 'AttributeType': 'S'}
-    ],
-    KeySchema=[
-        {'AttributeName': 'pk', 'KeyType': 'HASH'},
-        {'AttributeName': 'sk', 'KeyType': 'RANGE'}
-    ],
-    BillingMode='PAY_PER_REQUEST',
-    GlobalSecondaryIndexes=[{
-        'IndexName':'GSI1',
-        'KeySchema':[{'AttributeName':'gsi1pk','KeyType':'HASH'}],
-        'Projection':{'ProjectionType':'ALL'}
-    }]
-)
-```
+# Initialize DynamoDB resource
+dynamodb = boto3.resource('dynamodb', region_name='ap-southeast-2')
+table = dynamodb.Table('Employees')
 
-Put item and query (boto3):
-```python
-# filepath: examples/dynamodb_put_query.py
+def get_employee(employee_id, department):
+    """Get specific employee by ID and Department"""
+    response = table.get_item(
+        Key={'EmployeeID': employee_id, 'Department': department}
+    )
+    return response.get('Item')
+
+def get_all_employees():
+    """Get all employees from table"""
+    response = table.scan()
+    return response.get('Items', [])
+
+def get_employees_by_department(department):
+    """Get employees in specific department"""
+    response = table.scan(
+        FilterExpression=Attr('Department').eq(department)
+    )
+    return response.get('Items', [])
+
+def get_high_earners(min_salary):
+    """Get employees earning above specified salary"""
+    response = table.scan(
+        FilterExpression=Attr('Salary').gte(Decimal(str(min_salary)))
+    )
+    return response.get('Items', [])
+
+def display_employee(emp):
+    """Display employee information"""
+    if not emp:
+        print("Employee not found")
+        return
+    print(f"\nEmployee ID: {emp.get('EmployeeID', 'N/A')}")
+    print(f"Name: {emp.get('Name', 'N/A')}")
+    print(f"Department: {emp.get('Department', 'N/A')}")
+    print(f"Role: {emp.get('Role', 'N/A')}")
+    print(f"Salary: ${emp.get('Salary', 'N/A')}")
+    print(f"Age: {emp.get('Age', 'N/A')}")
+    print("-" * 40)
+
+if __name__ == "__main__":
+    print("=== Get Specific Employee ===")
+    employee = get_employee('E001', 'Engineering')
+    display_employee(employee)
+    
+    print("\n=== All Employees ===")
+    for emp in get_all_employees():
+        display_employee(emp)
+    
+    print("\n=== Engineering Department ===")
+    for emp in get_employees_by_department('Engineering'):
+        display_employee(emp)
+    
+    print("\n=== High Earners (>= $100,000) ===")
+    for emp in get_high_earners(100000):
+        display_employee(emp)
+EOF
+
+# Create add_employee.py file
+cat > add_employee.py << 'EOF'
+#!/usr/bin/env python3
+"""Add new employee to DynamoDB table"""
 import boto3
-from boto3.dynamodb.conditions import Key
+from decimal import Decimal
 
-d = boto3.resource('dynamodb', region_name='us-east-1')
-t = d.Table('LabEvents')
+# Initialize DynamoDB resource
+dynamodb = boto3.resource('dynamodb', region_name='ap-southeast-2')
+table = dynamodb.Table('Employees')
 
-t.put_item(Item={'pk':'USER#123','sk':'EVENT#2025-11-10T12:00:00Z','type':'login','payload':'{"ip":"1.2.3.4"}'})
-
-resp = t.query(KeyConditionExpression=Key('pk').eq('USER#123') & Key('sk').begins_with('EVENT#2025'))
-print(resp.get('Items', []))
-```
-
-## IAM policy example (scoped)
-Grant minimal privileges for the lab (replace resource ARNs):
-```json
-{
-  "Version": "2012-10-17",
-  "Statement": [
-    {
-      "Effect": "Allow",
-      "Action": [
-        "dynamodb:CreateTable",
-        "dynamodb:DescribeTable",
-        "dynamodb:PutItem",
-        "dynamodb:BatchWriteItem",
-        "dynamodb:Query",
-        "dynamodb:Scan",
-        "dynamodb:UpdateTable",
-        "dynamodb:DeleteTable",
-        "dynamodb:CreateBackup",
-        "dynamodb:UpdateContinuousBackups",
-        "dynamodb:UpdateTimeToLive"
-      ],
-      "Resource": "arn:aws:dynamodb:REGION:ACCOUNT_ID:table/LabEvents"
+def add_employee(employee_id, department, name, role, salary=None, age=None):
+    """Add new employee to table"""
+    item = {
+        'EmployeeID': employee_id,
+        'Department': department,
+        'Name': name,
+        'Role': role
     }
-  ]
-}
+    if salary:
+        item['Salary'] = Decimal(str(salary))
+    if age:
+        item['Age'] = int(age)
+    
+    table.put_item(Item=item)
+    print(f"Added employee {employee_id}")
+
+if __name__ == "__main__":
+    add_employee(
+        employee_id='E005',
+        department='Marketing',
+        name='Emma Wilson',
+        role='Marketing Manager',
+        salary=88000,
+        age=30
+    )
+EOF
+
+# Create requirements.txt
+cat > requirements.txt << 'EOF'
+boto3>=1.26.0
+EOF
+
+# Make scripts executable
+chmod +x query_employees.py add_employee.py
+
+echo "Python application files created"
 ```
 
-## Validation checklist
-- [ ] Table created and active
-- [ ] Items inserted via CLI and SDK
-- [ ] Query by PK+SK returns expected items
-- [ ] GSI created and queried successfully
-- [ ] Pagination handled for large results
-- [ ] TTL and backups configured (on-demand backup + PITR)
-- [ ] IAM permissions scoped and working
+---
 
-## Cleanup
-Delete table when done:
+## Step 5: Run Python Application
+
 ```bash
-aws dynamodb delete-table --table-name LabEvents --region us-east-1
-aws dynamodb wait table-not-exists --table-name LabEvents --region us-east-1
-```
-Remove example backup(s) and any on-demand snapshots if created.
+# Install dependencies
+pip install -r requirements.txt
 
-## Notes & best practices
-- Prefer queries over scans; design keys for access patterns.
-- Use on-demand billing for unpredictable workloads during labs.
-- Monitor for hot keys and uneven traffic distribution.
-- Use GSIs sparingly and evaluate capacity/cost.
-- Use encryption at rest (default) and IAM roles for SDK access.
+# Query employees
+python3 query_employees.py
+
+# Add new employee
+python3 add_employee.py
+
+# Query again to see new employee
+python3 query_employees.py
+```
+
+---
+
+## Step 6: Cleanup
+
+```bash
+# Delete the DynamoDB table
+aws dynamodb delete-table \
+  --table-name "$TABLE_NAME" \
+  --region "$REGION"
+echo "Table deletion initiated"
+
+# Wait for table deletion to complete
+aws dynamodb wait table-not-exists \
+  --table-name "$TABLE_NAME" \
+  --region "$REGION"
+echo "Table deleted"
+
+# Clean up application directory
+cd ..
+rm -rf employee-app
+echo "Cleanup complete"
+```
+
+---
 
 ## Summary
-This lab covers practical DynamoDB operations using CLI and SDK, focusing on schema design, efficient querying, indexes, TTL, backups, and cleanup — all essential for scalable serverless data stores.
+
+This lab demonstrated:
+- **DynamoDB table creation** with partition (EmployeeID) and sort keys (Department)
+- **Flexible schema** - employees can have different attributes
+- **CLI operations** for inserting and querying data
+- **Python boto3** for programmatic table access
+- **Real-world example** with employee data demonstrating NoSQL flexibility
+
+### Key Concepts
+
+**Partition Key (EmployeeID):**
+- Unique identifier for data distribution
+- Used for direct item lookups
+
+**Sort Key (Department):**
+- Allows multiple items with same partition key
+- Enables range queries and filtering
+
+**Flexible Schema:**
+- E001: All attributes (ID, Name, Role, Salary, Age)
+- E002: Missing Age
+- E004: Missing Salary
+- DynamoDB allows items with different attributes in same table
+
+**Query vs Scan:**
+- **get-item**: Fast lookup by exact key
+- **scan**: Reads entire table (expensive)
+- **scan with filter**: Filters after reading (use sparingly)
+
+**Best Practices:**
+- Use PAY_PER_REQUEST for unpredictable workloads
+- Design keys for your access patterns
+- Minimize scans on large tables
+- Handle missing attributes in application code
+
+---
