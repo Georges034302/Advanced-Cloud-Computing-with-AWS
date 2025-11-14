@@ -1,4 +1,5 @@
 # Lab 2.C: Federated Access with AWS Cognito and IAM Roles
+<img width="1536" height="1024" alt="IMG" src="https://github.com/user-attachments/assets/abca74ee-b0b9-42fb-8a0a-376cc5be6103" />
 
 ## Overview
 This lab demonstrates how users from external identity providers (Google, Facebook, Amazon) can authenticate using Amazon Cognito and obtain temporary IAM role credentials via AWS STS. You will integrate federated identities without creating IAM users, showcasing secure, temporary access to AWS resources.
