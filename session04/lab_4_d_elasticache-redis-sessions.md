@@ -25,24 +25,19 @@ This lab demonstrates how to use Amazon ElastiCache Redis as a high-performance 
 ## Step 1 – Set Variables and Verify Prerequisites
 
 ```bash
-# Get AWS account ID dynamically
-ACCOUNT_ID=$(aws sts get-caller-identity \
-  --query Account \
-  --output text)
-echo "ACCOUNT_ID=$ACCOUNT_ID"
-
-# Set region
-REGION="ap-southeast-2"
+# Set AWS region (Sydney, Australia)
+REGION=ap-southeast-2
 echo "REGION=$REGION"
 
 # Set cache cluster identifier
-CACHE_CLUSTER_ID="lab-redis-cluster"
+CACHE_CLUSTER_ID=lab-redis-cluster
 echo "CACHE_CLUSTER_ID=$CACHE_CLUSTER_ID"
 
-# Set cache configuration
-CACHE_NODE_TYPE="cache.t3.micro"
+# Set cache node type (t3.micro for cost efficiency)
+CACHE_NODE_TYPE=cache.t3.micro
 echo "CACHE_NODE_TYPE=$CACHE_NODE_TYPE"
 
+# Set number of cache nodes (single node for simplicity)
 NUM_CACHE_NODES=1
 echo "NUM_CACHE_NODES=$NUM_CACHE_NODES"
 
@@ -54,7 +49,7 @@ VPC_ID=$(aws ec2 describe-vpcs \
   --region "$REGION")
 echo "VPC_ID=$VPC_ID"
 
-# Get first subnet ID
+# Get first subnet ID for EC2 instance
 SUBNET_ID=$(aws ec2 describe-subnets \
   --filters "Name=vpc-id,Values=$VPC_ID" \
   --query 'Subnets[0].SubnetId' \
@@ -62,16 +57,13 @@ SUBNET_ID=$(aws ec2 describe-subnets \
   --region "$REGION")
 echo "SUBNET_ID=$SUBNET_ID"
 
-# Get all subnet IDs for cache subnet group
+# Get all subnet IDs for cache subnet group (multi-AZ support)
 SUBNET_IDS=$(aws ec2 describe-subnets \
   --filters "Name=vpc-id,Values=$VPC_ID" \
   --query 'Subnets[*].SubnetId' \
   --output text \
   --region "$REGION")
 echo "SUBNET_IDS=$SUBNET_IDS"
-
-# Verify AWS CLI is configured
-aws sts get-caller-identity
 ```
 
 ---
@@ -79,9 +71,9 @@ aws sts get-caller-identity
 ## Step 2 – Create Security Groups
 
 ```bash
-# Create security group for ElastiCache Redis
+# Create security group for ElastiCache Redis cluster
 REDIS_SG_ID=$(aws ec2 create-security-group \
-  --group-name "elasticache-redis-sg" \
+  --group-name elasticache-redis-sg \
   --description "Security group for ElastiCache Redis cluster" \
   --vpc-id "$VPC_ID" \
   --region "$REGION" \
@@ -89,48 +81,42 @@ REDIS_SG_ID=$(aws ec2 create-security-group \
   --output text)
 echo "REDIS_SG_ID=$REDIS_SG_ID"
 
-# Create security group for EC2 application servers
+# Create security group for application server
 APP_SG_ID=$(aws ec2 create-security-group \
-  --group-name "redis-app-sg" \
-  --description "Security group for application servers accessing Redis" \
+  --group-name redis-app-sg \
+  --description "Security group for Flask application" \
   --vpc-id "$VPC_ID" \
   --region "$REGION" \
   --query 'GroupId' \
   --output text)
 echo "APP_SG_ID=$APP_SG_ID"
 
-# Allow SSH access to application servers
+# Allow SSH access (port 22) to application server
 aws ec2 authorize-security-group-ingress \
   --group-id "$APP_SG_ID" \
   --protocol tcp \
   --port 22 \
   --cidr 0.0.0.0/0 \
   --region "$REGION"
+echo "SSH access (port 22) allowed"
 
-# Allow Flask port access
+# Allow HTTP access (port 5000) for Flask application
 aws ec2 authorize-security-group-ingress \
   --group-id "$APP_SG_ID" \
   --protocol tcp \
   --port 5000 \
   --cidr 0.0.0.0/0 \
   --region "$REGION"
+echo "Flask access (port 5000) allowed"
 
-# Allow Redis access from application security group
+# Allow Redis access (port 6379) from application security group only
 aws ec2 authorize-security-group-ingress \
   --group-id "$REDIS_SG_ID" \
   --protocol tcp \
   --port 6379 \
   --source-group "$APP_SG_ID" \
   --region "$REGION"
-
-echo "Security groups created successfully"
-
-# Describe security groups
-aws ec2 describe-security-groups \
-  --group-ids "$REDIS_SG_ID" "$APP_SG_ID" \
-  --query 'SecurityGroups[*].{GroupId:GroupId,GroupName:GroupName,Description:Description}' \
-  --output table \
-  --region "$REGION"
+echo "Redis access (port 6379) allowed from app servers"
 ```
 
 ---
@@ -138,21 +124,13 @@ aws ec2 describe-security-groups \
 ## Step 3 – Create Cache Subnet Group
 
 ```bash
-# Create cache subnet group spanning multiple availability zones
+# Create cache subnet group (multi-AZ support for high availability)
 aws elasticache create-cache-subnet-group \
-  --cache-subnet-group-name "lab-cache-subnet-group" \
-  --cache-subnet-group-description "Subnet group for ElastiCache Redis lab" \
+  --cache-subnet-group-name lab-cache-subnet-group \
+  --cache-subnet-group-description "Subnet group for Redis cluster" \
   --subnet-ids $SUBNET_IDS \
   --region "$REGION"
-
 echo "Cache subnet group created"
-
-# Describe cache subnet group
-aws elasticache describe-cache-subnet-groups \
-  --cache-subnet-group-name "lab-cache-subnet-group" \
-  --query 'CacheSubnetGroups[0].{Name:CacheSubnetGroupName,VpcId:VpcId,Subnets:Subnets[*].SubnetIdentifier}' \
-  --output json \
-  --region "$REGION" | jq '.'
 ```
 
 ---
@@ -160,37 +138,23 @@ aws elasticache describe-cache-subnet-groups \
 ## Step 4 – Create ElastiCache Redis Cluster
 
 ```bash
-# Create Redis cluster (single node for simplicity)
-echo "Creating ElastiCache Redis cluster..."
-
+# Create Redis cluster (single node, Redis 7.0)
 aws elasticache create-cache-cluster \
   --cache-cluster-id "$CACHE_CLUSTER_ID" \
   --cache-node-type "$CACHE_NODE_TYPE" \
   --engine redis \
-  --engine-version "7.0" \
+  --engine-version 7.0 \
   --num-cache-nodes "$NUM_CACHE_NODES" \
-  --cache-subnet-group-name "lab-cache-subnet-group" \
+  --cache-subnet-group-name lab-cache-subnet-group \
   --security-group-ids "$REDIS_SG_ID" \
   --region "$REGION"
+echo "Redis cluster creation initiated (takes 5-10 minutes)"
 
-echo "Redis cluster creation initiated..."
-echo "This will take 5-10 minutes..."
-
-# Wait for cluster to be available
-echo "Waiting for Redis cluster to become available..."
+# Wait for cluster to become available
 aws elasticache wait cache-cluster-available \
   --cache-cluster-id "$CACHE_CLUSTER_ID" \
   --region "$REGION"
-
-echo "✅ Redis cluster is now available!"
-
-# Get cluster details
-aws elasticache describe-cache-clusters \
-  --cache-cluster-id "$CACHE_CLUSTER_ID" \
-  --show-cache-node-info \
-  --query 'CacheClusters[0].{ClusterId:CacheClusterId,Status:CacheClusterStatus,NodeType:CacheNodeType,Engine:Engine,EngineVersion:EngineVersion}' \
-  --output table \
-  --region "$REGION"
+echo "Redis cluster is now available"
 ```
 
 ---
@@ -198,7 +162,7 @@ aws elasticache describe-cache-clusters \
 ## Step 5 – Get Redis Endpoint
 
 ```bash
-# Get Redis endpoint address
+# Get Redis endpoint hostname
 REDIS_ENDPOINT=$(aws elasticache describe-cache-clusters \
   --cache-cluster-id "$CACHE_CLUSTER_ID" \
   --show-cache-node-info \
@@ -207,7 +171,7 @@ REDIS_ENDPOINT=$(aws elasticache describe-cache-clusters \
   --region "$REGION")
 echo "REDIS_ENDPOINT=$REDIS_ENDPOINT"
 
-# Get Redis port
+# Get Redis port number
 REDIS_PORT=$(aws elasticache describe-cache-clusters \
   --cache-cluster-id "$CACHE_CLUSTER_ID" \
   --show-cache-node-info \
@@ -215,13 +179,6 @@ REDIS_PORT=$(aws elasticache describe-cache-clusters \
   --output text \
   --region "$REGION")
 echo "REDIS_PORT=$REDIS_PORT"
-
-echo ""
-echo "Redis connection details:"
-echo "Host: $REDIS_ENDPOINT"
-echo "Port: $REDIS_PORT"
-echo ""
-echo "Connection string: redis://${REDIS_ENDPOINT}:${REDIS_PORT}"
 ```
 
 ---
@@ -238,25 +195,18 @@ AMI_ID=$(aws ec2 describe-images \
   --output text \
   --region "$REGION")
 echo "AMI_ID=$AMI_ID"
-
-# Display AMI details
-aws ec2 describe-images \
-  --image-ids "$AMI_ID" \
-  --query 'Images[0].{ImageId:ImageId,Name:Name,CreationDate:CreationDate}' \
-  --output table \
-  --region "$REGION"
 ```
 
 ---
 
-## Step 7 – Create Simple Flask Application
+## Step 7 – Create Flask Application with Redis Session Management
 
 ```bash
-# Create Flask application directory
+# Create application directory
 mkdir -p redis-app
 cd redis-app
 
-# Create simple Flask application with Redis session management
+# Create Flask application with Redis session support
 cat > app.py <<'EOF'
 from flask import Flask, session, render_template_string
 from flask_session import Session
@@ -269,7 +219,7 @@ app.config['SECRET_KEY'] = 'lab-secret-key'
 app.config['SESSION_TYPE'] = 'redis'
 app.config['SESSION_PERMANENT'] = False
 
-# Redis connection
+# Redis connection configuration
 REDIS_HOST = os.environ.get('REDIS_HOST', 'localhost')
 REDIS_PORT = int(os.environ.get('REDIS_PORT', 6379))
 
@@ -333,11 +283,12 @@ def index():
 def test():
     cache = redis.Redis(host=REDIS_HOST, port=REDIS_PORT, decode_responses=True)
     
-    # Simple Redis tests
+    # Test SET/GET operations
     cache.set('test:key', 'Hello Redis!', ex=60)
     value = cache.get('test:key')
     result = f"SET/GET test: {value}\n"
     
+    # Test Hash operations
     cache.hset('test:user', mapping={'name': 'John', 'email': 'john@example.com'})
     user = cache.hgetall('test:user')
     result += f"Hash test: {user}"
@@ -359,16 +310,14 @@ if __name__ == '__main__':
     app.run(host='0.0.0.0', port=5000, debug=True)
 EOF
 
-# Create requirements.txt
+# Create requirements file
 cat > requirements.txt <<'EOF'
 Flask==3.0.0
 Flask-Session==0.5.0
 redis==5.0.1
 EOF
 
-echo "Flask application created in redis-app/ directory"
-ls -la
-
+echo "Flask application created"
 cd ..
 ```
 
@@ -377,7 +326,7 @@ cd ..
 ## Step 8 – Create User Data Script for EC2
 
 ```bash
-# Create user data script to install and run Flask app
+# Create user data script to auto-install and run Flask app on EC2
 cat > redis-app-userdata.sh <<EOF
 #!/bin/bash
 # Update system packages
@@ -395,7 +344,7 @@ cat > app.py <<'PYAPP'
 $(cat redis-app/app.py)
 PYAPP
 
-# Create requirements.txt
+# Create requirements file
 cat > requirements.txt <<'PYREQ'
 $(cat redis-app/requirements.txt)
 PYREQ
@@ -422,18 +371,16 @@ Restart=always
 WantedBy=multi-user.target
 SERVICE
 
-# Set ownership
+# Set ownership to ec2-user
 chown -R ec2-user:ec2-user /home/ec2-user/app
 
 # Enable and start Flask service
 systemctl daemon-reload
 systemctl enable flask-app
 systemctl start flask-app
-
-echo "Flask application started successfully" > /var/log/userdata-complete.log
 EOF
 
-echo "User data script created for EC2 instance"
+echo "User data script created"
 ```
 
 ---
@@ -441,30 +388,24 @@ echo "User data script created for EC2 instance"
 ## Step 9 – Launch EC2 Instance with Flask Application
 
 ```bash
-# Launch EC2 instance with Flask application
-echo "Launching EC2 instance with Flask application..."
-
-INSTANCE_OUTPUT=$(aws ec2 run-instances \
+# Launch EC2 instance with Flask application (auto-configured via user data)
+INSTANCE_ID=$(aws ec2 run-instances \
   --image-id "$AMI_ID" \
   --instance-type t2.micro \
   --subnet-id "$SUBNET_ID" \
   --security-group-ids "$APP_SG_ID" \
   --user-data file://redis-app-userdata.sh \
-  --tag-specifications "ResourceType=instance,Tags=[{Key=Name,Value=redis-app-server},{Key=Lab,Value=4D}]" \
-  --count 1 \
+  --tag-specifications "ResourceType=instance,Tags=[{Key=Name,Value=redis-app-server}]" \
+  --query 'Instances[0].InstanceId' \
+  --output text \
   --region "$REGION")
-
-# Extract instance ID
-INSTANCE_ID=$(echo "$INSTANCE_OUTPUT" | jq -r '.Instances[0].InstanceId')
 echo "INSTANCE_ID=$INSTANCE_ID"
 
 # Wait for instance to be running
-echo "Waiting for EC2 instance to be running..."
 aws ec2 wait instance-running \
   --instance-ids "$INSTANCE_ID" \
   --region "$REGION"
-
-echo "✅ Instance is now running!"
+echo "Instance is running"
 
 # Get public IP address
 PUBLIC_IP=$(aws ec2 describe-instances \
@@ -474,74 +415,24 @@ PUBLIC_IP=$(aws ec2 describe-instances \
   --region "$REGION")
 echo "PUBLIC_IP=$PUBLIC_IP"
 
-# Display instance details
-aws ec2 describe-instances \
-  --instance-ids "$INSTANCE_ID" \
-  --query 'Reservations[0].Instances[0].{InstanceId:InstanceId,PublicIP:PublicIpAddress,PrivateIP:PrivateIpAddress,State:State.Name}' \
-  --output table \
-  --region "$REGION"
-
 echo ""
-echo "================================================"
-echo "APPLICATION ACCESS"
-echo "================================================"
-echo ""
-echo "Wait 2-3 minutes for application to start"
-echo ""
-echo "Then access the application at:"
+echo "Wait 2-3 minutes for Flask app to start, then access:"
 echo "  http://${PUBLIC_IP}:5000"
-echo ""
-echo "Test the following:"
-echo "  1. Refresh the page - visit count increases"
-echo "  2. Click 'Test Redis' - verify Redis operations"
-echo "  3. Click 'Clear Session' - reset visit count"
-echo "  4. Refresh again - visit count starts from 1"
-echo ""
-echo "================================================"
 ```
 
 ---
 
-## Step 10 – Test Redis Connection 
+## Step 10 – Test Application
 
-```bash
-# Create Redis connection test script
-cat > test-redis.sh <<EOF
-#!/bin/bash
-# Test Redis connection from EC2 instance
+```
+Visit the application in your browser:
+  http://<PUBLIC_IP>:5000
 
-echo "Testing Redis connection to ${REDIS_ENDPOINT}:${REDIS_PORT}"
-echo ""
-
-# Install redis-cli if needed
-if ! command -v redis-cli &> /dev/null; then
-    echo "Installing redis-cli..."
-    sudo dnf install -y redis6
-fi
-
-echo "Testing PING..."
-redis-cli -h ${REDIS_ENDPOINT} -p ${REDIS_PORT} PING
-
-echo ""
-echo "Setting test key..."
-redis-cli -h ${REDIS_ENDPOINT} -p ${REDIS_PORT} SET test:connection "success"
-
-echo ""
-echo "Getting test key..."
-redis-cli -h ${REDIS_ENDPOINT} -p ${REDIS_PORT} GET test:connection
-
-echo ""
-echo "Connection test completed!"
-EOF
-
-chmod +x test-redis.sh
-
-echo ""
-echo "Redis test script created: test-redis.sh"
-echo ""
-echo "To run on EC2 instance:"
-echo "  1. SSH to instance: ssh -i <key.pem> ec2-user@${PUBLIC_IP}"
-echo "  2. Copy and run the test script"
+Test the following:
+  1. Refresh the page - visit count increases (session stored in Redis)
+  2. Click 'Test Redis' - verify Redis SET/GET and Hash operations
+  3. Click 'Clear Session' - reset visit count
+  4. Refresh again - visit count starts from 1
 ```
 
 ---
@@ -550,71 +441,47 @@ echo "  2. Copy and run the test script"
 
 ```bash
 # Terminate EC2 instance
-echo "Terminating EC2 instance..."
 aws ec2 terminate-instances \
   --instance-ids "$INSTANCE_ID" \
   --region "$REGION"
+echo "EC2 instance termination initiated"
 
 # Wait for instance to terminate
-echo "Waiting for instance to terminate..."
 aws ec2 wait instance-terminated \
   --instance-ids "$INSTANCE_ID" \
   --region "$REGION"
+echo "EC2 instance terminated"
 
-echo "Instance terminated successfully"
-
-# Delete ElastiCache cluster
-echo "Deleting ElastiCache Redis cluster..."
+# Delete ElastiCache Redis cluster
 aws elasticache delete-cache-cluster \
   --cache-cluster-id "$CACHE_CLUSTER_ID" \
   --region "$REGION"
+echo "Redis cluster deletion initiated (takes a few minutes)"
 
-# Wait for cluster deletion
-echo "Waiting for cluster to be deleted (this may take a few minutes)..."
-sleep 60
-
-# Check cluster status
-aws elasticache describe-cache-clusters \
-  --cache-cluster-id "$CACHE_CLUSTER_ID" \
-  --region "$REGION" 2>&1 || echo "Cache cluster deleted successfully"
+# Wait for cluster deletion to complete
+sleep 120
 
 # Delete cache subnet group
-echo "Deleting cache subnet group..."
 aws elasticache delete-cache-subnet-group \
-  --cache-subnet-group-name "lab-cache-subnet-group" \
+  --cache-subnet-group-name lab-cache-subnet-group \
   --region "$REGION"
+echo "Cache subnet group deleted"
 
-# Delete security groups
-echo "Deleting security groups..."
+# Delete security groups (wait for dependencies to clear)
 sleep 10
-
 aws ec2 delete-security-group \
   --group-id "$APP_SG_ID" \
   --region "$REGION"
+echo "App security group deleted"
 
 aws ec2 delete-security-group \
   --group-id "$REDIS_SG_ID" \
   --region "$REGION"
+echo "Redis security group deleted"
 
-# Verify security group deletion
-aws ec2 describe-security-groups \
-  --group-ids "$REDIS_SG_ID" \
-  --region "$REGION" 2>&1 || echo "Security groups deleted"
-
-# Delete local files
-echo "Cleaning up local files..."
-rm -rf redis-app/
-rm -f redis-app-userdata.sh test-redis.sh
-
-echo ""
-echo "✅ Cleanup completed successfully!"
-echo ""
-echo "All resources deleted:"
-echo "- EC2 instance"
-echo "- ElastiCache Redis cluster"
-echo "- Cache subnet group"
-echo "- Security groups (2)"
-echo "- Local application files"
+# Remove local files
+rm -rf redis-app redis-app-userdata.sh
+echo "Local files removed"
 ```
 
 ---
