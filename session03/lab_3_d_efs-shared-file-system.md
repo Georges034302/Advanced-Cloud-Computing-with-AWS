@@ -1,4 +1,5 @@
 # Lab 3.D: Amazon EFS Shared File System
+<img width="1536" height="1024" alt="IMG" src="https://github.com/user-attachments/assets/d358c209-ecef-4b02-b9e9-0c06fc76bee1" />
 
 ## Overview
 Deploy Amazon EFS as a shared network file system accessible by multiple EC2 instances across availability zones.
