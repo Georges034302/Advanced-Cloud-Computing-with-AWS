@@ -26,6 +26,8 @@ KEY_NAME="efs-lab-key"
 # Get VPC details
 VPC_ID=$(aws ec2 describe-vpcs --filters "Name=is-default,Values=true" --query 'Vpcs[0].VpcId' --output text)
 VPC_CIDR=$(aws ec2 describe-vpcs --vpc-ids "$VPC_ID" --query 'Vpcs[0].CidrBlock' --output text)
+echo "VPC_ID=$VPC_ID"
+echo "VPC_CIDR=$VPC_CIDR"
 
 # Get subnet IDs
 SUBNET_IDS=$(aws ec2 describe-subnets --filters "Name=vpc-id,Values=$VPC_ID" --query 'Subnets[*].{AZ:AvailabilityZone,SubnetId:SubnetId}' --output json)
@@ -151,14 +153,15 @@ sed -i "s/FILE_SYSTEM_ID/${FILE_SYSTEM_ID}/g" user-data.sh
 ## Step 8 – Launch EC2 Instances
 
 ```bash
-# Get Instance 1 ID
+# Run instance 1 and get Instance 1 ID
 INSTANCE_ID_1=$(aws ec2 run-instances --image-id "$AMI_ID" --instance-type t3.micro --key-name "$KEY_NAME" --subnet-id "$SUBNET_ID_1" --security-group-ids "$EC2_SG_ID" --user-data file://user-data.sh --tag-specifications "ResourceType=instance,Tags=[{Key=Name,Value=${INSTANCE_NAME}-1}]" --query 'Instances[0].InstanceId' --output text)
-
-# Get Instance 2 ID
-INSTANCE_ID_2=$(aws ec2 run-instances --image-id "$AMI_ID" --instance-type t3.micro --key-name "$KEY_NAME" --subnet-id "$SUBNET_ID_2" --security-group-ids "$EC2_SG_ID" --user-data file://user-data.sh --tag-specifications "ResourceType=instance,Tags=[{Key=Name,Value=${INSTANCE_NAME}-2}]" --query 'Instances[0].InstanceId' --output text)
-
 echo "INSTANCE_ID_1=$INSTANCE_ID_1"
+
+# Run instance 2 and get Instance 2 ID
+INSTANCE_ID_2=$(aws ec2 run-instances --image-id "$AMI_ID" --instance-type t3.micro --key-name "$KEY_NAME" --subnet-id "$SUBNET_ID_2" --security-group-ids "$EC2_SG_ID" --user-data file://user-data.sh --tag-specifications "ResourceType=instance,Tags=[{Key=Name,Value=${INSTANCE_NAME}-2}]" --query 'Instances[0].InstanceId' --output text)
 echo "INSTANCE_ID_2=$INSTANCE_ID_2"
+
+# Wait for the EC2 instances to become ready
 sleep 120
 
 PUBLIC_IP_1=$(aws ec2 describe-instances --instance-ids "$INSTANCE_ID_1" --query 'Reservations[0].Instances[0].PublicIpAddress' --output text)
@@ -228,10 +231,6 @@ ls -lh "$TEST_DIR"
 ENDSSH
 
 # Wait for both background jobs to complete
-wait
-
-echo ""
-echo "Concurrent write tests completed on both instances"
 ```
 
 ---
