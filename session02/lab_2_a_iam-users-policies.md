@@ -1,4 +1,5 @@
 # Lab 2.A: IAM Users, Groups, and Custom Policies
+<img width="1536" height="849" alt="IMG" src="https://github.com/user-attachments/assets/b2a3a015-330c-40a6-9bdd-9d1a95d00e15" />
 
 ## Overview
 This lab demonstrates how to implement AWS Identity and Access Management (IAM) following the principle of least privilege. You will create IAM users, groups, and custom policies, configure roles for EC2 instances, test permissions, and apply security best practices.
