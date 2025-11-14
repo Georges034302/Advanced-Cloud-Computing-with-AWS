@@ -11,7 +11,6 @@ This lab demonstrates how to implement AWS Identity and Access Management (IAM) 
 - Create IAM roles with trust policies for EC2
 - Test effective permissions using the policy simulator
 - Apply permission boundaries to limit maximum permissions
-- Follow IAM best practices (MFA, role-based access, principle of least privilege)
 
 ---
 
@@ -26,18 +25,16 @@ This lab demonstrates how to implement AWS Identity and Access Management (IAM) 
 ## Step 1 – Set Variables and Verify Prerequisites
 
 ```bash
-# Get AWS account ID
-ACCOUNT_ID=$(aws sts get-caller-identity \
-  --query Account \
-  --output text)
-echo "ACCOUNT_ID=$ACCOUNT_ID"
+# Generate random bucket suffix
+RAND=$(openssl rand -hex 4)
+echo "RAND=$RAND"
 
 # Set region
 REGION="ap-southeast-2"
 echo "REGION=$REGION"
 
 # Set bucket name for testing
-BUCKET_NAME="iam-lab-test-bucket-${ACCOUNT_ID}"
+BUCKET_NAME="iam-lab-test-bucket-${RAND}"
 echo "BUCKET_NAME=$BUCKET_NAME"
 
 # Verify AWS CLI is configured
@@ -413,63 +410,7 @@ aws iam simulate-principal-policy \
 
 ---
 
-## Step 9 – Create Access Keys for Testing (Optional)
-
-```bash
-# Create access key for Alice to test with CLI
-echo "Creating access key for Alice..."
-ALICE_KEYS=$(aws iam create-access-key \
-  --user-name $USER_ALICE)
-
-# Display access key (in production, handle securely!)
-echo "$ALICE_KEYS" | jq -r '.AccessKey | "Access Key ID: \(.AccessKeyId)\nSecret: \(.SecretAccessKey)"'
-
-# Note: In a real scenario, you would:
-# 1. Configure a new profile with these credentials
-# 2. Test S3 access: aws s3 ls s3://$BUCKET_NAME --profile alice-profile
-# 3. Verify permissions work as expected
-echo "To test Alice's permissions, configure a profile with these credentials"
-```
-
-> **Security Note:** In production, never display secret access keys in logs. Use AWS Secrets Manager or Parameter Store for secure credential management.
-
----
-
-## Step 10 – IAM Best Practices
-
-```bash
-# List all IAM users without MFA enabled (best practice check)
-echo "Checking users without MFA..."
-aws iam get-credential-report || aws iam generate-credential-report
-sleep 5
-aws iam get-credential-report \
-  --query 'Content' \
-  --output text | base64 -d | grep -v ",true," || echo "All users have MFA enabled"
-
-# List access keys older than 90 days (best practice: rotate keys)
-echo "Checking for old access keys..."
-aws iam list-users \
-  --query 'Users[*].UserName' \
-  --output text | while read user; do
-    aws iam list-access-keys --user-name $user \
-      --query 'AccessKeyMetadata[*].[UserName,AccessKeyId,CreateDate]' \
-      --output text
-done
-
-# View password policy (should enforce strong passwords)
-aws iam get-account-password-policy || echo "No password policy set"
-```
-
-> **Best Practices:**
-> - Enable MFA for all users, especially those with elevated privileges
-> - Rotate access keys regularly (every 90 days)
-> - Use IAM roles instead of access keys for applications on EC2
-> - Apply principle of least privilege
-> - Use permission boundaries to limit delegation
-> - Enable CloudTrail to audit IAM actions
----
-
-## Step 11 – Cleanup Resources
+## Step 9 – Cleanup Resources
 
 ```bash
 # Delete access keys for Alice
@@ -587,16 +528,6 @@ In this lab, you have:
 - Applied inline policies for user-specific permissions
 - Implemented permission boundaries to limit maximum permissions
 - Used the IAM policy simulator to validate effective permissions
-- Created and tested access keys for programmatic access
-- Followed IAM best practices including MFA, key rotation, and least privilege
 - Successfully cleaned up all IAM resources and test infrastructure
-
-**Key Takeaways:**
-- Use groups to manage permissions for multiple users efficiently
-- Prefer managed policies over inline policies for reusability
-- Use IAM roles for applications on EC2 instead of embedding credentials
-- Permission boundaries provide an additional security layer for delegation
-- Always test permissions using the policy simulator before deployment
-- Regular audits of IAM users, keys, and MFA status are essential for security
 
 ---
