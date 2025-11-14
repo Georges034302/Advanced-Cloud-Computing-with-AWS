@@ -1,20 +1,16 @@
-# Lab 3.C: S3 Static Website Hosting with CloudFront CDN
+# Lab 3.C: S3 Static Website Hosting
 
 ## Overview
-This lab demonstrates how to deploy a static website using Amazon S3 and distribute it globally with Amazon CloudFront CDN. You will configure public website access, custom error pages, HTTPS delivery, and implement caching strategies for optimal performance.
+This lab demonstrates how to deploy a static website using Amazon S3. You will configure public website access, custom error pages, and test the S3 static website endpoint.
 
 ---
 
 ## Objectives
 - Create and configure S3 bucket for static website hosting
-- Upload and organize website files (HTML, CSS, JavaScript, images)
+- Upload and organize website files (HTML, CSS, JavaScript)
 - Configure bucket policies for public read access
 - Set up index and error documents
-- Create CloudFront distribution for global content delivery
-- Configure Origin Access Identity (OAI) for secure S3 access
-- Implement custom error pages and cache behaviors
-- Test CDN caching and create invalidations
-- Monitor website performance and access logs
+- Test S3 website endpoint
 - Clean up all resources
 
 ---
@@ -22,7 +18,7 @@ This lab demonstrates how to deploy a static website using Amazon S3 and distrib
 ## Prerequisites
 - AWS CLI configured (`aws configure`)
 - Basic understanding of HTML/CSS/JavaScript
-- IAM permissions to manage S3, CloudFront, and IAM
+- IAM permissions to manage S3
 - Text editor for creating website files
 
 ---
@@ -73,14 +69,14 @@ cat > website-files/index.html <<'EOF'
 <body>
     <div class="container">
         <h1>AWS S3 Static Website</h1>
-        <p>Hosted on S3 and distributed via CloudFront CDN</p>
+        <p>Hosted on Amazon S3</p>
         <div class="info">
             <h2>Lab 3.C Demo</h2>
             <p>This simple static website demonstrates:</p>
             <ul>
                 <li>S3 static website hosting</li>
-                <li>CloudFront CDN distribution</li>
-                <li>HTTPS delivery</li>
+                <li>Public bucket policies</li>
+                <li>Custom error pages</li>
             </ul>
         </div>
         <footer>© 2024 AWS Static Website Demo</footer>
@@ -318,291 +314,12 @@ echo "Website URL: $WEBSITE_URL"
 
 ---
 
-## Step 8 – Create CloudFront Origin Access Identity (OAI)
+## Step 8 – Cleanup Resources
 
 ```bash
-# Create Origin Access Identity for CloudFront
-OAI_OUTPUT=$(aws cloudfront create-cloud-front-origin-access-identity \
-  --cloud-front-origin-access-identity-config \
-    "CallerReference=$(date +%s),Comment=OAI for ${WEBSITE_BUCKET}")
-
-# Extract OAI ID
-OAI_ID=$(echo "$OAI_OUTPUT" | jq -r '.CloudFrontOriginAccessIdentity.Id')
-echo "OAI_ID=$OAI_ID"
-
-# Extract S3 Canonical User ID for OAI
-OAI_S3_USER=$(echo "$OAI_OUTPUT" | jq -r '.CloudFrontOriginAccessIdentity.S3CanonicalUserId')
-echo "OAI_S3_USER=$OAI_S3_USER"
-
-# Display OAI details
-echo "$OAI_OUTPUT" | jq '.CloudFrontOriginAccessIdentity'
-```
-
----
-
-## Step 9 – Update Bucket Policy for CloudFront OAI
-
-```bash
-# Create updated bucket policy for CloudFront OAI access
-cat > cloudfront-bucket-policy.json <<EOF
-{
-  "Version": "2012-10-17",
-  "Statement": [
-    {
-      "Sid": "CloudFrontOAIAccess",
-      "Effect": "Allow",
-      "Principal": {
-        "AWS": "arn:aws:iam::cloudfront:user/CloudFront Origin Access Identity ${OAI_ID}"
-      },
-      "Action": "s3:GetObject",
-      "Resource": "arn:aws:s3:::${WEBSITE_BUCKET}/*"
-    }
-  ]
-}
-EOF
-
-# Display the updated policy
-cat cloudfront-bucket-policy.json
-
-# Apply updated bucket policy (comment out if keeping public access)
-# Uncomment below to use OAI exclusively (more secure)
-# aws s3api put-bucket-policy \
-#   --bucket "$WEBSITE_BUCKET" \
-#   --policy file://cloudfront-bucket-policy.json
-
-echo "CloudFront OAI policy created (optional secure access)"
-```
-
----
-
-## Step 10 – Create CloudFront Distribution
-
-```bash
-# Generate unique caller reference
-CALLER_REF="static-website-$(date +%s)"
-echo "CALLER_REF=$CALLER_REF"
-
-# Create CloudFront distribution configuration
-cat > cloudfront-config.json <<EOF
-{
-  "CallerReference": "${CALLER_REF}",
-  "Comment": "CloudFront distribution for ${WEBSITE_BUCKET}",
-  "Enabled": true,
-  "DefaultRootObject": "index.html",
-  "Origins": {
-    "Quantity": 1,
-    "Items": [
-      {
-        "Id": "S3-${WEBSITE_BUCKET}",
-        "DomainName": "${WEBSITE_BUCKET}.s3.${REGION}.amazonaws.com",
-        "S3OriginConfig": {
-          "OriginAccessIdentity": "origin-access-identity/cloudfront/${OAI_ID}"
-        }
-      }
-    ]
-  },
-  "DefaultCacheBehavior": {
-    "TargetOriginId": "S3-${WEBSITE_BUCKET}",
-    "ViewerProtocolPolicy": "redirect-to-https",
-    "AllowedMethods": {
-      "Quantity": 2,
-      "Items": ["GET", "HEAD"],
-      "CachedMethods": {
-        "Quantity": 2,
-        "Items": ["GET", "HEAD"]
-      }
-    },
-    "ForwardedValues": {
-      "QueryString": false,
-      "Cookies": {
-        "Forward": "none"
-      }
-    },
-    "MinTTL": 0,
-    "DefaultTTL": 86400,
-    "MaxTTL": 31536000,
-    "Compress": true,
-    "TrustedSigners": {
-      "Enabled": false,
-      "Quantity": 0
-    }
-  },
-  "CustomErrorResponses": {
-    "Quantity": 2,
-    "Items": [
-      {
-        "ErrorCode": 404,
-        "ResponsePagePath": "/error.html",
-        "ResponseCode": "404",
-        "ErrorCachingMinTTL": 300
-      },
-      {
-        "ErrorCode": 403,
-        "ResponsePagePath": "/error.html",
-        "ResponseCode": "404",
-        "ErrorCachingMinTTL": 300
-      }
-    ]
-  },
-  "PriceClass": "PriceClass_100",
-  "ViewerCertificate": {
-    "CloudFrontDefaultCertificate": true
-  }
-}
-EOF
-
-# Display CloudFront configuration
-cat cloudfront-config.json | jq '.'
-
-# Create CloudFront distribution
-echo "Creating CloudFront distribution (this may take 15-20 minutes)..."
-DISTRIBUTION_OUTPUT=$(aws cloudfront create-distribution \
-  --distribution-config file://cloudfront-config.json)
-
-# Extract distribution ID and domain name
-DISTRIBUTION_ID=$(echo "$DISTRIBUTION_OUTPUT" | jq -r '.Distribution.Id')
-echo ""
-echo "CloudFront distribution created successfully!"
-echo "Distribution ID: $DISTRIBUTION_ID"
-```
-
----
-
-## Step 11 – Test CloudFront Distribution
-
-```bash
-# Check distribution status
-echo "Checking CloudFront distribution status..."
-
-aws cloudfront get-distribution \
-  --id "$DISTRIBUTION_ID" \
-  --query 'Distribution.Status' \
-  --output text
-
-# Wait for distribution to be deployed (optional - takes time)
-echo ""
-echo "Waiting for distribution deployment..."
-echo "Status: InProgress → Deployed"
-echo ""
-echo "You can check status with:"
-echo "aws cloudfront get-distribution --id $DISTRIBUTION_ID --query 'Distribution.Status'"
-echo "Note: Distribution deployment takes 15-20 minutes"
-echo ""
-CLOUDFRONT_DOMAIN=$(echo "$DISTRIBUTION_OUTPUT" | jq -r '.Distribution.DomainName')
-echo "CLOUDFRONT_DOMAIN=$CLOUDFRONT_DOMAIN"
-echo ""
-
-# Test with curl (may fail if not deployed yet)
-curl -I "https://${CLOUDFRONT_DOMAIN}" || echo "Distribution still deploying..."
-
-# Test 404 error page
-curl -I "https://${CLOUDFRONT_DOMAIN}/nonexistent.html" || echo "Custom error page configured"
-
-echo "Once deployed, access your s3 static website at: https://${CLOUDFRONT_DOMAIN}"
-"$BROWSER" "https://${CLOUDFRONT_DOMAIN}"
-```
-
----
-
-## Step 12 – Create CloudFront Invalidation
-
-```bash
-# Make a change to the website
-echo "Updating website content..."
-
-# Update index.html with new content
-cat >> website-files/index.html <<'EOF'
-<!-- Updated content -->
-<div style="background: #4CAF50; color: white; padding: 10px; text-align: center; margin-top: 20px;">
-    <p>✅ Website Updated! Cache invalidation demonstration.</p>
-</div>
-EOF
-
-# Upload updated file
-aws s3 cp website-files/index.html "s3://${WEBSITE_BUCKET}/index.html" \
-  --content-type "text/html"
-
-echo "Updated file uploaded to S3"
-
-# Create CloudFront invalidation to clear cache
-echo "Creating CloudFront invalidation..."
-
-INVALIDATION_OUTPUT=$(aws cloudfront create-invalidation \
-  --distribution-id "$DISTRIBUTION_ID" \
-  --paths "/*")
-
-# Extract invalidation ID
-INVALIDATION_ID=$(echo "$INVALIDATION_OUTPUT" | jq -r '.Invalidation.Id')
-echo "INVALIDATION_ID=$INVALIDATION_ID"
-
-# Check invalidation status
-aws cloudfront get-invalidation \
-  --distribution-id "$DISTRIBUTION_ID" \
-  --id "$INVALIDATION_ID" \
-  --query 'Invalidation.Status' \
-  --output text
-
-echo ""
-echo "Invalidation created. New content will be available shortly."
-echo "Check status: aws cloudfront get-invalidation --distribution-id $DISTRIBUTION_ID --id $INVALIDATION_ID"
-```
-
----
-
-## Step 13 – Cleanup Resources
-
-```bash
-# Disable CloudFront distribution first
-echo "Disabling CloudFront distribution..."
-
-# Get current distribution config
-aws cloudfront get-distribution-config \
-  --id "$DISTRIBUTION_ID" \
-  --query 'DistributionConfig' > distribution-config-current.json
-
-# Get ETag for update
-ETAG=$(aws cloudfront get-distribution-config \
-  --id "$DISTRIBUTION_ID" \
-  --query 'ETag' \
-  --output text)
-echo "ETAG=$ETAG"
-
-# Update config to disable distribution
-cat distribution-config-current.json | jq '.Enabled = false' > distribution-config-disabled.json
-
-# Disable distribution
-aws cloudfront update-distribution \
-  --id "$DISTRIBUTION_ID" \
-  --distribution-config file://distribution-config-disabled.json \
-  --if-match "$ETAG"
-
-echo "Distribution disabled. Waiting for deployment..."
-echo "This will take several minutes..."
-
-# Wait for disabled status (optional - takes time)
-# aws cloudfront wait distribution-deployed --id "$DISTRIBUTION_ID"
-
-echo ""
-echo "After distribution is deployed as disabled, you can delete it:"
-echo "1. Wait 10-15 minutes for disable to complete"
-echo "2. Get new ETag: aws cloudfront get-distribution --id $DISTRIBUTION_ID --query ETag --output text"
-echo "3. Delete: aws cloudfront delete-distribution --id $DISTRIBUTION_ID --if-match <new-etag>"
-echo ""
-echo "For now, continuing with other cleanup..."
-
-# Delete Origin Access Identity
-echo "Deleting Origin Access Identity..."
-
-# Get OAI ETag
-OAI_ETAG=$(aws cloudfront get-cloud-front-origin-access-identity \
-  --id "$OAI_ID" \
-  --query 'ETag' \
-  --output text)
-
-# Delete OAI (will fail if still in use by distribution)
-aws cloudfront delete-cloud-front-origin-access-identity \
-  --id "$OAI_ID" \
-  --if-match "$OAI_ETAG" || echo "OAI still in use by distribution"
+# Delete bucket policy
+echo "Deleting S3 bucket policy..."
+aws s3api delete-bucket-policy --bucket "$WEBSITE_BUCKET"
 
 # Empty S3 bucket
 echo "Emptying S3 bucket..."
@@ -620,27 +337,10 @@ aws s3 ls | grep "$WEBSITE_BUCKET" || echo "S3 bucket deleted successfully"
 # Delete local files
 echo "Cleaning up local files..."
 rm -rf website-files/
-rm -f website-bucket-policy.json \
-  cloudfront-bucket-policy.json \
-  cloudfront-config.json \
-  distribution-config-current.json \
-  distribution-config-disabled.json
+rm -f website-bucket-policy.json
 
 echo ""
-echo "⚠️  Manual Cleanup Required:"
-echo "After the CloudFront distribution is fully disabled (10-15 minutes):"
-echo ""
-echo "1. Get new ETag:"
-echo "   NEW_ETAG=\$(aws cloudfront get-distribution --id $DISTRIBUTION_ID --query ETag --output text)"
-echo ""
-echo "2. Delete distribution:"
-echo "   aws cloudfront delete-distribution --id $DISTRIBUTION_ID --if-match \$NEW_ETAG"
-echo ""
-echo "3. Delete OAI (if not already deleted):"
-echo "   OAI_ETAG=\$(aws cloudfront get-cloud-front-origin-access-identity --id $OAI_ID --query ETag --output text)"
-echo "   aws cloudfront delete-cloud-front-origin-access-identity --id $OAI_ID --if-match \$OAI_ETAG"
-echo ""
-echo "✅ S3 bucket and local files cleaned up successfully!"
+echo "✅ All resources cleaned up successfully!"
 ```
 
 ---
@@ -652,50 +352,15 @@ In this lab, you have:
 - Configured S3 bucket for static website hosting
 - Set up public bucket policy for website access
 - Uploaded and organized website files in S3
-- Created CloudFront distribution for global content delivery
-- Configured Origin Access Identity (OAI) for secure S3 access
-- Implemented custom error pages (404/403)
-- Set up HTTPS delivery with CloudFront
-- Created cache invalidations for content updates
-- Monitored CloudFront distribution metrics
-- Compared S3 direct access vs CloudFront CDN performance
-
-**Key Takeaways:**
-- **S3 Static Hosting**: Cost-effective, serverless website hosting
-- **CloudFront CDN**: Global content delivery with low latency
-- **OAI Security**: Secure S3 access without public bucket policies
-- **Cache Management**: TTL settings and invalidations for content updates
-- **HTTPS by Default**: CloudFront provides free SSL/TLS
-- **Custom Error Pages**: Better user experience with branded error pages
-- **Cost Optimization**: Pay only for storage and data transfer used
-
-**Performance Benefits:**
-- **S3 Direct**: Single region, higher latency for distant users
-- **CloudFront**: Multiple edge locations, cached content, lower latency globally
-- **Compression**: Automatic gzip compression reduces bandwidth
-- **Caching**: Reduces origin requests and improves response times
-
-**Real-World Use Cases:**
-- Single Page Applications (React, Vue, Angular)
-- Corporate websites and landing pages
-- Documentation and API references
-- Portfolio and personal websites
-- Marketing campaign microsites
-- Static blog generators (Hugo, Jekyll, Gatsby)
-
-**Cost Comparison:**
-- **S3 Hosting**: ~$0.023/GB storage + $0.09/GB data transfer
-- **CloudFront**: Free tier includes 1TB data transfer/month
-- **vs EC2**: No server costs, only pay for usage
-- **vs Lightsail**: More scalable, better global performance
+- Configured custom error page (404)
+- Tested S3 website endpoint
+- Cleaned up all resources
 
 ---
 
 ## Additional Resources
 - [S3 Static Website Hosting](https://docs.aws.amazon.com/AmazonS3/latest/userguide/WebsiteHosting.html)
-- [CloudFront Distribution](https://docs.aws.amazon.com/AmazonCloudFront/latest/DeveloperGuide/distribution-working-with.html)
-- [Origin Access Identity (OAI)](https://docs.aws.amazon.com/AmazonCloudFront/latest/DeveloperGuide/private-content-restricting-access-to-s3.html)
-- [CloudFront Cache Behaviors](https://docs.aws.amazon.com/AmazonCloudFront/latest/DeveloperGuide/distribution-web-values-specify.html#DownloadDistValuesCacheBehavior)
-- [CloudFront Invalidation](https://docs.aws.amazon.com/AmazonCloudFront/latest/DeveloperGuide/Invalidation.html)
+- [S3 Bucket Policies](https://docs.aws.amazon.com/AmazonS3/latest/userguide/bucket-policies.html)
+- [S3 Website Endpoints](https://docs.aws.amazon.com/AmazonS3/latest/userguide/WebsiteEndpoints.html)
 
 ---
