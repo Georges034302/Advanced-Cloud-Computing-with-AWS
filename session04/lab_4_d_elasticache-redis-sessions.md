@@ -1,5 +1,7 @@
 # Lab 4.D: ElastiCache Redis for Session Management
 
+<img width="935" height="499" alt="IMG" src="https://github.com/user-attachments/assets/b829598b-b691-4adf-a9aa-7322d84db45e" />
+
 ## Overview
 This lab demonstrates how to use Amazon ElastiCache Redis as a high-performance in-memory data store for session management. You will deploy a Redis cluster, integrate it with a simple Flask web application, implement session storage, and test basic cache operations.
 
