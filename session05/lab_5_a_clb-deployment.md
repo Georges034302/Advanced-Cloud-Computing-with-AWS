@@ -1,4 +1,5 @@
 # Lab 5.A: Deploy Web Application Behind Classic Load Balancer
+<img width="1536" height="1024" alt="IMG" src="https://github.com/user-attachments/assets/8c1d0e27-fe84-4d17-8134-5d10e9f73b99" />
 
 ## Overview
 This lab demonstrates how to deploy a simple web application behind an AWS Classic Load Balancer (CLB). Classic Load Balancers are included in the AWS Free Tier (750 hours/month), making this an ideal lab for learning load balancing concepts without incurring costs. You will create a CLB, launch multiple EC2 instances, configure health checks, and test load distribution.
