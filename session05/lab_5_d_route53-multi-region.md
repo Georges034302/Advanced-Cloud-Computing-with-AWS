@@ -34,10 +34,8 @@ SECONDARY_REGION="us-east-1"        # US East
 SG_NAME="lab-route53-sg"
 INSTANCE_NAME="route53-demo"
 
-# Domain configuration (use your registered domain)
-# For this lab, we'll use a pseudo domain name
+# Domain configuration (pseudo domain for demonstration)
 DOMAIN_NAME="myapp.example.com"
-echo "DOMAIN_NAME=$DOMAIN_NAME"
 ```
 
 ---
@@ -297,16 +295,14 @@ PRIMARY_IP=$(aws ec2 describe-instances \
   --query 'Reservations[0].Instances[0].PublicIpAddress' \
   --output text \
   --region "$PRIMARY_REGION")
-echo "PRIMARY_IP=$PRIMARY_IP"
-echo "Primary Region (Sydney): http://${PRIMARY_IP}"
+echo "PRIMARY_IP=$PRIMARY_IP (Sydney: http://${PRIMARY_IP})"
 
 SECONDARY_IP=$(aws ec2 describe-instances \
   --instance-ids "$SECONDARY_INSTANCE" \
   --query 'Reservations[0].Instances[0].PublicIpAddress' \
   --output text \
   --region "$SECONDARY_REGION")
-echo "SECONDARY_IP=$SECONDARY_IP"
-echo "Secondary Region (US East): http://${SECONDARY_IP}"
+echo "SECONDARY_IP=$SECONDARY_IP (US East: http://${SECONDARY_IP})"
 ```
 
 ---
@@ -406,8 +402,6 @@ aws route53 change-resource-record-sets \
       }
     }]
   }"
-
-echo "Latency-based routing configured for $DOMAIN_NAME"
 ```
 
 ---
@@ -422,7 +416,6 @@ aws route53 list-resource-record-sets \
   --output table
 
 # Test DNS resolution (may take a few minutes to propagate)
-echo "Testing DNS resolution for $DOMAIN_NAME"
 dig +short "$DOMAIN_NAME" @8.8.8.8
 ```
 
@@ -431,21 +424,17 @@ dig +short "$DOMAIN_NAME" @8.8.8.8
 ## Step 9 – Test Regional Endpoints
 
 ```bash
-# Test regional endpoints via IPs
-echo "Testing primary region (Sydney):"
+# Test regional endpoints
 curl -s "http://${PRIMARY_IP}" | grep -o "SYDNEY (PRIMARY)"
-
-echo "Testing secondary region (US East):"
 curl -s "http://${SECONDARY_IP}" | grep -o "US EAST (SECONDARY)"
 
-# Test via domain name (latency-based routing)
-echo "Testing domain: $DOMAIN_NAME"
+# Test latency-based routing via domain
 curl -s "http://${DOMAIN_NAME}" | grep -o "SYDNEY\\|US EAST"
 
-# Open in browser for visual verification
-"$BROWSER" "http://${PRIMARY_IP}"    # Purple gradient, 🇦🇺
-"$BROWSER" "http://${SECONDARY_IP}"  # Pink gradient, 🇺🇸
-"$BROWSER" "http://${DOMAIN_NAME}"   # Routes to nearest healthy region
+# Open in browser (Purple=Sydney 🇦🇺, Pink=US East 🇺🇸)
+"$BROWSER" "http://${PRIMARY_IP}"
+"$BROWSER" "http://${SECONDARY_IP}"
+"$BROWSER" "http://${DOMAIN_NAME}"
 ```
 
 ---
@@ -475,34 +464,13 @@ aws route53 get-health-check-status \
 
 ```bash
 # Simulate regional failure by stopping primary instance
-# Route 53 will automatically route traffic to secondary region
+# Route 53 will detect failure (~90s) and automatically route to secondary region
 aws ec2 stop-instances \
   --instance-ids "$PRIMARY_INSTANCE" \
   --region "$PRIMARY_REGION"
 
-echo "Primary instance stopped (simulated failure)"
-echo "Wait 2 minutes for health check to detect failure"
-echo "Route 53 will automatically fail over to secondary region"
-echo "Test: curl http://${DOMAIN_NAME} (should route to US East)"
-echo "Monitor: aws route53 get-health-check-status --health-check-id $PRIMARY_HEALTH_CHECK"
-```
-
----
-
-## Step 12 – Monitor Health Checks
----
-
-## Step 8 – Simulate Regional Failure
-
-```bash
-# Simulate regional failure by stopping primary instance
-# Route 53 will detect unhealthy endpoint after ~90 seconds and stop routing traffic
-aws ec2 stop-instances \
-  --instance-ids "$PRIMARY_INSTANCE" \
-  --region "$PRIMARY_REGION"
-
-echo "Primary instance stopped (simulated failure)"
-echo "Wait 2 minutes for health check to detect failure"
+# Monitor health check status after 2 minutes
+echo "Primary instance stopped. Wait 2 minutes for failover detection."
 echo "Monitor: aws route53 get-health-check-status --health-check-id $PRIMARY_HEALTH_CHECK"
 ```
 
@@ -526,17 +494,10 @@ aws route53 get-health-check-status \
   --query 'HealthCheckObservations[0:3].{Region:Region,Status:StatusReport.Status,Timestamp:StatusReport.CheckedTime}' \
   --output table
 
-# Test automatic failover via domain
-echo "Testing automatic failover:"
+# Verify automatic failover to secondary region
 curl -s "http://${DOMAIN_NAME}" | grep -o "US EAST (SECONDARY)"
-echo "Traffic automatically routed to secondary region!"
 ```
 
----
-
-## Step 13 – View CloudWatch Metrics
-
-```bash
 ---
 
 ## Step 13 – View CloudWatch Metrics
@@ -628,43 +589,6 @@ rm -f primary-userdata.sh secondary-userdata.sh
 
 echo "✅ Cleanup completed"
 ```
-```
-
----
-
-## Step 11 – Review Multi-Region Architecture
-
-```bash
-# View deployed resources summary
-echo "Primary Region (ap-southeast-2): $PRIMARY_INSTANCE @ $PRIMARY_IP (STOPPED)"
-echo "Secondary Region (us-east-1): $SECONDARY_INSTANCE @ $SECONDARY_IP (RUNNING)"
-echo "Health Checks: $PRIMARY_HEALTH_CHECK, $SECONDARY_HEALTH_CHECK"
-```
-
----
-
-## Step 12 – Cleanup Resources
-
-```bash
-# Delete health checks
-aws route53 delete-health-check --health-check-id "$PRIMARY_HEALTH_CHECK"
-aws route53 delete-health-check --health-check-id "$SECONDARY_HEALTH_CHECK"
-
-# Terminate instances
-aws ec2 terminate-instances --instance-ids "$PRIMARY_INSTANCE" --region "$PRIMARY_REGION"
-aws ec2 terminate-instances --instance-ids "$SECONDARY_INSTANCE" --region "$SECONDARY_REGION"
-
-sleep 30
-
-# Delete security groups
-aws ec2 delete-security-group --group-id "$PRIMARY_SG" --region "$PRIMARY_REGION"
-aws ec2 delete-security-group --group-id "$SECONDARY_SG" --region "$SECONDARY_REGION"
-
-# Delete local files
-rm -f primary-userdata.sh secondary-userdata.sh
-
-echo "✅ Cleanup completed"
-```
 
 ---
 
@@ -672,21 +596,23 @@ echo "✅ Cleanup completed"
 
 In this lab, you have:
 - Deployed web applications in two AWS regions (Sydney and US East)
-- Created Route 53 health checks for both endpoints
-- Configured health monitoring for automatic failover detection
-- Tested regional endpoints independently
+- Created Route 53 hosted zone with pseudo domain (myapp.example.com)
+- Configured latency-based routing records for both regions
+- Set up Route 53 health checks for automatic failover detection
+- Tested regional endpoints and DNS-based routing
 - Simulated regional failure by stopping primary instance
-- Verified automatic failover to secondary region
+- Verified automatic DNS failover to secondary region
 - Monitored health check status and CloudWatch metrics
-- Cleaned up all resources
+- Cleaned up all resources including DNS records and hosted zone
 
 **Key Takeaways:**
 - **Multi-Region Deployment**: High availability across geographic regions
-- **Route 53 Health Checks**: Monitor endpoint availability from multiple locations
-- **Automatic Failover**: Traffic routed away from unhealthy endpoints
-- **Latency-Based Routing**: Users routed to nearest region (requires hosted zone)
-- **Health Detection**: ~90 seconds to detect and failover
-- **Free Tier Compatible**: Health checks included in Route 53 free tier
+- **Route 53 Hosted Zone**: DNS management with pseudo domain
+- **Latency-Based Routing**: Users routed to nearest healthy region automatically
+- **Health Checks**: Monitor endpoint availability from multiple locations worldwide
+- **Automatic DNS Failover**: Traffic automatically routed away from unhealthy endpoints
+- **Health Detection**: ~90 seconds to detect failure and trigger failover
+- **Free Tier Note**: Hosted zone costs $0.50/month, health checks may incur charges
 
 **Routing Policies:**
 | Policy | Use Case | Best For |
@@ -712,29 +638,25 @@ In this lab, you have:
 
 For production multi-region deployment:
 
-1. **Register Domain in Route 53**
-   ```bash
-   # Create hosted zone
-   aws route53 create-hosted-zone --name example.com --caller-reference $(date +%s)
-   
-   # Create latency-based records
-   aws route53 change-resource-record-sets --hosted-zone-id Z123 --change-batch file://records.json
-   ```
+1. **Use Registered Domain**
+   - Register real domain in Route 53 (or use existing domain)
+   - Update nameservers at registrar to Route 53 nameservers
+   - Replace pseudo domain with real domain name
 
 2. **Add Application Load Balancers**
-   - Deploy ALB in each region
-   - Route 53 points to ALB endpoints
-   - Multi-AZ within each region
+   - Deploy ALB in each region for multi-AZ redundancy
+   - Route 53 Alias records point to ALB endpoints
+   - Health checks monitor ALB instead of individual IPs
 
 3. **Database Replication**
    - RDS with cross-region read replicas
-   - DynamoDB global tables
-   - Aurora Global Database
+   - DynamoDB global tables for multi-region writes
+   - Aurora Global Database for fast failover
 
 4. **CloudFront Integration**
-   - CloudFront distribution with multiple origins
-   - Origin failover groups
-   - Edge location caching
+   - CloudFront distribution with multiple regional origins
+   - Origin failover groups for automatic backup
+   - Edge location caching for faster global access
 
 ---
 
