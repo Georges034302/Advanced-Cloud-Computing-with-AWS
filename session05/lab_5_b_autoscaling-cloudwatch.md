@@ -1,4 +1,5 @@
 # Lab 5.B: Auto Scaling with CloudWatch Alarms
+<img width="1536" height="1024" alt="IMG" src="https://github.com/user-attachments/assets/351faf62-59b4-4199-bde2-a37acf84eba4" />
 
 ## Overview
 This lab demonstrates how to create an Auto Scaling Group (ASG) for EC2 instances with automatic scaling based on CloudWatch metrics and alarms. You will configure target-tracking scaling policies, step-scaling policies, scheduled scaling, and test scale-out/scale-in behavior with load testing.
