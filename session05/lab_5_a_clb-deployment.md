@@ -29,12 +29,6 @@ This lab demonstrates how to deploy a simple web application behind an AWS Class
 ## Step 1 – Set Variables and Verify Prerequisites
 
 ```bash
-# Get AWS account ID dynamically
-ACCOUNT_ID=$(aws sts get-caller-identity \
-  --query Account \
-  --output text)
-echo "ACCOUNT_ID=$ACCOUNT_ID"
-
 # Set region
 REGION="ap-southeast-2"
 echo "REGION=$REGION"
@@ -76,8 +70,6 @@ SUBNET_2=$(aws ec2 describe-subnets \
   --region "$REGION")
 echo "SUBNET_2=$SUBNET_2"
 
-# Verify AWS CLI is configured
-aws sts get-caller-identity
 ```
 
 ---
@@ -269,8 +261,6 @@ aws ec2 describe-instances \
   --output table \
   --region "$REGION"
 
-echo ""
-echo "Wait 2-3 minutes for web servers to complete initialization"
 ```
 
 ---
@@ -368,32 +358,26 @@ echo "  aws elb describe-instance-health --load-balancer-name $ELB_NAME --region
 ## Step 8 – Test Load Balancer
 
 ```bash
-echo ""
-echo "================================================"
-echo "LOAD BALANCER TESTING"
-echo "================================================"
-echo ""
-echo "Load Balancer DNS: $ELB_DNS"
-echo "Load Balancer URL: http://${ELB_DNS}"
-echo ""
-echo "Testing load distribution..."
-echo ""
-
 # Test load balancer multiple times to see different instances
-for i in {1..6}; do
+for i in {1..10}; do
   echo "Request $i:"
   curl -s "http://${ELB_DNS}" | grep -E "(Instance:|Availability Zone:|Private IP:)" | sed 's/<[^>]*>//g' | sed 's/^[[:space:]]*//'
   echo "---"
   sleep 1
 done
 
-echo ""
-echo "================================================"
-echo ""
-echo "Open in browser to see full page:"
-echo "  http://${ELB_DNS}"
-echo ""
-echo "Refresh multiple times to see traffic distributed across instances"
+# ================================================
+# BROWSER TESTING
+# ================================================
+# Opening load balancer in browser...
+"$BROWSER" "http://${ELB_DNS}"
+
+# NOTE: Classic Load Balancer uses session stickiness by default.
+# Your browser will stick to the same instance during a session.
+# To see different instances, use:
+#   - Private/Incognito windows
+#   - Different browsers
+#   - Clear cookies between requests
 ```
 
 ---
@@ -401,12 +385,10 @@ echo "Refresh multiple times to see traffic distributed across instances"
 ## Step 9 – Test Failover Behavior
 
 ```bash
-echo ""
-echo "================================================"
-echo "TESTING FAILOVER"
-echo "================================================"
-echo ""
-echo "Simulating instance failure by stopping one instance..."
+# ================================================
+# TESTING FAILOVER
+# ================================================
+# Simulating instance failure by stopping one instance...
 
 # Stop first instance to simulate failure
 aws ec2 stop-instances \
@@ -414,41 +396,33 @@ aws ec2 stop-instances \
   --region "$REGION"
 
 echo "Instance $INSTANCE_1_ID stopped"
-echo ""
-echo "Waiting for health check to detect failure (60-90 seconds)..."
 
-# Wait and check health status
-sleep 60
-
-aws elb describe-instance-health \
+# Waiting for health check to detect failure (60-90 seconds)...
+sleep 60 && aws elb describe-instance-health \
   --load-balancer-name "$ELB_NAME" \
   --region "$REGION" \
   --query 'InstanceStates[*].{InstanceId:InstanceId,State:State,Description:Description}' \
   --output table
 
-echo ""
-echo "Testing load balancer (should only route to healthy instance)..."
-echo ""
+# Testing load balancer (should only route to healthy instance)...
 
 # Test that traffic only goes to healthy instance
-for i in {1..3}; do
+for i in {1..10}; do
   echo "Request $i:"
   curl -s "http://${ELB_DNS}" | grep -E "Instance:" | sed 's/<[^>]*>//g' | sed 's/^[[:space:]]*//'
   echo "---"
   sleep 1
 done
 
-echo ""
-echo "✅ Load balancer automatically routes traffic only to healthy instances"
-echo ""
-echo "Restarting stopped instance..."
+# ✅ Load balancer automatically routes traffic only to healthy instances
 
-# Restart the stopped instance
+# Restarting stopped instance...
 aws ec2 start-instances \
   --instance-ids "$INSTANCE_1_ID" \
   --region "$REGION"
 
-echo "Instance restarted. It will rejoin the load balancer when healthy."
+# Instance restarted. It will rejoin the load balancer when healthy.
+# ✅ Run the Test Traffic loop to verify that the load balancer is routing traffic to both instances.
 ```
 
 ---
