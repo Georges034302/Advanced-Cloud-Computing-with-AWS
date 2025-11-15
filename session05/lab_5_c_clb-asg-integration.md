@@ -1,4 +1,5 @@
 # Lab 5.C: Classic Load Balancer with Auto Scaling Integration
+<img width="1024" height="1024" alt="IMG" src="https://github.com/user-attachments/assets/a76b4e7a-45d8-4c15-8631-112d2fca2047" />
 
 ## Overview
 This lab demonstrates how to integrate a Classic Load Balancer (CLB) with an Auto Scaling Group (ASG). You will deploy a load balancer that automatically distributes traffic across instances managed by Auto Scaling, configure health checks at both the load balancer and ASG levels, and test automatic instance replacement and scaling behavior.
