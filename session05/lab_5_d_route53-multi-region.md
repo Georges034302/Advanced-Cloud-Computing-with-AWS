@@ -28,37 +28,14 @@ This lab demonstrates how to implement global high availability using Amazon Rou
 ## Step 1 – Set Variables and Verify Prerequisites
 
 ```bash
-# Get AWS account ID
-ACCOUNT_ID=$(aws sts get-caller-identity \
-  --query Account \
-  --output text)
-echo "ACCOUNT_ID=$ACCOUNT_ID"
-
-# Set primary region (Sydney)
-PRIMARY_REGION="ap-southeast-2"
-echo "PRIMARY_REGION=$PRIMARY_REGION"
-
-# Set secondary region (US East)
-SECONDARY_REGION="us-east-1"
-echo "SECONDARY_REGION=$SECONDARY_REGION"
-
-# Set resource names
+# Set regions and resource names
+PRIMARY_REGION="ap-southeast-2"     # Sydney
+SECONDARY_REGION="us-east-1"        # US East
 SG_NAME="lab-route53-sg"
-echo "SG_NAME=$SG_NAME"
-
 INSTANCE_NAME="route53-demo"
-echo "INSTANCE_NAME=$INSTANCE_NAME"
 
-# Set hosted zone (use test domain or your domain)
-# For testing without domain, we'll use public IPs directly
-DOMAIN_NAME="example.com"
-echo "DOMAIN_NAME=$DOMAIN_NAME"
-
-echo ""
-echo "✅ Variables set"
-echo ""
-echo "Note: This lab will use EC2 public IPs for routing."
-echo "For production, register a domain in Route 53."
+# Note: This lab uses EC2 public IPs for routing
+# For production, register a domain in Route 53 and use latency-based routing
 ```
 
 ---
@@ -84,7 +61,7 @@ PRIMARY_SG=$(aws ec2 create-security-group \
   --output text)
 echo "PRIMARY_SG=$PRIMARY_SG"
 
-# Allow HTTP traffic
+# Allow HTTP and ICMP for health checks
 aws ec2 authorize-security-group-ingress \
   --group-id "$PRIMARY_SG" \
   --protocol tcp \
@@ -92,15 +69,12 @@ aws ec2 authorize-security-group-ingress \
   --cidr 0.0.0.0/0 \
   --region "$PRIMARY_REGION"
 
-# Allow ICMP for health checks
 aws ec2 authorize-security-group-ingress \
   --group-id "$PRIMARY_SG" \
   --protocol icmp \
   --port -1 \
   --cidr 0.0.0.0/0 \
   --region "$PRIMARY_REGION"
-
-echo "✅ Security group created in $PRIMARY_REGION"
 
 # Get latest Amazon Linux 2023 AMI in primary region
 PRIMARY_AMI=$(aws ec2 describe-images \
@@ -169,8 +143,6 @@ echo "Primary region setup completed" > /var/log/userdata-complete.log
 EOF
 
 # Launch instance in primary region
-echo "Launching instance in $PRIMARY_REGION..."
-
 PRIMARY_INSTANCE=$(aws ec2 run-instances \
   --image-id "$PRIMARY_AMI" \
   --instance-type t2.micro \
@@ -181,8 +153,6 @@ PRIMARY_INSTANCE=$(aws ec2 run-instances \
   --query 'Instances[0].InstanceId' \
   --output text)
 echo "PRIMARY_INSTANCE=$PRIMARY_INSTANCE"
-
-echo "✅ Instance launched in $PRIMARY_REGION"
 ```
 
 ---
@@ -208,7 +178,7 @@ SECONDARY_SG=$(aws ec2 create-security-group \
   --output text)
 echo "SECONDARY_SG=$SECONDARY_SG"
 
-# Allow HTTP traffic
+# Allow HTTP and ICMP for health checks
 aws ec2 authorize-security-group-ingress \
   --group-id "$SECONDARY_SG" \
   --protocol tcp \
@@ -216,15 +186,12 @@ aws ec2 authorize-security-group-ingress \
   --cidr 0.0.0.0/0 \
   --region "$SECONDARY_REGION"
 
-# Allow ICMP for health checks
 aws ec2 authorize-security-group-ingress \
   --group-id "$SECONDARY_SG" \
   --protocol icmp \
   --port -1 \
   --cidr 0.0.0.0/0 \
   --region "$SECONDARY_REGION"
-
-echo "✅ Security group created in $SECONDARY_REGION"
 
 # Get latest Amazon Linux 2023 AMI in secondary region
 SECONDARY_AMI=$(aws ec2 describe-images \
@@ -293,8 +260,6 @@ echo "Secondary region setup completed" > /var/log/userdata-complete.log
 EOF
 
 # Launch instance in secondary region
-echo "Launching instance in $SECONDARY_REGION..."
-
 SECONDARY_INSTANCE=$(aws ec2 run-instances \
   --image-id "$SECONDARY_AMI" \
   --instance-type t2.micro \
@@ -305,8 +270,6 @@ SECONDARY_INSTANCE=$(aws ec2 run-instances \
   --query 'Instances[0].InstanceId' \
   --output text)
 echo "SECONDARY_INSTANCE=$SECONDARY_INSTANCE"
-
-echo "✅ Instance launched in $SECONDARY_REGION"
 ```
 
 ---
@@ -314,45 +277,33 @@ echo "✅ Instance launched in $SECONDARY_REGION"
 ## Step 4 – Wait for Instances and Get Public IPs
 
 ```bash
-echo ""
-echo "Waiting for instances to initialize..."
-echo "This may take 2-3 minutes..."
-
-# Wait for primary instance
-echo "Waiting for primary instance..."
+# Wait for instances to initialize (2-3 minutes)
 aws ec2 wait instance-running \
   --instance-ids "$PRIMARY_INSTANCE" \
   --region "$PRIMARY_REGION"
 
-# Wait for secondary instance
-echo "Waiting for secondary instance..."
 aws ec2 wait instance-running \
   --instance-ids "$SECONDARY_INSTANCE" \
   --region "$SECONDARY_REGION"
 
-# Additional wait for user data to complete
+# Wait for user data to complete
 sleep 60
 
-# Get primary instance public IP
+# Get instance public IPs
 PRIMARY_IP=$(aws ec2 describe-instances \
   --instance-ids "$PRIMARY_INSTANCE" \
   --query 'Reservations[0].Instances[0].PublicIpAddress' \
   --output text \
   --region "$PRIMARY_REGION")
 echo "PRIMARY_IP=$PRIMARY_IP"
+echo "Primary Region (Sydney): http://${PRIMARY_IP}"
 
-# Get secondary instance public IP
 SECONDARY_IP=$(aws ec2 describe-instances \
   --instance-ids "$SECONDARY_INSTANCE" \
   --query 'Reservations[0].Instances[0].PublicIpAddress' \
   --output text \
   --region "$SECONDARY_REGION")
 echo "SECONDARY_IP=$SECONDARY_IP"
-
-echo ""
-echo "✅ Both instances are running"
-echo ""
-echo "Primary Region (Sydney): http://${PRIMARY_IP}"
 echo "Secondary Region (US East): http://${SECONDARY_IP}"
 ```
 
@@ -361,10 +312,8 @@ echo "Secondary Region (US East): http://${SECONDARY_IP}"
 ## Step 5 – Create Route 53 Health Checks
 
 ```bash
-echo ""
-echo "Creating Route 53 health checks..."
-
-# Create health check for primary region
+# Create Route 53 health checks
+# HTTP health check on /health.html, Interval: 30s, Failure Threshold: 3
 PRIMARY_HEALTH_CHECK=$(aws route53 create-health-check \
   --caller-reference "primary-$(date +%s)" \
   --health-check-config \
@@ -379,7 +328,6 @@ FailureThreshold=3 \
   --output text)
 echo "PRIMARY_HEALTH_CHECK=$PRIMARY_HEALTH_CHECK"
 
-# Create health check for secondary region
 SECONDARY_HEALTH_CHECK=$(aws route53 create-health-check \
   --caller-reference "secondary-$(date +%s)" \
   --health-check-config \
@@ -393,10 +341,6 @@ FailureThreshold=3 \
   --query 'HealthCheck.Id' \
   --output text)
 echo "SECONDARY_HEALTH_CHECK=$SECONDARY_HEALTH_CHECK"
-
-echo "✅ Health checks created"
-echo ""
-echo "Note: Health checks may take 1-2 minutes to become healthy"
 ```
 
 ---
@@ -404,27 +348,16 @@ echo "Note: Health checks may take 1-2 minutes to become healthy"
 ## Step 6 – Test Regional Endpoints
 
 ```bash
-echo ""
-echo "================================================"
-echo "TESTING REGIONAL ENDPOINTS"
-echo "================================================"
-echo ""
-
-# Test primary region
-echo "Testing primary region (Sydney)..."
+# Test regional endpoints
+echo "Testing primary region (Sydney):"
 curl -s "http://${PRIMARY_IP}" | grep -o "SYDNEY (PRIMARY)"
-echo ""
 
-# Test secondary region
-echo "Testing secondary region (US East)..."
+echo "Testing secondary region (US East):"
 curl -s "http://${SECONDARY_IP}" | grep -o "US EAST (SECONDARY)"
-echo ""
 
-echo "✅ Both regions are responding correctly"
-echo ""
-echo "Visual verification:"
-echo "  Primary:   http://${PRIMARY_IP}   (Purple gradient, 🇦🇺)"
-echo "  Secondary: http://${SECONDARY_IP} (Pink gradient, 🇺🇸)"
+# Open in browser for visual verification
+"$BROWSER" "http://${PRIMARY_IP}"    # Purple gradient, 🇦🇺
+"$BROWSER" "http://${SECONDARY_IP}"  # Pink gradient, 🇺🇸
 ```
 
 ---
@@ -432,28 +365,20 @@ echo "  Secondary: http://${SECONDARY_IP} (Pink gradient, 🇺🇸)"
 ## Step 7 – View Health Check Status
 
 ```bash
-echo ""
-echo "Checking health check status..."
+# Wait for health checks to become healthy (1-2 minutes)
 sleep 60
 
 # Check primary health
-echo ""
-echo "Primary Region Health Check:"
 aws route53 get-health-check-status \
   --health-check-id "$PRIMARY_HEALTH_CHECK" \
   --query 'HealthCheckObservations[0:3].{Region:Region,Status:StatusReport.Status,Timestamp:StatusReport.CheckedTime}' \
   --output table
 
 # Check secondary health
-echo ""
-echo "Secondary Region Health Check:"
 aws route53 get-health-check-status \
   --health-check-id "$SECONDARY_HEALTH_CHECK" \
   --query 'HealthCheckObservations[0:3].{Region:Region,Status:StatusReport.Status,Timestamp:StatusReport.CheckedTime}' \
   --output table
-
-echo ""
-echo "Health check status should show 'Success' from multiple locations"
 ```
 
 ---
@@ -461,30 +386,15 @@ echo "Health check status should show 'Success' from multiple locations"
 ## Step 8 – Simulate Regional Failure
 
 ```bash
-echo ""
-echo "================================================"
-echo "SIMULATING REGIONAL FAILURE"
-echo "================================================"
-echo ""
-echo "Stopping primary region instance to simulate failure..."
-
-# Stop primary instance
+# Simulate regional failure by stopping primary instance
+# Route 53 will detect unhealthy endpoint after ~90 seconds and stop routing traffic
 aws ec2 stop-instances \
   --instance-ids "$PRIMARY_INSTANCE" \
   --region "$PRIMARY_REGION"
 
-echo "✅ Primary instance stopped"
-echo ""
-echo "Route 53 will:"
-echo "  1. Detect primary endpoint is unhealthy (after ~90 seconds)"
-echo "  2. Stop routing traffic to primary region"
-echo "  3. Route all traffic to secondary region"
-echo ""
-echo "Wait 2 minutes and check health status:"
-echo "  aws route53 get-health-check-status --health-check-id $PRIMARY_HEALTH_CHECK"
-echo ""
-echo "Test failover by accessing: http://${PRIMARY_IP} (should timeout)"
-echo "Secondary region still works: http://${SECONDARY_IP}"
+echo "Primary instance stopped (simulated failure)"
+echo "Wait 2 minutes for health check to detect failure"
+echo "Monitor: aws route53 get-health-check-status --health-check-id $PRIMARY_HEALTH_CHECK"
 ```
 
 ---
@@ -492,29 +402,20 @@ echo "Secondary region still works: http://${SECONDARY_IP}"
 ## Step 9 – Monitor Health Checks
 
 ```bash
-echo ""
-echo "Waiting for health check to detect failure..."
+# Wait for health check to detect failure (~2 minutes)
 sleep 120
 
-# Check primary health after failure
-echo ""
-echo "Primary Region Health Check (After Failure):"
+# Check primary health after failure (should show 'Failure')
 aws route53 get-health-check-status \
   --health-check-id "$PRIMARY_HEALTH_CHECK" \
   --query 'HealthCheckObservations[0:3].{Region:Region,Status:StatusReport.Status,Timestamp:StatusReport.CheckedTime}' \
   --output table
 
-# Verify secondary is still healthy
-echo ""
-echo "Secondary Region Health Check (Still Healthy):"
+# Verify secondary is still healthy (should show 'Success')
 aws route53 get-health-check-status \
   --health-check-id "$SECONDARY_HEALTH_CHECK" \
   --query 'HealthCheckObservations[0:3].{Region:Region,Status:StatusReport.Status,Timestamp:StatusReport.CheckedTime}' \
   --output table
-
-echo ""
-echo "Primary health check should show 'Failure' status"
-echo "Secondary health check should show 'Success' status"
 ```
 
 ---
@@ -522,10 +423,8 @@ echo "Secondary health check should show 'Success' status"
 ## Step 10 – View CloudWatch Metrics
 
 ```bash
-echo ""
-echo "Route 53 Health Check Metrics (Last 10 minutes):"
-
-# Get primary health check metrics
+# Get Route 53 health check metrics (last 10 minutes)
+# Health Check Status: 1.0 = Healthy, 0.0 = Unhealthy
 aws cloudwatch get-metric-statistics \
   --namespace AWS/Route53 \
   --metric-name HealthCheckStatus \
@@ -536,11 +435,6 @@ aws cloudwatch get-metric-statistics \
   --statistics Minimum \
   --query 'Datapoints[-5:].[Timestamp,Minimum]' \
   --output table
-
-echo ""
-echo "Health Check Status Values:"
-echo "  1.0 = Healthy"
-echo "  0.0 = Unhealthy"
 ```
 
 ---
@@ -548,35 +442,10 @@ echo "  0.0 = Unhealthy"
 ## Step 11 – Review Multi-Region Architecture
 
 ```bash
-echo ""
-echo "================================================"
-echo "MULTI-REGION ARCHITECTURE SUMMARY"
-echo "================================================"
-echo ""
-echo "Deployed Resources:"
-echo ""
-echo "Primary Region (ap-southeast-2):"
-echo "  - Instance: $PRIMARY_INSTANCE"
-echo "  - Public IP: $PRIMARY_IP"
-echo "  - Health Check: $PRIMARY_HEALTH_CHECK"
-echo "  - Status: STOPPED (simulated failure)"
-echo ""
-echo "Secondary Region (us-east-1):"
-echo "  - Instance: $SECONDARY_INSTANCE"
-echo "  - Public IP: $SECONDARY_IP"
-echo "  - Health Check: $SECONDARY_HEALTH_CHECK"
-echo "  - Status: RUNNING (active)"
-echo ""
-echo "Route 53 Configuration:"
-echo "  - Health Check Interval: 30 seconds"
-echo "  - Failure Threshold: 3 checks"
-echo "  - Detection Time: ~90 seconds"
-echo ""
-echo "For production, add:"
-echo "  - Route 53 Hosted Zone with your domain"
-echo "  - Latency-based routing records"
-echo "  - CloudWatch alarms for health checks"
-echo "  - Multi-AZ deployment in each region"
+# View deployed resources summary
+echo "Primary Region (ap-southeast-2): $PRIMARY_INSTANCE @ $PRIMARY_IP (STOPPED)"
+echo "Secondary Region (us-east-1): $SECONDARY_INSTANCE @ $SECONDARY_IP (RUNNING)"
+echo "Health Checks: $PRIMARY_HEALTH_CHECK, $SECONDARY_HEALTH_CHECK"
 ```
 
 ---
@@ -584,55 +453,24 @@ echo "  - Multi-AZ deployment in each region"
 ## Step 12 – Cleanup Resources
 
 ```bash
-echo ""
-echo "Cleaning up resources..."
-
 # Delete health checks
-echo "Deleting health checks..."
-aws route53 delete-health-check \
-  --health-check-id "$PRIMARY_HEALTH_CHECK"
+aws route53 delete-health-check --health-check-id "$PRIMARY_HEALTH_CHECK"
+aws route53 delete-health-check --health-check-id "$SECONDARY_HEALTH_CHECK"
 
-aws route53 delete-health-check \
-  --health-check-id "$SECONDARY_HEALTH_CHECK"
+# Terminate instances
+aws ec2 terminate-instances --instance-ids "$PRIMARY_INSTANCE" --region "$PRIMARY_REGION"
+aws ec2 terminate-instances --instance-ids "$SECONDARY_INSTANCE" --region "$SECONDARY_REGION"
 
-# Terminate primary instance
-echo "Terminating primary instance..."
-aws ec2 terminate-instances \
-  --instance-ids "$PRIMARY_INSTANCE" \
-  --region "$PRIMARY_REGION"
-
-# Terminate secondary instance
-echo "Terminating secondary instance..."
-aws ec2 terminate-instances \
-  --instance-ids "$SECONDARY_INSTANCE" \
-  --region "$SECONDARY_REGION"
-
-echo "Waiting for instances to terminate..."
 sleep 30
 
-# Delete primary security group
-echo "Deleting primary security group..."
-aws ec2 delete-security-group \
-  --group-id "$PRIMARY_SG" \
-  --region "$PRIMARY_REGION"
-
-# Delete secondary security group
-echo "Deleting secondary security group..."
-aws ec2 delete-security-group \
-  --group-id "$SECONDARY_SG" \
-  --region "$SECONDARY_REGION"
+# Delete security groups
+aws ec2 delete-security-group --group-id "$PRIMARY_SG" --region "$PRIMARY_REGION"
+aws ec2 delete-security-group --group-id "$SECONDARY_SG" --region "$SECONDARY_REGION"
 
 # Delete local files
 rm -f primary-userdata.sh secondary-userdata.sh
 
-echo ""
-echo "✅ Cleanup completed successfully!"
-echo ""
-echo "All resources deleted:"
-echo "- EC2 instances (both regions)"
-echo "- Security groups (both regions)"
-echo "- Route 53 health checks"
-echo "- Local files"
+echo "✅ Cleanup completed"
 ```
 
 ---
