@@ -450,8 +450,6 @@ curl -s "http://${DOMAIN_NAME}" | grep -o "SYDNEY\\|US EAST"
 
 ---
 
----
-
 ## Step 10 – View Health Check Status
 
 ```bash
