@@ -1,4 +1,5 @@
 # Lab 5.D: Multi-Region Traffic Distribution with Route 53
+<img width="1536" height="1024" alt="IMG" src="https://github.com/user-attachments/assets/70917958-034b-4a30-a334-11c9b08cd907" />
 
 ## Overview
 This lab demonstrates how to implement global high availability using Amazon Route 53 for multi-region traffic distribution. You will deploy identical web applications in two AWS regions, configure Route 53 with latency-based routing to direct users to the nearest region, implement health checks for automatic failover, and test regional failover scenarios.
