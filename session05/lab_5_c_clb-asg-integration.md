@@ -27,38 +27,15 @@ This lab demonstrates how to integrate a Classic Load Balancer (CLB) with an Aut
 ## Step 1 – Set Variables and Verify Prerequisites
 
 ```bash
-# Get AWS account ID dynamically
-ACCOUNT_ID=$(aws sts get-caller-identity \
-  --query Account \
-  --output text)
-echo "ACCOUNT_ID=$ACCOUNT_ID"
-
-# Set region
+# Set region and resource names
 REGION="ap-southeast-2"
-echo "REGION=$REGION"
-
-# Set resource names
 CLB_NAME="lab-clb-asg"
-echo "CLB_NAME=$CLB_NAME"
-
 LAUNCH_TEMPLATE_NAME="lab-clb-asg-template"
-echo "LAUNCH_TEMPLATE_NAME=$LAUNCH_TEMPLATE_NAME"
-
 ASG_NAME="lab-clb-asg-group"
-echo "ASG_NAME=$ASG_NAME"
-
 SG_NAME="lab-clb-asg-sg"
-echo "SG_NAME=$SG_NAME"
-
-# Set capacity limits (free tier compatible)
 MIN_SIZE=2
-echo "MIN_SIZE=$MIN_SIZE"
-
 MAX_SIZE=4
-echo "MAX_SIZE=$MAX_SIZE"
-
 DESIRED_CAPACITY=2
-echo "DESIRED_CAPACITY=$DESIRED_CAPACITY"
 
 # Get default VPC ID
 VPC_ID=$(aws ec2 describe-vpcs \
@@ -68,26 +45,14 @@ VPC_ID=$(aws ec2 describe-vpcs \
   --region "$REGION")
 echo "VPC_ID=$VPC_ID"
 
-# Verify VPC exists
-if [ "$VPC_ID" == "None" ] || [ -z "$VPC_ID" ]; then
-  echo "❌ Error: Default VPC not found"
-  exit 1
-fi
-
-# Get availability zones
+# Get availability zones and subnets
 AZS=$(aws ec2 describe-availability-zones \
   --region "$REGION" \
   --query 'AvailabilityZones[0:2].ZoneName' \
   --output text)
-echo "AZS=$AZS"
-
 AZ1=$(echo "$AZS" | awk '{print $1}')
-echo "AZ1=$AZ1"
-
 AZ2=$(echo "$AZS" | awk '{print $2}')
-echo "AZ2=$AZ2"
 
-# Get subnets for each AZ
 SUBNET1=$(aws ec2 describe-subnets \
   --filters "Name=vpc-id,Values=$VPC_ID" "Name=availability-zone,Values=$AZ1" \
   --query 'Subnets[0].SubnetId' \
@@ -101,9 +66,6 @@ SUBNET2=$(aws ec2 describe-subnets \
   --output text \
   --region "$REGION")
 echo "SUBNET2=$SUBNET2"
-
-echo ""
-echo "✅ Prerequisites verified"
 ```
 
 ---
@@ -121,15 +83,13 @@ SG_ID=$(aws ec2 create-security-group \
   --output text)
 echo "SG_ID=$SG_ID"
 
-# Allow HTTP traffic from anywhere to load balancer
+# Allow HTTP traffic from anywhere
 aws ec2 authorize-security-group-ingress \
   --group-id "$SG_ID" \
   --protocol tcp \
   --port 80 \
   --cidr 0.0.0.0/0 \
   --region "$REGION"
-
-echo "✅ Security group created with HTTP access"
 ```
 
 ---
@@ -138,8 +98,6 @@ echo "✅ Security group created with HTTP access"
 
 ```bash
 # Create Classic Load Balancer
-echo "Creating Classic Load Balancer..."
-
 aws elb create-load-balancer \
   --load-balancer-name "$CLB_NAME" \
   --listeners "Protocol=HTTP,LoadBalancerPort=80,InstanceProtocol=HTTP,InstancePort=80" \
@@ -147,11 +105,7 @@ aws elb create-load-balancer \
   --security-groups "$SG_ID" \
   --region "$REGION"
 
-echo "✅ Classic Load Balancer created"
-
-# Configure health check
-echo "Configuring health check..."
-
+# Configure health check (Target: /health.html, Interval: 30s, Timeout: 5s)
 aws elb configure-health-check \
   --load-balancer-name "$CLB_NAME" \
   --health-check \
@@ -162,8 +116,6 @@ UnhealthyThreshold=2,\
 HealthyThreshold=2 \
   --region "$REGION"
 
-echo "✅ Health check configured (Target: /health.html, Interval: 30s)"
-
 # Get CLB DNS name
 CLB_DNS=$(aws elb describe-load-balancers \
   --load-balancer-names "$CLB_NAME" \
@@ -171,8 +123,6 @@ CLB_DNS=$(aws elb describe-load-balancers \
   --output text \
   --region "$REGION")
 echo "CLB_DNS=$CLB_DNS"
-
-echo ""
 echo "Load Balancer URL: http://${CLB_DNS}"
 ```
 
@@ -232,8 +182,6 @@ systemctl enable httpd
 # Log completion
 echo "Web server setup completed" > /var/log/userdata-complete.log
 EOF
-
-echo "✅ User data script created"
 ```
 
 ---
@@ -252,8 +200,6 @@ AMI_ID=$(aws ec2 describe-images \
 echo "AMI_ID=$AMI_ID"
 
 # Create Launch Template
-echo "Creating Launch Template..."
-
 aws ec2 create-launch-template \
   --launch-template-name "$LAUNCH_TEMPLATE_NAME" \
   --version-description "v1.0" \
@@ -271,8 +217,6 @@ aws ec2 create-launch-template \
     }]
   }" \
   --region "$REGION"
-
-echo "✅ Launch Template created"
 ```
 
 ---
@@ -280,9 +224,9 @@ echo "✅ Launch Template created"
 ## Step 6 – Create Auto Scaling Group with CLB
 
 ```bash
-# Create Auto Scaling Group attached to CLB
-echo "Creating Auto Scaling Group with CLB integration..."
-
+# Create Auto Scaling Group with CLB integration
+# Health Check Type: ELB (uses load balancer health checks)
+# Grace Period: 300 seconds for instance startup
 aws autoscaling create-auto-scaling-group \
   --auto-scaling-group-name "$ASG_NAME" \
   --launch-template "LaunchTemplateName=$LAUNCH_TEMPLATE_NAME,Version=\$Latest" \
@@ -295,15 +239,6 @@ aws autoscaling create-auto-scaling-group \
   --vpc-zone-identifier "$SUBNET1,$SUBNET2" \
   --tags "Key=Name,Value=CLB-ASG-Instance,PropagateAtLaunch=true" \
   --region "$REGION"
-
-echo "✅ Auto Scaling Group created and attached to CLB"
-echo ""
-echo "Configuration:"
-echo "  - Min Size: $MIN_SIZE"
-echo "  - Max Size: $MAX_SIZE"
-echo "  - Desired: $DESIRED_CAPACITY"
-echo "  - Health Check: ELB (from load balancer)"
-echo "  - Grace Period: 300 seconds"
 ```
 
 ---
@@ -311,14 +246,10 @@ echo "  - Grace Period: 300 seconds"
 ## Step 7 – Wait for Instances and Verify Health
 
 ```bash
-echo ""
-echo "Waiting for instances to launch and become healthy..."
-echo "This may take 3-5 minutes..."
+# Wait for instances to launch and become healthy (3-5 minutes)
 sleep 60
 
 # Check ASG status
-echo ""
-echo "Auto Scaling Group Status:"
 aws autoscaling describe-auto-scaling-groups \
   --auto-scaling-group-names "$ASG_NAME" \
   --query 'AutoScalingGroups[0].{Name:AutoScalingGroupName,Desired:DesiredCapacity,Current:length(Instances),MinSize:MinSize,MaxSize:MaxSize}' \
@@ -326,22 +257,16 @@ aws autoscaling describe-auto-scaling-groups \
   --region "$REGION"
 
 # List instances in ASG
-echo ""
-echo "Instances in Auto Scaling Group:"
 aws autoscaling describe-auto-scaling-groups \
   --auto-scaling-group-names "$ASG_NAME" \
   --query 'AutoScalingGroups[0].Instances[*].{InstanceId:InstanceId,HealthStatus:HealthStatus,LifecycleState:LifecycleState,AZ:AvailabilityZone}' \
   --output table \
   --region "$REGION"
 
-# Wait longer for health checks to pass
-echo ""
-echo "Waiting for instances to pass CLB health checks..."
+# Wait for instances to pass CLB health checks
 sleep 120
 
 # Check CLB instance health
-echo ""
-echo "Load Balancer Instance Health:"
 aws elb describe-instance-health \
   --load-balancer-name "$CLB_NAME" \
   --query 'InstanceStates[*].{InstanceId:InstanceId,State:State,ReasonCode:ReasonCode}' \
@@ -354,28 +279,16 @@ aws elb describe-instance-health \
 ## Step 8 – Test Load Distribution
 
 ```bash
-echo ""
-echo "================================================"
-echo "TESTING LOAD DISTRIBUTION"
-echo "================================================"
-echo ""
-echo "Load Balancer URL: http://${CLB_DNS}"
-echo ""
-echo "Testing load distribution across instances..."
-echo ""
-
-# Make 10 requests and show which instance responds
+# Test load distribution across instances (10 requests)
+echo "Testing load distribution: http://${CLB_DNS}"
 for i in {1..10}; do
   echo -n "Request $i: "
   curl -s "http://${CLB_DNS}" | grep -oP 'Instance ID:</strong> \K[^<]+'
   sleep 1
 done
 
-echo ""
-echo "✅ Load is distributed across multiple instances"
-echo ""
-echo "Open in browser to see instance details:"
-echo "  http://${CLB_DNS}"
+# Open in browser
+"$BROWSER" "http://${CLB_DNS}"
 ```
 
 ---
@@ -384,8 +297,6 @@ echo "  http://${CLB_DNS}"
 
 ```bash
 # Create target tracking scaling policy (40% CPU)
-echo "Creating target tracking scaling policy..."
-
 aws autoscaling put-scaling-policy \
   --auto-scaling-group-name "$ASG_NAME" \
   --policy-name "cpu-target-tracking" \
@@ -397,8 +308,6 @@ aws autoscaling put-scaling-policy \
     \"TargetValue\": 40.0
   }" \
   --region "$REGION"
-
-echo "✅ Target tracking policy created (Target: 40% CPU)"
 ```
 
 ---
@@ -414,33 +323,14 @@ INSTANCE_ID=$(aws autoscaling describe-auto-scaling-groups \
   --region "$REGION")
 echo "INSTANCE_ID=$INSTANCE_ID"
 
-echo ""
-echo "================================================"
-echo "TESTING AUTOMATIC INSTANCE REPLACEMENT"
-echo "================================================"
-echo ""
-echo "Simulating instance failure by stopping instance..."
-echo "Instance to stop: $INSTANCE_ID"
-echo ""
-
-# Stop instance (simulates failure)
+# Stop instance to simulate failure
+# ASG will detect unhealthy instance via CLB health check and launch replacement
 aws ec2 stop-instances \
   --instance-ids "$INSTANCE_ID" \
   --region "$REGION"
 
-echo "✅ Instance stopped"
-echo ""
-echo "Auto Scaling will:"
-echo "  1. Detect unhealthy instance via CLB health check"
-echo "  2. Mark instance as unhealthy"
-echo "  3. Terminate the unhealthy instance"
-echo "  4. Launch a replacement instance"
-echo "  5. Register new instance with CLB"
-echo ""
-echo "Wait 5 minutes and check status with:"
-echo "  aws autoscaling describe-auto-scaling-groups --auto-scaling-group-names $ASG_NAME --region $REGION"
-echo ""
-echo "Monitor replacement activity:"
+# Monitor replacement activity (wait 5 minutes, then check)
+echo "Monitor scaling activities:"
 echo "  aws autoscaling describe-scaling-activities --auto-scaling-group-name $ASG_NAME --max-records 5 --region $REGION"
 ```
 
@@ -449,14 +339,7 @@ echo "  aws autoscaling describe-scaling-activities --auto-scaling-group-name $A
 ## Step 11 – Monitor CLB and ASG Metrics
 
 ```bash
-echo ""
-echo "================================================"
-echo "MONITORING METRICS"
-echo "================================================"
-echo ""
-
-# Get CLB metrics
-echo "Load Balancer Metrics (Last 5 minutes):"
+# Get CLB healthy host count (last 5 minutes)
 aws cloudwatch get-metric-statistics \
   --namespace AWS/ELB \
   --metric-name HealthyHostCount \
@@ -469,8 +352,7 @@ aws cloudwatch get-metric-statistics \
   --query 'Datapoints[-5:].[Timestamp,Average]' \
   --output table
 
-echo ""
-echo "Request Count (Last 5 minutes):"
+# Get CLB request count (last 5 minutes)
 aws cloudwatch get-metric-statistics \
   --namespace AWS/ELB \
   --metric-name RequestCount \
@@ -482,12 +364,6 @@ aws cloudwatch get-metric-statistics \
   --region "$REGION" \
   --query 'Datapoints[-5:].[Timestamp,Sum]' \
   --output table
-
-echo ""
-echo "To monitor in real-time:"
-echo "  - CloudWatch Console → Dashboards → Create custom dashboard"
-echo "  - Metrics: HealthyHostCount, RequestCount, Latency"
-echo "  - ASG Metrics: GroupDesiredCapacity, GroupInServiceInstances"
 ```
 
 ---
@@ -495,8 +371,7 @@ echo "  - ASG Metrics: GroupDesiredCapacity, GroupInServiceInstances"
 ## Step 12 – View Scaling Activities
 
 ```bash
-echo ""
-echo "Recent Auto Scaling Activities:"
+# View recent scaling activities
 aws autoscaling describe-scaling-activities \
   --auto-scaling-group-name "$ASG_NAME" \
   --max-records 5 \
@@ -504,8 +379,7 @@ aws autoscaling describe-scaling-activities \
   --output table \
   --region "$REGION"
 
-echo ""
-echo "Current ASG Status:"
+# View current ASG status
 aws autoscaling describe-auto-scaling-groups \
   --auto-scaling-group-names "$ASG_NAME" \
   --query 'AutoScalingGroups[0].{Name:AutoScalingGroupName,Desired:DesiredCapacity,Min:MinSize,Max:MaxSize,InService:length(Instances[?LifecycleState==`InService`])}' \
@@ -518,36 +392,27 @@ aws autoscaling describe-auto-scaling-groups \
 ## Step 13 – Cleanup Resources
 
 ```bash
-echo ""
-echo "Cleaning up resources..."
-
 # Delete Auto Scaling Group
-echo "Deleting Auto Scaling Group..."
 aws autoscaling delete-auto-scaling-group \
   --auto-scaling-group-name "$ASG_NAME" \
   --force-delete \
   --region "$REGION"
 
-echo "Waiting for instances to terminate..."
 sleep 30
 
 # Delete Launch Template
-echo "Deleting Launch Template..."
 aws ec2 delete-launch-template \
   --launch-template-name "$LAUNCH_TEMPLATE_NAME" \
   --region "$REGION"
 
 # Delete Classic Load Balancer
-echo "Deleting Classic Load Balancer..."
 aws elb delete-load-balancer \
   --load-balancer-name "$CLB_NAME" \
   --region "$REGION"
 
-# Wait for load balancer to delete
 sleep 10
 
 # Delete Security Group
-echo "Deleting Security Group..."
 aws ec2 delete-security-group \
   --group-id "$SG_ID" \
   --region "$REGION"
@@ -555,15 +420,7 @@ aws ec2 delete-security-group \
 # Delete local files
 rm -f clb-asg-userdata.sh
 
-echo ""
-echo "✅ Cleanup completed successfully!"
-echo ""
-echo "All resources deleted:"
-echo "- Auto Scaling Group"
-echo "- Launch Template"
-echo "- Classic Load Balancer"
-echo "- Security Group"
-echo "- Local files"
+echo "✅ Cleanup completed"
 ```
 
 ---
