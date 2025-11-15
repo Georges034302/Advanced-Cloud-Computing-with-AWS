@@ -7,11 +7,11 @@ This lab demonstrates how to implement global high availability using Amazon Rou
 
 ## Objectives
 - Deploy web application in two AWS regions
-- Create Route 53 hosted zone and records
+- Create Route 53 hosted zone with pseudo domain
 - Configure latency-based routing policy
-- Set up Route 53 health checks
+- Set up Route 53 health checks for automatic failover
 - Test traffic routing to nearest region
-- Simulate regional failure and verify failover
+- Simulate regional failure and verify automatic failover
 - Clean up all resources
 
 ---
@@ -20,8 +20,8 @@ This lab demonstrates how to implement global high availability using Amazon Rou
 - AWS CLI configured (`aws configure`)
 - Default VPCs in both regions (ap-southeast-2, us-east-1)
 - IAM permissions for EC2, Route 53, and CloudWatch
-- Registered domain or use Route 53 test domain
 - Basic understanding of DNS and routing policies
+- Note: Lab uses pseudo domain name (myapp.example.com) for demonstration
 
 ---
 
@@ -34,8 +34,10 @@ SECONDARY_REGION="us-east-1"        # US East
 SG_NAME="lab-route53-sg"
 INSTANCE_NAME="route53-demo"
 
-# Note: This lab uses EC2 public IPs for routing
-# For production, register a domain in Route 53 and use latency-based routing
+# Domain configuration (use your registered domain)
+# For this lab, we'll use a pseudo domain name
+DOMAIN_NAME="myapp.example.com"
+echo "DOMAIN_NAME=$DOMAIN_NAME"
 ```
 
 ---
@@ -345,24 +347,112 @@ echo "SECONDARY_HEALTH_CHECK=$SECONDARY_HEALTH_CHECK"
 
 ---
 
-## Step 6 – Test Regional Endpoints
+## Step 6 – Create Route 53 Hosted Zone
 
 ```bash
-# Test regional endpoints
+# Create hosted zone for domain
+HOSTED_ZONE_OUTPUT=$(aws route53 create-hosted-zone \
+  --name "$DOMAIN_NAME" \
+  --caller-reference "$(date +%s)" \
+  --hosted-zone-config Comment="Multi-region demo hosted zone")
+
+HOSTED_ZONE_ID=$(echo "$HOSTED_ZONE_OUTPUT" | jq -r '.HostedZone.Id' | cut -d'/' -f3)
+echo "HOSTED_ZONE_ID=$HOSTED_ZONE_ID"
+
+# Get name servers
+aws route53 get-hosted-zone \
+  --id "$HOSTED_ZONE_ID" \
+  --query 'DelegationSet.NameServers' \
+  --output table
+```
+
+---
+
+## Step 7 – Create Latency-Based Routing Records
+
+```bash
+# Create latency-based record for primary region (Sydney)
+aws route53 change-resource-record-sets \
+  --hosted-zone-id "$HOSTED_ZONE_ID" \
+  --change-batch "{
+    \"Changes\": [{
+      \"Action\": \"CREATE\",
+      \"ResourceRecordSet\": {
+        \"Name\": \"$DOMAIN_NAME\",
+        \"Type\": \"A\",
+        \"SetIdentifier\": \"Primary-Sydney\",
+        \"Region\": \"$PRIMARY_REGION\",
+        \"TTL\": 60,
+        \"ResourceRecords\": [{\"Value\": \"$PRIMARY_IP\"}],
+        \"HealthCheckId\": \"$PRIMARY_HEALTH_CHECK\"
+      }
+    }]
+  }"
+
+# Create latency-based record for secondary region (US East)
+aws route53 change-resource-record-sets \
+  --hosted-zone-id "$HOSTED_ZONE_ID" \
+  --change-batch "{
+    \"Changes\": [{
+      \"Action\": \"CREATE\",
+      \"ResourceRecordSet\": {
+        \"Name\": \"$DOMAIN_NAME\",
+        \"Type\": \"A\",
+        \"SetIdentifier\": \"Secondary-USEast\",
+        \"Region\": \"$SECONDARY_REGION\",
+        \"TTL\": 60,
+        \"ResourceRecords\": [{\"Value\": \"$SECONDARY_IP\"}],
+        \"HealthCheckId\": \"$SECONDARY_HEALTH_CHECK\"
+      }
+    }]
+  }"
+
+echo "Latency-based routing configured for $DOMAIN_NAME"
+```
+
+---
+
+## Step 8 – Verify DNS Records
+
+```bash
+# List all records in hosted zone
+aws route53 list-resource-record-sets \
+  --hosted-zone-id "$HOSTED_ZONE_ID" \
+  --query "ResourceRecordSets[?Type=='A'].{Name:Name,Type:Type,Region:Region,IP:ResourceRecords[0].Value,HealthCheck:HealthCheckId}" \
+  --output table
+
+# Test DNS resolution (may take a few minutes to propagate)
+echo "Testing DNS resolution for $DOMAIN_NAME"
+dig +short "$DOMAIN_NAME" @8.8.8.8
+```
+
+---
+
+## Step 9 – Test Regional Endpoints
+
+```bash
+# Test regional endpoints via IPs
 echo "Testing primary region (Sydney):"
 curl -s "http://${PRIMARY_IP}" | grep -o "SYDNEY (PRIMARY)"
 
 echo "Testing secondary region (US East):"
 curl -s "http://${SECONDARY_IP}" | grep -o "US EAST (SECONDARY)"
 
+# Test via domain name (latency-based routing)
+echo "Testing domain: $DOMAIN_NAME"
+curl -s "http://${DOMAIN_NAME}" | grep -o "SYDNEY\\|US EAST"
+
 # Open in browser for visual verification
 "$BROWSER" "http://${PRIMARY_IP}"    # Purple gradient, 🇦🇺
 "$BROWSER" "http://${SECONDARY_IP}"  # Pink gradient, 🇺🇸
+"$BROWSER" "http://${DOMAIN_NAME}"   # Routes to nearest healthy region
 ```
 
 ---
 
-## Step 7 – View Health Check Status
+---
+
+## Step 10 – View Health Check Status
 
 ```bash
 # Wait for health checks to become healthy (1-2 minutes)
@@ -383,6 +473,27 @@ aws route53 get-health-check-status \
 
 ---
 
+## Step 11 – Simulate Regional Failure
+
+```bash
+# Simulate regional failure by stopping primary instance
+# Route 53 will automatically route traffic to secondary region
+aws ec2 stop-instances \
+  --instance-ids "$PRIMARY_INSTANCE" \
+  --region "$PRIMARY_REGION"
+
+echo "Primary instance stopped (simulated failure)"
+echo "Wait 2 minutes for health check to detect failure"
+echo "Route 53 will automatically fail over to secondary region"
+echo "Test: curl http://${DOMAIN_NAME} (should route to US East)"
+echo "Monitor: aws route53 get-health-check-status --health-check-id $PRIMARY_HEALTH_CHECK"
+```
+
+---
+
+## Step 12 – Monitor Health Checks
+---
+
 ## Step 8 – Simulate Regional Failure
 
 ```bash
@@ -399,7 +510,7 @@ echo "Monitor: aws route53 get-health-check-status --health-check-id $PRIMARY_HE
 
 ---
 
-## Step 9 – Monitor Health Checks
+## Step 12 – Monitor Health Checks
 
 ```bash
 # Wait for health check to detect failure (~2 minutes)
@@ -416,11 +527,21 @@ aws route53 get-health-check-status \
   --health-check-id "$SECONDARY_HEALTH_CHECK" \
   --query 'HealthCheckObservations[0:3].{Region:Region,Status:StatusReport.Status,Timestamp:StatusReport.CheckedTime}' \
   --output table
+
+# Test automatic failover via domain
+echo "Testing automatic failover:"
+curl -s "http://${DOMAIN_NAME}" | grep -o "US EAST (SECONDARY)"
+echo "Traffic automatically routed to secondary region!"
 ```
 
 ---
 
-## Step 10 – View CloudWatch Metrics
+## Step 13 – View CloudWatch Metrics
+
+```bash
+---
+
+## Step 13 – View CloudWatch Metrics
 
 ```bash
 # Get Route 53 health check metrics (last 10 minutes)
@@ -435,6 +556,80 @@ aws cloudwatch get-metric-statistics \
   --statistics Minimum \
   --query 'Datapoints[-5:].[Timestamp,Minimum]' \
   --output table
+```
+
+---
+
+## Step 14 – Review Multi-Region Architecture
+
+```bash
+# View deployed resources summary
+echo "Primary Region (ap-southeast-2): $PRIMARY_INSTANCE @ $PRIMARY_IP (STOPPED)"
+echo "Secondary Region (us-east-1): $SECONDARY_INSTANCE @ $SECONDARY_IP (RUNNING)"
+echo "Health Checks: $PRIMARY_HEALTH_CHECK, $SECONDARY_HEALTH_CHECK"
+echo "Hosted Zone: $HOSTED_ZONE_ID"
+echo "Domain: $DOMAIN_NAME (Routes to: Secondary Region)"
+```
+
+---
+
+## Step 15 – Cleanup Resources
+
+```bash
+# Delete Route 53 records first
+aws route53 change-resource-record-sets \
+  --hosted-zone-id "$HOSTED_ZONE_ID" \
+  --change-batch "{
+    \"Changes\": [
+      {
+        \"Action\": \"DELETE\",
+        \"ResourceRecordSet\": {
+          \"Name\": \"$DOMAIN_NAME\",
+          \"Type\": \"A\",
+          \"SetIdentifier\": \"Primary-Sydney\",
+          \"Region\": \"$PRIMARY_REGION\",
+          \"TTL\": 60,
+          \"ResourceRecords\": [{\"Value\": \"$PRIMARY_IP\"}],
+          \"HealthCheckId\": \"$PRIMARY_HEALTH_CHECK\"
+        }
+      },
+      {
+        \"Action\": \"DELETE\",
+        \"ResourceRecordSet\": {
+          \"Name\": \"$DOMAIN_NAME\",
+          \"Type\": \"A\",
+          \"SetIdentifier\": \"Secondary-USEast\",
+          \"Region\": \"$SECONDARY_REGION\",
+          \"TTL\": 60,
+          \"ResourceRecords\": [{\"Value\": \"$SECONDARY_IP\"}],
+          \"HealthCheckId\": \"$SECONDARY_HEALTH_CHECK\"
+        }
+      }
+    ]
+  }"
+
+# Delete hosted zone
+aws route53 delete-hosted-zone --id "$HOSTED_ZONE_ID"
+
+# Delete health checks
+aws route53 delete-health-check --health-check-id "$PRIMARY_HEALTH_CHECK"
+aws route53 delete-health-check --health-check-id "$SECONDARY_HEALTH_CHECK"
+
+# Terminate instances
+aws ec2 terminate-instances --instance-ids "$PRIMARY_INSTANCE" --region "$PRIMARY_REGION"
+aws ec2 terminate-instances --instance-ids "$SECONDARY_INSTANCE" --region "$SECONDARY_REGION"
+
+sleep 30
+
+# Delete security groups
+aws ec2 delete-security-group --group-id "$PRIMARY_SG" --region "$PRIMARY_REGION"
+aws ec2 delete-security-group --group-id "$SECONDARY_SG" --region "$SECONDARY_REGION"
+
+# Delete local files
+rm -f primary-userdata.sh secondary-userdata.sh
+
+echo "✅ Cleanup completed"
+```
 ```
 
 ---
@@ -545,11 +740,3 @@ For production multi-region deployment:
 
 ---
 
-## Free Tier Notes
-- **Route 53**: 50 health checks/month (free for first 12 months)
-- **Route 53 Queries**: 1M queries/month (free for first 12 months)
-- **EC2 t2.micro**: 750 hours/month per region (1500 total)
-- **Data Transfer**: 15 GB outbound per month
-- **CloudWatch**: 10 alarms free
-
-This lab uses 2 t2.micro instances (one per region) and 2 health checks, staying within free tier limits.
