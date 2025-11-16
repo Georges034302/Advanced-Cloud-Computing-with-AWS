@@ -1,5 +1,6 @@
 # Lab 6.A: Build, Push to ECR, and Deploy to ECS with EC2
-<img width="1536" height="1024" alt="IMAGE" src="https://github.com/user-attachments/assets/4466a453-ddbd-4694-9ff4-1c830c8e308e" />
+
+<img width="1024" height="1024" alt="IMG" src="https://github.com/user-attachments/assets/dd758da2-5239-4dba-9a65-acb6f643f486" />
 
 ## Overview
 This lab demonstrates the complete container workflow: building a Docker image for a simple Python Flask API, pushing it to Amazon Elastic Container Registry (ECR), and deploying it to Amazon Elastic Container Service (ECS) using the EC2 launch type with a single t2.micro instance (free tier eligible).
