@@ -47,9 +47,6 @@ echo "REGION=$REGION"
 # Verify Docker is running
 docker --version || { echo "❌ Docker not installed"; exit 1; }
 
-echo ""
-echo "⚠️  COST WARNING: Fargate charges $0.04/hour minimum"
-echo "   Delete all resources after lab to minimize costs!"
 ```
 
 ---
@@ -361,8 +358,6 @@ aws ecs register-task-definition \
   --cli-input-json file://fargate-task-definition.json \
   --region "$REGION"
 
-echo ""  
-echo "💰 Cost: Fargate task uses 0.25 vCPU + 0.5 GB = ~$0.04/hour"
 ```
 
 ---
@@ -445,8 +440,6 @@ echo ""
 "$BROWSER" "http://${PUBLIC_IP}/joke"
 "$BROWSER" "http://${PUBLIC_IP}/jokes"
 
-echo ""
-echo "💰 Remember: You're being charged ~$0.04/hour while running"
 ```
 
 ---
@@ -535,7 +528,6 @@ rm -f fargate-task-trust-policy.json fargate-task-definition.json
 
 echo ""
 echo "✅ Cleanup completed - all resources deleted"
-echo "💰 Fargate charges stopped!"
 ```
 
 ---
