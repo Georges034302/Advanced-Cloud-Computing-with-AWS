@@ -1,4 +1,5 @@
 # Lab 6.B: Deploy Containerized Application to Elastic Beanstalk
+<img width="1536" height="1024" alt="IMG" src="https://github.com/user-attachments/assets/d314b7e4-827f-4d3a-9377-d7f9b42f7175" />
 
 ## Overview
 This lab demonstrates how to deploy a containerized Python Flask API to AWS Elastic Beanstalk using Docker. Elastic Beanstalk automatically handles deployment, capacity provisioning, load balancing, and health monitoring, making it ideal for simple container deployments without managing infrastructure.
