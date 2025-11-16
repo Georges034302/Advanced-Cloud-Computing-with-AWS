@@ -1,5 +1,5 @@
 # Lab 6.D: Deploy Microservices to Amazon EKS
-<img width="800" height="1200" alt="IMG" src="https://github.com/user-attachments/assets/478bbdbc-9333-480d-9029-e7126f0bcb90" />
+<img width="400" height="800" alt="IMG" src="https://github.com/user-attachments/assets/478bbdbc-9333-480d-9029-e7126f0bcb90" />
 
 ## Overview
 This lab demonstrates how to deploy containerized microservices to Amazon Elastic Kubernetes Service (EKS). You'll create an EKS cluster, build two microservices for a student management system (Tutor service and Report service), deploy them as Kubernetes pods, expose them via services, and test inter-service communication. This provides hands-on experience with Kubernetes orchestration on AWS.
