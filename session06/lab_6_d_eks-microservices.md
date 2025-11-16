@@ -46,9 +46,6 @@ SERVICE2_NAME="report"
 
 echo "ACCOUNT_ID=$ACCOUNT_ID"
 echo "REGION=$REGION"
-echo ""
-echo "⚠️  COST WARNING: EKS Control Plane ($0.10/hr) + 2 t3.small nodes ($0.046/hr)"
-echo "   DELETE cluster immediately after lab!"
 ```
 
 ---
@@ -296,6 +293,17 @@ eksctl create cluster \
   --nodes-min "$NODE_COUNT" \
   --nodes-max "$NODE_COUNT" \
   --managed
+
+# If cluster exists but nodegroup wasn't created, create it separately
+eksctl create nodegroup \
+  --cluster "$CLUSTER_NAME" \
+  --region "$REGION" \
+  --name standard-workers \
+  --node-type "$NODE_TYPE" \
+  --nodes "$NODE_COUNT" \
+  --nodes-min "$NODE_COUNT" \
+  --nodes-max "$NODE_COUNT" \
+  --managed
 ```
 
 ---
@@ -303,6 +311,9 @@ eksctl create cluster \
 ## Step 7 – Verify Cluster and Nodes
 
 ```bash
+# Configure kubectl to use the EKS cluster
+aws eks update-kubeconfig --name "$CLUSTER_NAME" --region "$REGION"
+
 # Verify kubectl context
 kubectl config current-context
 
@@ -311,6 +322,20 @@ kubectl get nodes -o wide
 
 # Get cluster info
 kubectl cluster-info
+
+# Check EKS cluster status
+aws eks describe-cluster \
+  --name "$CLUSTER_NAME" \
+  --region "$REGION" \
+  --query 'cluster.status' \
+  --output text
+
+# Check CloudFormation stack status
+aws cloudformation describe-stacks \
+  --stack-name "eksctl-${CLUSTER_NAME}-cluster" \
+  --region "$REGION" \
+  --query 'Stacks[0].[StackStatus,CreationTime]' \
+  --output text
 ```
 
 ---
