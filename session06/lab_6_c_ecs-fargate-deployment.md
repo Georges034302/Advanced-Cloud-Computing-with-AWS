@@ -559,20 +559,6 @@ In this lab, you have:
 - **Automatic Scaling**: Can scale tasks without managing instances
 - **Public IP**: Assign public IP for internet access
 
-**Fargate vs EC2 Launch Type:**
-| Feature | Fargate | EC2 Launch Type |
-|---------|---------|-----------------|
-| **Management** | Serverless | Manage EC2 instances |
-| **Cost** | ~$0.04/hour/task | EC2 instance cost |
-| **Scaling** | Task-level | Instance + task level |
-| **Free Tier** | ❌ No | ✅ Yes (t2.micro) |
-| **Best For** | Short-lived, bursty | Long-running, cost-sensitive |
-
-**Fargate Pricing (ap-southeast-2):**
-- **vCPU**: $0.04656 per vCPU hour
-- **Memory**: $0.00511 per GB hour
-- **Minimum**: 0.25 vCPU + 0.5 GB = ~$0.04/hour = ~$30/month
-
 **Best Practices:**
 - Use smallest CPU/memory needed (0.25 vCPU minimum)
 - Enable CloudWatch logs for debugging
@@ -581,21 +567,6 @@ In this lab, you have:
 - Use Application Load Balancer for multiple tasks
 - Tag resources for cost tracking
 - **DELETE resources immediately after testing**
-
----
-
-## Cost Breakdown
-
-**This Lab Costs (assuming 2-hour runtime):**
-- Fargate task (0.25 vCPU, 0.5 GB): $0.04/hour × 2 = **$0.08**
-- ECR storage: < $0.01
-- Data transfer: < $0.01
-- **Total lab cost: ~$0.10**
-
-**If left running 24/7:**
-- Fargate: $0.04/hour × 24 × 30 = **~$30/month**
-
-**⚠️ IMPORTANT: Always delete Fargate services after testing!**
 
 ---
 
