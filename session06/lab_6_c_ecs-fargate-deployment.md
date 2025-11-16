@@ -1,4 +1,5 @@
 # Lab 6.C: Deploy Container to ECS with Fargate
+<img width="1487" height="798" alt="IMG" src="https://github.com/user-attachments/assets/c8d0e8f9-8026-4da8-b550-13118d9785f5" />
 
 ## Overview
 This lab demonstrates how to deploy a containerized Python Flask API to Amazon ECS using AWS Fargate, a serverless compute engine for containers. Fargate eliminates the need to manage EC2 instances, allowing you to focus solely on your application. You'll build a Docker image, push it to ECR, and deploy it using Fargate with automatic networking and load balancing.
