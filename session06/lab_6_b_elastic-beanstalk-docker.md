@@ -28,32 +28,15 @@ This lab demonstrates how to deploy a containerized Python Flask API to AWS Elas
 ## Step 1 – Set Variables and Verify Prerequisites
 
 ```bash
-# Set region
+# Set region and application names
 REGION="ap-southeast-2"
-echo "REGION=$REGION"
-
-# Set application name
 APP_NAME="joke-api-eb"
-echo "APP_NAME=$APP_NAME"
-
 ENV_NAME="joke-api-env"
-echo "ENV_NAME=$ENV_NAME"
 
 # Verify prerequisites
-echo ""
-echo "Verifying prerequisites..."
-
-# Check AWS CLI
 aws --version || { echo "❌ AWS CLI not installed"; exit 1; }
-
-# Check Docker
 docker --version || { echo "❌ Docker not installed"; exit 1; }
-
-# Check EB CLI
 eb --version || { echo "❌ EB CLI not installed. Install: pip install awsebcli"; exit 1; }
-
-echo ""
-echo "✅ All prerequisites verified"
 ```
 
 ---
@@ -130,8 +113,6 @@ flask==3.0.0
 werkzeug==3.0.1
 gunicorn==21.2.0
 EOF
-
-echo "✅ Flask application created"
 ```
 
 ---
@@ -160,8 +141,6 @@ EXPOSE 5000
 # Run with gunicorn for production
 CMD ["gunicorn", "--bind", "0.0.0.0:5000", "--workers", "2", "application:application"]
 EOF
-
-echo "✅ Dockerfile created"
 ```
 
 ---
@@ -185,8 +164,6 @@ cat > Dockerrun.aws.json <<'EOF'
   ]
 }
 EOF
-
-echo "✅ Dockerrun.aws.json created"
 ```
 
 ---
@@ -194,30 +171,24 @@ echo "✅ Dockerrun.aws.json created"
 ## Step 5 – Test Docker Image Locally (Optional)
 
 ```bash
-echo ""
-echo "Testing Docker image locally..."
-
-# Build Docker image
+# Build and test Docker image locally
 docker build -t joke-api-eb:latest .
 
-# Run container locally
+# Run container on port 8080
 CONTAINER_ID=$(docker run -d -p 8080:5000 joke-api-eb:latest)
 echo "CONTAINER_ID=$CONTAINER_ID"
 
-# Wait for container to start
 sleep 3
 
-# Test endpoints
-echo ""
-echo "Testing local container on port 8080..."
+# Test local endpoint
 curl -s http://localhost:8080/ | python3 -m json.tool
+
+# Open in browser
+"$BROWSER" "http://localhost:8080/"
 
 # Stop and remove container
 docker stop "$CONTAINER_ID"
 docker rm "$CONTAINER_ID"
-
-echo ""
-echo "✅ Local Docker test successful"
 ```
 
 ---
@@ -225,18 +196,10 @@ echo "✅ Local Docker test successful"
 ## Step 6 – Initialize Elastic Beanstalk Application
 
 ```bash
-echo ""
-echo "Initializing Elastic Beanstalk application..."
+# Initialize EB application with Docker platform
+eb init --platform docker --region "$REGION" "$APP_NAME"
 
-# Initialize EB application
-eb init \
-  --platform docker \
-  --region "$REGION" \
-  "$APP_NAME"
-
-echo "✅ Elastic Beanstalk application initialized"
-
-# Verify .elasticbeanstalk directory was created
+# Verify configuration directory created
 ls -la .elasticbeanstalk/
 ```
 
@@ -245,18 +208,11 @@ ls -la .elasticbeanstalk/
 ## Step 7 – Create Elastic Beanstalk Environment
 
 ```bash
-echo ""
-echo "Creating Elastic Beanstalk environment..."
-echo "This will take 5-7 minutes..."
-
-# Create environment with t2.micro (free tier)
+# Create single-instance environment with t2.micro (takes 5-7 minutes)
 eb create "$ENV_NAME" \
   --instance-type t2.micro \
   --single \
   --region "$REGION"
-
-echo ""
-echo "✅ Elastic Beanstalk environment created"
 ```
 
 ---
@@ -268,48 +224,37 @@ echo "✅ Elastic Beanstalk environment created"
 APP_URL=$(eb status | grep "CNAME" | awk '{print $2}')
 echo "APP_URL=$APP_URL"
 
-# Wait for application to be fully ready
-echo ""
-echo "Waiting for application to be ready..."
+# Wait for application to be ready
 sleep 30
 
 echo ""
-echo "================================================"
-echo "JOKE API DEPLOYED ON ELASTIC BEANSTALK"
-echo "================================================"
-echo ""
 echo "API Base URL: http://${APP_URL}"
-echo ""
-echo "Testing endpoints..."
 echo ""
 
 # Test welcome endpoint
-echo "1. Testing / (welcome):"
+echo "Testing / (welcome):"
 curl -s "http://${APP_URL}/" | python3 -m json.tool
 echo ""
 
 # Test random joke endpoint
-echo "2. Testing /joke (random joke):"
+echo "Testing /joke (random joke):"
 curl -s "http://${APP_URL}/joke" | python3 -m json.tool
 echo ""
 
 # Test all jokes endpoint
-echo "3. Testing /jokes (all jokes):"
+echo "Testing /jokes (all jokes):"
 curl -s "http://${APP_URL}/jokes" | python3 -m json.tool
 echo ""
 
 # Test health endpoint
-echo "4. Testing /health (health check):"
+echo "Testing /health (health check):"
 curl -s "http://${APP_URL}/health" | python3 -m json.tool
 echo ""
 
-echo "================================================"
-echo "✅ All endpoints working!"
-echo ""
-echo "Try in browser:"
-echo "  http://${APP_URL}/"
-echo "  http://${APP_URL}/joke"
-echo "  http://${APP_URL}/jokes"
+# Open in browser
+"$BROWSER" "http://${APP_URL}/"
+"$BROWSER" "http://${APP_URL}/joke"
+"$BROWSER" "http://${APP_URL}/jokes"
 ```
 
 ---
@@ -317,16 +262,13 @@ echo "  http://${APP_URL}/jokes"
 ## Step 9 – View Environment Status
 
 ```bash
-echo ""
-echo "Elastic Beanstalk Environment Status:"
+# View environment status
 eb status
 
-echo ""
-echo "Environment Health:"
+# View environment health
 eb health
 
-echo ""
-echo "Recent Events:"
+# View recent events (press Ctrl+C to exit)
 eb events --follow
 ```
 
@@ -335,8 +277,7 @@ eb events --follow
 ## Step 10 – View Environment Configuration
 
 ```bash
-echo ""
-echo "Environment Configuration:"
+# View environment configuration
 aws elasticbeanstalk describe-environments \
   --application-name "$APP_NAME" \
   --environment-names "$ENV_NAME" \
@@ -344,8 +285,7 @@ aws elasticbeanstalk describe-environments \
   --output table \
   --region "$REGION"
 
-echo ""
-echo "Environment Resources:"
+# View environment resources
 aws elasticbeanstalk describe-environment-resources \
   --environment-name "$ENV_NAME" \
   --query 'EnvironmentResources.{Instances:length(Instances),SecurityGroups:length(SecurityGroups),LoadBalancers:length(LoadBalancers)}' \
@@ -355,39 +295,12 @@ aws elasticbeanstalk describe-environment-resources \
 
 ---
 
-## Step 11 – Update Application (Optional)
+## Step 11 – Cleanup Resources
 
 ```bash
-# If you need to update the application, modify code and run:
-# eb deploy
-
-echo ""
-echo "To update the application:"
-echo "  1. Modify application.py or Dockerfile"
-echo "  2. Run: eb deploy"
-echo "  3. Wait 2-3 minutes for deployment"
-echo ""
-echo "To view logs:"
-echo "  eb logs"
-echo ""
-echo "To SSH into instance:"
-echo "  eb ssh"
-```
-
----
-
-## Step 12 – Cleanup Resources
-
-```bash
-echo ""
-echo "Cleaning up resources..."
-echo "This will take 3-5 minutes..."
-
-# Terminate Elastic Beanstalk environment
-echo "Terminating Elastic Beanstalk environment..."
+# Terminate Elastic Beanstalk environment (takes 3-5 minutes)
 eb terminate "$ENV_NAME" --force
 
-echo "Waiting for environment to terminate..."
 sleep 60
 
 # Verify environment is terminated
@@ -398,30 +311,18 @@ aws elasticbeanstalk describe-environments \
   --output text \
   --region "$REGION" 2>/dev/null || echo "Environment terminated"
 
-# Delete application (optional - keeps application but removes environment)
-echo ""
-echo "To delete the entire application:"
-echo "  aws elasticbeanstalk delete-application --application-name $APP_NAME --region $REGION"
-echo ""
-echo "For now, keeping application (only environment deleted)"
+# Clean up S3 bucket contents before deleting application
+aws s3 rm s3://elasticbeanstalk-${REGION}-${ACCOUNT_ID} --recursive
+
+# Delete the s3 bucket
+aws s3 rb s3://elasticbeanstalk-${REGION}-${ACCOUNT_ID}
+
+# Delete application
+aws elasticbeanstalk delete-application --application-name "$APP_NAME" --region "$REGION"
 
 # Clean up local files
 cd ..
 rm -rf joke-api-eb
-
-echo ""
-echo "✅ Cleanup completed successfully!"
-echo ""
-echo "Resources cleaned up:"
-echo "- Elastic Beanstalk environment"
-echo "- EC2 instance (t2.micro)"
-echo "- Security groups"
-echo "- S3 bucket (application versions)"
-echo "- Local project files"
-echo ""
-echo "Note: Application '$APP_NAME' still exists (no cost)"
-echo "Delete it manually if needed using:"
-echo "  aws elasticbeanstalk delete-application --application-name $APP_NAME --region $REGION"
 ```
 
 ---
@@ -476,16 +377,6 @@ eb logs          # View logs
 eb ssh           # SSH into instance
 eb terminate     # Terminate environment
 ```
-
----
-
-## Free Tier Notes
-- **Elastic Beanstalk**: No additional charge (only underlying resources)
-- **EC2 t2.micro**: 750 hours/month (free tier)
-- **S3 Storage**: 5 GB for application versions
-- **Data Transfer**: 15 GB outbound per month
-
-This lab uses single t2.micro instance in single-instance mode, staying within free tier limits.
 
 ---
 
