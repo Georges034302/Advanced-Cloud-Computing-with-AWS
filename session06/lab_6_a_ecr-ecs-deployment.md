@@ -29,42 +29,21 @@ This lab demonstrates the complete container workflow: building a Docker image f
 
 ```bash
 # Get AWS account ID
-ACCOUNT_ID=$(aws sts get-caller-identity \
-  --query Account \
-  --output text)
+ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
 echo "ACCOUNT_ID=$ACCOUNT_ID"
 
-# Set region
+# Set region and resource names
 REGION="ap-southeast-2"
-echo "REGION=$REGION"
-
-# Set resource names
 REPO_NAME="joke-api"
-echo "REPO_NAME=$REPO_NAME"
-
 IMAGE_TAG="latest"
-echo "IMAGE_TAG=$IMAGE_TAG"
-
 CLUSTER_NAME="lab-ecs-cluster"
-echo "CLUSTER_NAME=$CLUSTER_NAME"
-
 TASK_FAMILY="joke-api-task"
-echo "TASK_FAMILY=$TASK_FAMILY"
-
 SERVICE_NAME="joke-api-service"
-echo "SERVICE_NAME=$SERVICE_NAME"
-
 CONTAINER_NAME="joke-api"
-echo "CONTAINER_NAME=$CONTAINER_NAME"
-
 INSTANCE_TYPE="t2.micro"
-echo "INSTANCE_TYPE=$INSTANCE_TYPE"
 
 # Verify Docker is running
 docker --version || { echo "❌ Docker not installed"; exit 1; }
-
-echo ""
-echo "✅ Prerequisites verified"
 ```
 
 ---
@@ -128,8 +107,6 @@ cat > requirements.txt <<'EOF'
 flask==3.0.0
 werkzeug==3.0.1
 EOF
-
-echo "✅ Flask application created"
 ```
 
 ---
@@ -158,8 +135,6 @@ EXPOSE 80
 # Run the application
 CMD ["python", "app.py"]
 EOF
-
-echo "✅ Dockerfile created"
 ```
 
 ---
@@ -167,19 +142,10 @@ echo "✅ Dockerfile created"
 ## Step 4 – Build Docker Image Locally
 
 ```bash
-# Build Docker image
-echo "Building Docker image..."
+# Build Docker image for linux/amd64 platform
+docker build --tag "${REPO_NAME}:${IMAGE_TAG}" --platform linux/amd64 .
 
-docker build \
-  --tag "${REPO_NAME}:${IMAGE_TAG}" \
-  --platform linux/amd64 \
-  .
-
-echo "✅ Docker image built successfully"
-
-# Verify image
-echo ""
-echo "Docker images:"
+# Verify image created
 docker images | grep "$REPO_NAME"
 ```
 
@@ -191,15 +157,11 @@ docker images | grep "$REPO_NAME"
 # Return to parent directory
 cd ..
 
-# Create ECR repository
-echo "Creating ECR repository..."
-
+# Create ECR repository with image scanning enabled
 aws ecr create-repository \
   --repository-name "$REPO_NAME" \
   --region "$REGION" \
   --image-scanning-configuration scanOnPush=true
-
-echo "✅ ECR repository created"
 
 # Get repository URI
 REPO_URI=$(aws ecr describe-repositories \
@@ -216,28 +178,16 @@ echo "REPO_URI=$REPO_URI"
 
 ```bash
 # Authenticate Docker to ECR
-echo "Authenticating Docker to ECR..."
-
-aws ecr get-login-password \
-  --region "$REGION" | docker login \
-  --username AWS \
-  --password-stdin "${ACCOUNT_ID}.dkr.ecr.${REGION}.amazonaws.com"
-
-echo "✅ Docker authenticated to ECR"
+aws ecr get-login-password --region "$REGION" | \
+  docker login --username AWS --password-stdin "${ACCOUNT_ID}.dkr.ecr.${REGION}.amazonaws.com"
 
 # Tag image for ECR
 docker tag "${REPO_NAME}:${IMAGE_TAG}" "${REPO_URI}:${IMAGE_TAG}"
 
 # Push image to ECR
-echo "Pushing image to ECR..."
-
 docker push "${REPO_URI}:${IMAGE_TAG}"
 
-echo "✅ Image pushed to ECR"
-
 # Verify image in ECR
-echo ""
-echo "Images in ECR repository:"
 aws ecr describe-images \
   --repository-name "$REPO_NAME" \
   --query 'imageDetails[*].{Tags:imageTags,Pushed:imagePushedAt,Size:imageSizeInBytes}' \
@@ -251,13 +201,7 @@ aws ecr describe-images \
 
 ```bash
 # Create ECS cluster
-echo "Creating ECS cluster..."
-
-aws ecs create-cluster \
-  --cluster-name "$CLUSTER_NAME" \
-  --region "$REGION"
-
-echo "✅ ECS cluster created"
+aws ecs create-cluster --cluster-name "$CLUSTER_NAME" --region "$REGION"
 ```
 
 ---
@@ -283,19 +227,16 @@ EOF
 
 # Create ECS task execution role
 TASK_ROLE_NAME="ecsTaskExecutionRole-lab"
-echo "TASK_ROLE_NAME=$TASK_ROLE_NAME"
 
 aws iam create-role \
   --role-name "$TASK_ROLE_NAME" \
   --assume-role-policy-document file://ecs-task-trust-policy.json \
-  2>/dev/null || echo "Role already exists"
+  2>/dev/null || true
 
 # Attach AWS managed policy
 aws iam attach-role-policy \
   --role-name "$TASK_ROLE_NAME" \
   --policy-arn arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy
-
-echo "✅ ECS task execution role created"
 
 # Create ECS instance role trust policy
 cat > ecs-instance-trust-policy.json <<'EOF'
@@ -315,35 +256,30 @@ EOF
 
 # Create ECS instance role
 INSTANCE_ROLE_NAME="ecsInstanceRole-lab"
-echo "INSTANCE_ROLE_NAME=$INSTANCE_ROLE_NAME"
 
 aws iam create-role \
   --role-name "$INSTANCE_ROLE_NAME" \
   --assume-role-policy-document file://ecs-instance-trust-policy.json \
-  2>/dev/null || echo "Role already exists"
+  2>/dev/null || true
 
 # Attach AWS managed policy for ECS instances
 aws iam attach-role-policy \
   --role-name "$INSTANCE_ROLE_NAME" \
   --policy-arn arn:aws:iam::aws:policy/service-role/AmazonEC2ContainerServiceforEC2Role
 
-# Create instance profile
+# Create instance profile and add role
 INSTANCE_PROFILE_NAME="ecsInstanceProfile-lab"
-echo "INSTANCE_PROFILE_NAME=$INSTANCE_PROFILE_NAME"
 
 aws iam create-instance-profile \
   --instance-profile-name "$INSTANCE_PROFILE_NAME" \
-  2>/dev/null || echo "Instance profile already exists"
+  2>/dev/null || true
 
-# Add role to instance profile
 aws iam add-role-to-instance-profile \
   --instance-profile-name "$INSTANCE_PROFILE_NAME" \
   --role-name "$INSTANCE_ROLE_NAME" \
-  2>/dev/null || echo "Role already in profile"
+  2>/dev/null || true
 
-echo "✅ ECS instance role and profile created"
-
-# Wait for role propagation
+# Wait for IAM role propagation
 sleep 10
 ```
 
@@ -362,8 +298,6 @@ echo "VPC_ID=$VPC_ID"
 
 # Create security group
 SG_NAME="ecs-joke-api-sg"
-echo "SG_NAME=$SG_NAME"
-
 SG_ID=$(aws ec2 create-security-group \
   --group-name "$SG_NAME" \
   --description "Security group for ECS joke API" \
@@ -373,7 +307,7 @@ SG_ID=$(aws ec2 create-security-group \
   --output text)
 echo "SG_ID=$SG_ID"
 
-# Allow HTTP traffic
+# Allow HTTP traffic from anywhere
 aws ec2 authorize-security-group-ingress \
   --group-id "$SG_ID" \
   --protocol tcp \
@@ -388,9 +322,7 @@ aws ec2 authorize-security-group-ingress \
   --port 22 \
   --cidr 0.0.0.0/0 \
   --region "$REGION" \
-  2>/dev/null || echo "SSH rule may already exist"
-
-echo "✅ Security group created with HTTP access"
+  2>/dev/null || true
 ```
 
 ---
@@ -398,31 +330,27 @@ echo "✅ Security group created with HTTP access"
 ## Step 10 – Launch ECS EC2 Instance
 
 ```bash
-# Get ECS-optimized AMI ID
+# Get ECS-optimized AMI ID for Amazon Linux 2
 ECS_AMI=$(aws ssm get-parameter \
   --name /aws/service/ecs/optimized-ami/amazon-linux-2/recommended/image_id \
   --query 'Parameter.Value' \
   --output text \
   --region "$REGION")
-echo "ECS_AMI=$ECS_AMI"
 
-# Get subnet ID
+# Get first available subnet
 SUBNET_ID=$(aws ec2 describe-subnets \
   --filters "Name=vpc-id,Values=$VPC_ID" \
   --query 'Subnets[0].SubnetId' \
   --output text \
   --region "$REGION")
-echo "SUBNET_ID=$SUBNET_ID"
 
-# Create user data for ECS instance
+# Create user data to register instance with ECS cluster
 cat > ecs-user-data.sh <<EOF
 #!/bin/bash
 echo ECS_CLUSTER=${CLUSTER_NAME} >> /etc/ecs/ecs.config
 EOF
 
 # Launch EC2 instance for ECS
-echo "Launching ECS EC2 instance..."
-
 INSTANCE_ID=$(aws ec2 run-instances \
   --image-id "$ECS_AMI" \
   --instance-type "$INSTANCE_TYPE" \
@@ -436,8 +364,7 @@ INSTANCE_ID=$(aws ec2 run-instances \
   --output text)
 echo "INSTANCE_ID=$INSTANCE_ID"
 
-echo "✅ ECS EC2 instance launched"
-echo "Waiting for instance to join cluster (this takes ~2 minutes)..."
+# Wait for instance to join cluster (~2 minutes)
 sleep 120
 ```
 
@@ -451,7 +378,6 @@ TASK_ROLE_ARN=$(aws iam get-role \
   --role-name "$TASK_ROLE_NAME" \
   --query 'Role.Arn' \
   --output text)
-echo "TASK_ROLE_ARN=$TASK_ROLE_ARN"
 
 # Create task definition JSON
 cat > task-definition.json <<EOF
@@ -481,13 +407,9 @@ cat > task-definition.json <<EOF
 EOF
 
 # Register task definition
-echo "Registering task definition..."
-
 aws ecs register-task-definition \
   --cli-input-json file://task-definition.json \
   --region "$REGION"
-
-echo "✅ Task definition registered"
 ```
 
 ---
@@ -495,9 +417,7 @@ echo "✅ Task definition registered"
 ## Step 12 – Create ECS Service
 
 ```bash
-# Create ECS service
-echo "Creating ECS service..."
-
+# Create ECS service with 1 task
 aws ecs create-service \
   --cluster "$CLUSTER_NAME" \
   --service-name "$SERVICE_NAME" \
@@ -506,8 +426,7 @@ aws ecs create-service \
   --launch-type EC2 \
   --region "$REGION"
 
-echo "✅ ECS service created"
-echo "Waiting for service to stabilize (this takes ~2 minutes)..."
+# Wait for service to stabilize (~2 minutes)
 sleep 120
 ```
 
@@ -525,37 +444,28 @@ PUBLIC_IP=$(aws ec2 describe-instances \
 echo "PUBLIC_IP=$PUBLIC_IP"
 
 echo ""
-echo "================================================"
-echo "JOKE API DEPLOYED"
-echo "================================================"
-echo ""
 echo "API Base URL: http://${PUBLIC_IP}"
-echo ""
-echo "Testing endpoints..."
 echo ""
 
 # Test welcome endpoint
-echo "1. Testing / (welcome):"
+echo "Testing / (welcome):"
 curl -s "http://${PUBLIC_IP}/" | python3 -m json.tool
 echo ""
 
 # Test random joke endpoint
-echo "2. Testing /joke (random joke):"
+echo "Testing /joke (random joke):"
 curl -s "http://${PUBLIC_IP}/joke" | python3 -m json.tool
 echo ""
 
 # Test all jokes endpoint
-echo "3. Testing /jokes (all jokes):"
+echo "Testing /jokes (all jokes):"
 curl -s "http://${PUBLIC_IP}/jokes" | python3 -m json.tool
 echo ""
 
-echo "================================================"
-echo "✅ All endpoints working!"
-echo ""
-echo "Try in browser:"
-echo "  http://${PUBLIC_IP}/"
-echo "  http://${PUBLIC_IP}/joke"
-echo "  http://${PUBLIC_IP}/jokes"
+# Open API in browser
+"$BROWSER" "http://${PUBLIC_IP}/"
+"$BROWSER" "http://${PUBLIC_IP}/joke"
+"$BROWSER" "http://${PUBLIC_IP}/jokes"
 ```
 
 ---
@@ -563,16 +473,14 @@ echo "  http://${PUBLIC_IP}/jokes"
 ## Step 14 – View ECS Service Status
 
 ```bash
-echo ""
-echo "ECS Cluster Status:"
+# View ECS cluster status
 aws ecs describe-clusters \
   --clusters "$CLUSTER_NAME" \
   --query 'clusters[0].{Name:clusterName,RegisteredInstances:registeredContainerInstancesCount,RunningTasks:runningTasksCount}' \
   --output table \
   --region "$REGION"
 
-echo ""
-echo "ECS Service Status:"
+# View ECS service status
 aws ecs describe-services \
   --cluster "$CLUSTER_NAME" \
   --services "$SERVICE_NAME" \
@@ -580,8 +488,7 @@ aws ecs describe-services \
   --output table \
   --region "$REGION"
 
-echo ""
-echo "Running Tasks:"
+# List running tasks
 aws ecs list-tasks \
   --cluster "$CLUSTER_NAME" \
   --query 'taskArns' \
@@ -594,11 +501,7 @@ aws ecs list-tasks \
 ## Step 15 – Cleanup Resources
 
 ```bash
-echo ""
-echo "Cleaning up resources..."
-
-# Delete ECS service
-echo "Deleting ECS service..."
+# Scale down and delete ECS service
 aws ecs update-service \
   --cluster "$CLUSTER_NAME" \
   --service "$SERVICE_NAME" \
@@ -611,11 +514,9 @@ aws ecs delete-service \
   --force \
   --region "$REGION"
 
-echo "Waiting for service to drain..."
 sleep 30
 
 # Deregister task definition
-echo "Deregistering task definition..."
 TASK_DEF_ARN=$(aws ecs list-task-definitions \
   --family-prefix "$TASK_FAMILY" \
   --query 'taskDefinitionArns[0]' \
@@ -627,35 +528,19 @@ aws ecs deregister-task-definition \
   --region "$REGION"
 
 # Terminate EC2 instance
-echo "Terminating EC2 instance..."
-aws ec2 terminate-instances \
-  --instance-ids "$INSTANCE_ID" \
-  --region "$REGION"
-
-echo "Waiting for instance to terminate..."
+aws ec2 terminate-instances --instance-ids "$INSTANCE_ID" --region "$REGION"
 sleep 30
 
 # Delete ECS cluster
-echo "Deleting ECS cluster..."
-aws ecs delete-cluster \
-  --cluster "$CLUSTER_NAME" \
-  --region "$REGION"
+aws ecs delete-cluster --cluster "$CLUSTER_NAME" --region "$REGION"
 
 # Delete security group
-echo "Deleting security group..."
-aws ec2 delete-security-group \
-  --group-id "$SG_ID" \
-  --region "$REGION"
+aws ec2 delete-security-group --group-id "$SG_ID" --region "$REGION"
 
-# Delete ECR repository
-echo "Deleting ECR repository..."
-aws ecr delete-repository \
-  --repository-name "$REPO_NAME" \
-  --force \
-  --region "$REGION"
+# Delete ECR repository (force delete with all images)
+aws ecr delete-repository --repository-name "$REPO_NAME" --force --region "$REGION"
 
-# Remove instance profile
-echo "Removing IAM instance profile..."
+# Remove instance profile and role association
 aws iam remove-role-from-instance-profile \
   --instance-profile-name "$INSTANCE_PROFILE_NAME" \
   --role-name "$INSTANCE_ROLE_NAME" \
@@ -666,7 +551,6 @@ aws iam delete-instance-profile \
   2>/dev/null || true
 
 # Detach and delete IAM roles
-echo "Cleaning up IAM roles..."
 aws iam detach-role-policy \
   --role-name "$TASK_ROLE_NAME" \
   --policy-arn arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy \
@@ -677,31 +561,13 @@ aws iam detach-role-policy \
   --policy-arn arn:aws:iam::aws:policy/service-role/AmazonEC2ContainerServiceforEC2Role \
   2>/dev/null || true
 
-aws iam delete-role \
-  --role-name "$TASK_ROLE_NAME" \
-  2>/dev/null || true
-
-aws iam delete-role \
-  --role-name "$INSTANCE_ROLE_NAME" \
-  2>/dev/null || true
+aws iam delete-role --role-name "$TASK_ROLE_NAME" 2>/dev/null || true
+aws iam delete-role --role-name "$INSTANCE_ROLE_NAME" 2>/dev/null || true
 
 # Delete local files
-echo "Cleaning up local files..."
 rm -rf joke-api
 rm -f ecs-task-trust-policy.json ecs-instance-trust-policy.json
 rm -f ecs-user-data.sh task-definition.json
-
-echo ""
-echo "✅ Cleanup completed successfully!"
-echo ""
-echo "All resources deleted:"
-echo "- ECS service and cluster"
-echo "- EC2 instance"
-echo "- Task definition"
-echo "- Security group"
-echo "- ECR repository and image"
-echo "- IAM roles and policies"
-echo "- Local files"
 ```
 
 ---
@@ -741,11 +607,3 @@ Build Image → Push to ECR → Define Task → Launch Instance → Run Service
 - Use health checks for production deployments
 
 ---
-
-## Free Tier Notes
-- **EC2 t2.micro**: 750 hours/month (free tier)
-- **ECR Storage**: 500 MB/month (free for 12 months)
-- **ECS**: No additional charge for ECS itself
-- **Data Transfer**: 15 GB outbound per month
-
-This lab uses 1 t2.micro instance and minimal ECR storage, staying within free tier limits.
