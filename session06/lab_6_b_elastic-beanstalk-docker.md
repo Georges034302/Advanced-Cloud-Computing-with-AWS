@@ -313,13 +313,12 @@ aws elasticbeanstalk describe-environments \
   --region "$REGION" 2>/dev/null || echo "Environment terminated"
 
 # Clean up S3 bucket contents before deleting application
-aws s3 rm s3://elasticbeanstalk-${REGION}-${ACCOUNT_ID} --recursive
-
-# Delete the s3 bucket
-aws s3 rb s3://elasticbeanstalk-${REGION}-${ACCOUNT_ID}
+aws s3 rm s3://elasticbeanstalk-${REGION}-$(aws sts get-caller-identity --query Account --output text)/ --recursive
 
 # Delete application
 aws elasticbeanstalk delete-application --application-name "$APP_NAME" --region "$REGION"
+
+# Note: S3 bucket cannot be deleted due to AWS-managed bucket policy (this is normal)
 
 # Clean up local files
 cd ..

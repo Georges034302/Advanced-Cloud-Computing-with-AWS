@@ -250,6 +250,26 @@ aws iam attach-role-policy \
   --role-name "$TASK_ROLE_NAME" \
   --policy-arn arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy
 
+# Add CloudWatch Logs permissions for log group creation
+aws iam put-role-policy \
+  --role-name "$TASK_ROLE_NAME" \
+  --policy-name CloudWatchLogsPolicy \
+  --policy-document '{
+    "Version": "2012-10-17",
+    "Statement": [
+      {
+        "Effect": "Allow",
+        "Action": [
+          "logs:CreateLogGroup",
+          "logs:CreateLogStream",
+          "logs:PutLogEvents"
+        ],
+        "Resource": "*"
+      }
+    ]
+  }'
+```
+```bash
 # Get role ARN
 TASK_ROLE_ARN=$(aws iam get-role \
   --role-name "$TASK_ROLE_NAME" \
@@ -502,8 +522,14 @@ aws ecs deregister-task-definition \
   --task-definition "$TASK_DEF_ARN" \
   --region "$REGION"
 
+# Verify services are deleted before deleting cluster
+aws ecs list-services --cluster "$CLUSTER_NAME" --region "$REGION"
+
 # Delete ECS cluster
 aws ecs delete-cluster --cluster "$CLUSTER_NAME" --region "$REGION"
+
+# Verify cluster deletion
+aws ecs describe-clusters --clusters "$CLUSTER_NAME" --region "$REGION" --query 'clusters[0].status' --output text
 
 # Delete security group
 aws ec2 delete-security-group --group-id "$SG_ID" --region "$REGION"
@@ -512,6 +538,8 @@ aws ec2 delete-security-group --group-id "$SG_ID" --region "$REGION"
 aws ecr delete-repository --repository-name "$REPO_NAME" --force --region "$REGION"
 
 # Delete IAM role
+aws iam delete-role-policy --role-name "$TASK_ROLE_NAME" --policy-name CloudWatchLogsPolicy
+
 aws iam detach-role-policy \
   --role-name "$TASK_ROLE_NAME" \
   --policy-arn arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy
@@ -522,7 +550,7 @@ aws iam delete-role --role-name "$TASK_ROLE_NAME"
 aws logs delete-log-group --log-group-name "/ecs/${TASK_FAMILY}" --region "$REGION" 2>/dev/null || true
 
 # Delete local files
-cd ..
+cd /workspaces/Advanced-Cloud-Computing-with-AWS/session06
 rm -rf joke-api-fargate
 rm -f fargate-task-trust-policy.json fargate-task-definition.json
 
