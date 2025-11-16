@@ -29,34 +29,20 @@ This lab demonstrates how to deploy a containerized Python Flask API to Amazon E
 ## Step 1 – Set Variables and Verify Prerequisites
 
 ```bash
-# Get AWS account ID
-ACCOUNT_ID=$(aws sts get-caller-identity \
-  --query Account \
-  --output text)
-echo "ACCOUNT_ID=$ACCOUNT_ID"
-
-# Set region
+# Get AWS account ID and set region
+ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
 REGION="ap-southeast-2"
-echo "REGION=$REGION"
 
 # Set resource names
 REPO_NAME="joke-api-fargate"
-echo "REPO_NAME=$REPO_NAME"
-
 IMAGE_TAG="latest"
-echo "IMAGE_TAG=$IMAGE_TAG"
-
 CLUSTER_NAME="lab-fargate-cluster"
-echo "CLUSTER_NAME=$CLUSTER_NAME"
-
 TASK_FAMILY="joke-api-fargate-task"
-echo "TASK_FAMILY=$TASK_FAMILY"
-
 SERVICE_NAME="joke-api-fargate-service"
-echo "SERVICE_NAME=$SERVICE_NAME"
-
 CONTAINER_NAME="joke-api"
-echo "CONTAINER_NAME=$CONTAINER_NAME"
+
+echo "ACCOUNT_ID=$ACCOUNT_ID"
+echo "REGION=$REGION"
 
 # Verify Docker is running
 docker --version || { echo "❌ Docker not installed"; exit 1; }
@@ -64,8 +50,6 @@ docker --version || { echo "❌ Docker not installed"; exit 1; }
 echo ""
 echo "⚠️  COST WARNING: Fargate charges $0.04/hour minimum"
 echo "   Delete all resources after lab to minimize costs!"
-echo ""
-echo "✅ Prerequisites verified"
 ```
 
 ---
@@ -140,8 +124,6 @@ cat > requirements.txt <<'EOF'
 flask==3.0.0
 werkzeug==3.0.1
 EOF
-
-echo "✅ Flask application created"
 ```
 
 ---
@@ -170,8 +152,6 @@ EXPOSE 80
 # Run the application
 CMD ["python", "app.py"]
 EOF
-
-echo "✅ Dockerfile created"
 ```
 
 ---
@@ -180,27 +160,22 @@ echo "✅ Dockerfile created"
 
 ```bash
 # Build Docker image
-echo "Building Docker image..."
-
-docker build \
-  --tag "${REPO_NAME}:${IMAGE_TAG}" \
-  --platform linux/amd64 \
-  .
-
-echo "✅ Docker image built"
+docker build --tag "${REPO_NAME}:${IMAGE_TAG}" --platform linux/amd64 .
 
 # Test locally (optional)
-echo ""
-echo "Testing image locally on port 8080..."
 CONTAINER_ID=$(docker run -d -p 8080:80 "${REPO_NAME}:${IMAGE_TAG}")
+echo "CONTAINER_ID=$CONTAINER_ID"
+
 sleep 3
 
 curl -s http://localhost:8080/ | python3 -m json.tool
 
+# Open in browser
+"$BROWSER" "http://localhost:8080/"
+
+# Stop and remove container
 docker stop "$CONTAINER_ID"
 docker rm "$CONTAINER_ID"
-
-echo "✅ Local test successful"
 ```
 
 ---
@@ -212,8 +187,6 @@ echo "✅ Local test successful"
 cd ..
 
 # Create ECR repository
-echo "Creating ECR repository..."
-
 aws ecr create-repository \
   --repository-name "$REPO_NAME" \
   --region "$REGION" \
@@ -228,22 +201,13 @@ REPO_URI=$(aws ecr describe-repositories \
 echo "REPO_URI=$REPO_URI"
 
 # Authenticate Docker to ECR
-echo "Authenticating Docker to ECR..."
-
-aws ecr get-login-password \
-  --region "$REGION" | docker login \
+aws ecr get-login-password --region "$REGION" | docker login \
   --username AWS \
   --password-stdin "${ACCOUNT_ID}.dkr.ecr.${REGION}.amazonaws.com"
 
-# Tag image for ECR
+# Tag and push image to ECR
 docker tag "${REPO_NAME}:${IMAGE_TAG}" "${REPO_URI}:${IMAGE_TAG}"
-
-# Push image to ECR
-echo "Pushing image to ECR..."
-
 docker push "${REPO_URI}:${IMAGE_TAG}"
-
-echo "✅ Image pushed to ECR"
 ```
 
 ---
@@ -252,13 +216,7 @@ echo "✅ Image pushed to ECR"
 
 ```bash
 # Create ECS cluster (Fargate doesn't need EC2 instances)
-echo "Creating ECS Fargate cluster..."
-
-aws ecs create-cluster \
-  --cluster-name "$CLUSTER_NAME" \
-  --region "$REGION"
-
-echo "✅ ECS cluster created"
+aws ecs create-cluster --cluster-name "$CLUSTER_NAME" --region "$REGION"
 ```
 
 ---
@@ -284,7 +242,6 @@ EOF
 
 # Create ECS task execution role
 TASK_ROLE_NAME="ecsTaskExecutionRole-fargate-lab"
-echo "TASK_ROLE_NAME=$TASK_ROLE_NAME"
 
 aws iam create-role \
   --role-name "$TASK_ROLE_NAME" \
@@ -295,8 +252,6 @@ aws iam create-role \
 aws iam attach-role-policy \
   --role-name "$TASK_ROLE_NAME" \
   --policy-arn arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy
-
-echo "✅ ECS task execution role created"
 
 # Get role ARN
 TASK_ROLE_ARN=$(aws iam get-role \
@@ -324,7 +279,6 @@ echo "VPC_ID=$VPC_ID"
 
 # Create security group
 SG_NAME="fargate-joke-api-sg"
-echo "SG_NAME=$SG_NAME"
 
 SG_ID=$(aws ec2 create-security-group \
   --group-name "$SG_NAME" \
@@ -342,8 +296,6 @@ aws ec2 authorize-security-group-ingress \
   --port 80 \
   --cidr 0.0.0.0/0 \
   --region "$REGION"
-
-echo "✅ Security group created with HTTP access"
 ```
 
 ---
@@ -357,12 +309,11 @@ SUBNETS=$(aws ec2 describe-subnets \
   --query 'Subnets[0:2].SubnetId' \
   --output text \
   --region "$REGION")
-echo "SUBNETS=$SUBNETS"
 
 SUBNET1=$(echo "$SUBNETS" | awk '{print $1}')
-echo "SUBNET1=$SUBNET1"
-
 SUBNET2=$(echo "$SUBNETS" | awk '{print $2}')
+
+echo "SUBNET1=$SUBNET1"
 echo "SUBNET2=$SUBNET2"
 ```
 
@@ -406,14 +357,11 @@ cat > fargate-task-definition.json <<EOF
 EOF
 
 # Register task definition
-echo "Registering Fargate task definition..."
-
 aws ecs register-task-definition \
   --cli-input-json file://fargate-task-definition.json \
   --region "$REGION"
 
-echo "✅ Task definition registered"
-echo ""
+echo ""  
 echo "💰 Cost: Fargate task uses 0.25 vCPU + 0.5 GB = ~$0.04/hour"
 ```
 
@@ -423,8 +371,6 @@ echo "💰 Cost: Fargate task uses 0.25 vCPU + 0.5 GB = ~$0.04/hour"
 
 ```bash
 # Create ECS service with Fargate launch type
-echo "Creating Fargate service..."
-
 aws ecs create-service \
   --cluster "$CLUSTER_NAME" \
   --service-name "$SERVICE_NAME" \
@@ -434,7 +380,7 @@ aws ecs create-service \
   --network-configuration "awsvpcConfiguration={subnets=[$SUBNET1,$SUBNET2],securityGroups=[$SG_ID],assignPublicIp=ENABLED}" \
   --region "$REGION"
 
-echo "✅ Fargate service created"
+echo ""  
 echo "Waiting for task to start (this takes ~2 minutes)..."
 sleep 120
 ```
@@ -473,40 +419,32 @@ PUBLIC_IP=$(aws ec2 describe-network-interfaces \
 echo "PUBLIC_IP=$PUBLIC_IP"
 
 echo ""
-echo "================================================"
-echo "FARGATE JOKE API DEPLOYED"
-echo "================================================"
-echo ""
 echo "API Base URL: http://${PUBLIC_IP}"
 echo ""
-echo "Testing endpoints..."
-echo ""
 
-# Wait a bit more for application to be ready
+# Wait for application to be ready
 sleep 10
 
 # Test welcome endpoint
-echo "1. Testing / (welcome):"
+echo "Testing / (welcome):"
 curl -s "http://${PUBLIC_IP}/" | python3 -m json.tool
 echo ""
 
 # Test random joke endpoint
-echo "2. Testing /joke (random joke):"
+echo "Testing /joke (random joke):"
 curl -s "http://${PUBLIC_IP}/joke" | python3 -m json.tool
 echo ""
 
 # Test all jokes endpoint
-echo "3. Testing /jokes (all jokes):"
+echo "Testing /jokes (all jokes):"
 curl -s "http://${PUBLIC_IP}/jokes" | python3 -m json.tool
 echo ""
 
-echo "================================================"
-echo "✅ All endpoints working!"
-echo ""
-echo "Try in browser:"
-echo "  http://${PUBLIC_IP}/"
-echo "  http://${PUBLIC_IP}/joke"
-echo "  http://${PUBLIC_IP}/jokes"
+# Open in browser
+"$BROWSER" "http://${PUBLIC_IP}/"
+"$BROWSER" "http://${PUBLIC_IP}/joke"
+"$BROWSER" "http://${PUBLIC_IP}/jokes"
+
 echo ""
 echo "💰 Remember: You're being charged ~$0.04/hour while running"
 ```
@@ -516,16 +454,14 @@ echo "💰 Remember: You're being charged ~$0.04/hour while running"
 ## Step 13 – View Fargate Service Status
 
 ```bash
-echo ""
-echo "ECS Cluster Status:"
+# View cluster status
 aws ecs describe-clusters \
   --clusters "$CLUSTER_NAME" \
   --query 'clusters[0].{Name:clusterName,RunningTasks:runningTasksCount,PendingTasks:pendingTasksCount}' \
   --output table \
   --region "$REGION"
 
-echo ""
-echo "Fargate Service Status:"
+# View service status
 aws ecs describe-services \
   --cluster "$CLUSTER_NAME" \
   --services "$SERVICE_NAME" \
@@ -533,8 +469,7 @@ aws ecs describe-services \
   --output table \
   --region "$REGION"
 
-echo ""
-echo "Running Tasks:"
+# View running tasks
 aws ecs list-tasks \
   --cluster "$CLUSTER_NAME" \
   --service-name "$SERVICE_NAME" \
@@ -548,11 +483,7 @@ aws ecs list-tasks \
 ## Step 14 – Cleanup Resources (IMPORTANT!)
 
 ```bash
-echo ""
-echo "⚠️  CLEANUP - Stopping charges immediately..."
-
 # Delete ECS service
-echo "Deleting Fargate service..."
 aws ecs update-service \
   --cluster "$CLUSTER_NAME" \
   --service "$SERVICE_NAME" \
@@ -565,11 +496,9 @@ aws ecs delete-service \
   --force \
   --region "$REGION"
 
-echo "Waiting for tasks to stop..."
 sleep 60
 
 # Deregister task definition
-echo "Deregistering task definition..."
 TASK_DEF_ARN=$(aws ecs list-task-definitions \
   --family-prefix "$TASK_FAMILY" \
   --query 'taskDefinitionArns[0]' \
@@ -581,59 +510,31 @@ aws ecs deregister-task-definition \
   --region "$REGION"
 
 # Delete ECS cluster
-echo "Deleting ECS cluster..."
-aws ecs delete-cluster \
-  --cluster "$CLUSTER_NAME" \
-  --region "$REGION"
+aws ecs delete-cluster --cluster "$CLUSTER_NAME" --region "$REGION"
 
 # Delete security group
-echo "Deleting security group..."
-aws ec2 delete-security-group \
-  --group-id "$SG_ID" \
-  --region "$REGION"
+aws ec2 delete-security-group --group-id "$SG_ID" --region "$REGION"
 
 # Delete ECR repository
-echo "Deleting ECR repository..."
-aws ecr delete-repository \
-  --repository-name "$REPO_NAME" \
-  --force \
-  --region "$REGION"
+aws ecr delete-repository --repository-name "$REPO_NAME" --force --region "$REGION"
 
 # Delete IAM role
-echo "Cleaning up IAM role..."
 aws iam detach-role-policy \
   --role-name "$TASK_ROLE_NAME" \
   --policy-arn arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy
 
-aws iam delete-role \
-  --role-name "$TASK_ROLE_NAME"
+aws iam delete-role --role-name "$TASK_ROLE_NAME"
 
 # Delete CloudWatch log group
-echo "Deleting CloudWatch logs..."
-aws logs delete-log-group \
-  --log-group-name "/ecs/${TASK_FAMILY}" \
-  --region "$REGION" \
-  2>/dev/null || true
+aws logs delete-log-group --log-group-name "/ecs/${TASK_FAMILY}" --region "$REGION" 2>/dev/null || true
 
 # Delete local files
-echo "Cleaning up local files..."
 cd ..
 rm -rf joke-api-fargate
 rm -f fargate-task-trust-policy.json fargate-task-definition.json
 
 echo ""
-echo "✅ Cleanup completed successfully!"
-echo ""
-echo "All resources deleted:"
-echo "- Fargate service (charges stopped)"
-echo "- ECS cluster"
-echo "- Task definition"
-echo "- Security group"
-echo "- ECR repository and image"
-echo "- IAM role"
-echo "- CloudWatch logs"
-echo "- Local files"
-echo ""
+echo "✅ Cleanup completed - all resources deleted"
 echo "💰 Fargate charges stopped!"
 ```
 
