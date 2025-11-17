@@ -1,4 +1,5 @@
 # Lab 7.A: Build Serverless REST API with Lambda and API Gateway
+<img width="1536" height="1024" alt="IMG" src="https://github.com/user-attachments/assets/e428ac24-057a-47c7-92d2-7f7cc8cc7ee3" />
 
 ## Overview
 This lab demonstrates how to build a serverless REST API using AWS Lambda and API Gateway. You'll create a simple Python joke API with Lambda functions, expose it through API Gateway HTTP API (publicly accessible), and test all endpoints. This serverless architecture requires zero infrastructure management and scales automatically.
