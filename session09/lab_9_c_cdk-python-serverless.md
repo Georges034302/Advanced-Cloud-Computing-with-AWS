@@ -26,6 +26,23 @@ This lab introduces AWS Cloud Development Kit (CDK) using Python to deploy a ser
 
 ---
 
+## Architecture
+
+```
+API Gateway HTTP API
+  ├── GET  /items         → List all items (Lambda → DynamoDB Scan)
+  └── POST /items         → Create item (Lambda → DynamoDB Put)
+
+Lambda Function
+  └── Python 3.11 runtime
+  └── Environment: TABLE_NAME
+
+DynamoDB Table
+  └── items-table (id: String - primary key)
+```
+
+---
+
 ## Step 1 – Install AWS CDK CLI
 
 ```bash
