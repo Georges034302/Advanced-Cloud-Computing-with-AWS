@@ -1,4 +1,5 @@
 # Lab 7.C: Create an event-driven workflow using SQS and Lambda consumers
+<img width="1424" height="765" alt="IMG" src="https://github.com/user-attachments/assets/e610a0e2-185b-40cf-bf40-ec7e84fb80c5" />
 
 ## Overview
 Build a resilient event-driven workflow using Amazon SQS queues and AWS Lambda consumers. This lab covers standard and FIFO queues, Dead-Letter Queues (DLQs), Lambda event source mappings, batch processing, visibility timeout tuning, idempotency, retries/DLQs, monitoring, and cleanup.
