@@ -1,4 +1,5 @@
 # Lab 10.C: GitHub Actions + AWS - Serverless CI/CD
+<img width="1536" height="1024" alt="IMG" src="https://github.com/user-attachments/assets/0923f59f-51b9-40b7-bc7f-82c31b4a5879" />
 
 ## Overview
 This lab demonstrates CI/CD using GitHub Actions to deploy serverless applications to AWS. You'll create a GitHub repository, configure GitHub Actions workflows to automatically deploy a Lambda function and static website to S3 on every git push, using OpenID Connect (OIDC) for secure authentication.
