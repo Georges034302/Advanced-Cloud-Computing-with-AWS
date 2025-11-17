@@ -25,14 +25,6 @@ Deploy a two-tier VPC architecture using CloudFormation Infrastructure as Code. 
 
 ---
 
-## Architecture
-
-```
-Internet → Classic Load Balancer → Web Server (public) → Backend API (private)
-```
-
----
-
 ## Step 1 – Create CloudFormation Template
 
 ```bash

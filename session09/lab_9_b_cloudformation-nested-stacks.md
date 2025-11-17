@@ -24,18 +24,6 @@ This lab demonstrates advanced CloudFormation patterns using nested stacks for m
 
 ---
 
-## Architecture
-
-```
-Parent Stack
-  ├── Network Stack (VPC, Subnets, IGW, Routes)
-  │     └── Exports: VPC-ID, Subnet-ID
-  └── Compute Stack (EC2 Instance)
-        └── Imports: VPC-ID, Subnet-ID from Network Stack
-```
-
----
-
 ## Step 1 – Set Variables and Create Project Directory
 
 ```bash
