@@ -1,4 +1,5 @@
 # Lab 9.B: CloudFormation Nested Stacks and Change Sets
+<img width="1024" height="863" alt="IMG" src="https://github.com/user-attachments/assets/8dee6ae2-10fd-4a81-8886-4d79835d4b79" />
 
 ## Overview
 This lab demonstrates advanced CloudFormation patterns using nested stacks for modular infrastructure and Change Sets for safe deployments. You'll create a parent stack that references child stacks (network and compute), use cross-stack exports, preview changes with Change Sets before applying, and detect configuration drift.
