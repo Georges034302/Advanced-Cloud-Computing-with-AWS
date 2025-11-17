@@ -22,31 +22,18 @@ Build a resilient event-driven workflow using Amazon SQS queues and AWS Lambda c
 ## Step 1 – Set Variables and Verify Prerequisites
 
 ```bash
-# Get AWS account ID
-ACCOUNT_ID=$(aws sts get-caller-identity \
-  --query Account \
-  --output text)
-echo "ACCOUNT_ID=$ACCOUNT_ID"
-
-# Set region
+# Get AWS account ID and set region
+ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
 REGION="ap-southeast-2"
-echo "REGION=$REGION"
 
 # Set resource names
 QUEUE_NAME="order-processing-queue"
-echo "QUEUE_NAME=$QUEUE_NAME"
-
 DLQ_NAME="order-processing-dlq"
-echo "DLQ_NAME=$DLQ_NAME"
-
 FUNCTION_NAME="sqs-order-processor"
-echo "FUNCTION_NAME=$FUNCTION_NAME"
-
 ROLE_NAME="lambda-sqs-processor-role"
-echo "ROLE_NAME=$ROLE_NAME"
 
-echo ""
-echo "✅ Prerequisites verified"
+echo "ACCOUNT_ID=$ACCOUNT_ID"
+echo "REGION=$REGION"
 ```
 
 ---
@@ -54,26 +41,23 @@ echo "✅ Prerequisites verified"
 ## Step 2 – Create Dead Letter Queue (DLQ)
 
 ```bash
-# Create DLQ for failed messages
-echo "Creating Dead Letter Queue..."
-
+# Create Dead Letter Queue for failed messages after max retries
 DLQ_URL=$(aws sqs create-queue \
   --queue-name "$DLQ_NAME" \
   --region "$REGION" \
   --query QueueUrl \
   --output text)
-echo "DLQ_URL=$DLQ_URL"
 
-# Get DLQ ARN
+# Get DLQ ARN (needed for main queue's redrive policy)
 DLQ_ARN=$(aws sqs get-queue-attributes \
   --queue-url "$DLQ_URL" \
   --attribute-names QueueArn \
   --region "$REGION" \
   --query Attributes.QueueArn \
   --output text)
-echo "DLQ_ARN=$DLQ_ARN"
 
-echo "✅ Dead Letter Queue created"
+echo "DLQ_URL=$DLQ_URL"
+echo "DLQ_ARN=$DLQ_ARN"
 ```
 
 ---
@@ -81,27 +65,24 @@ echo "✅ Dead Letter Queue created"
 ## Step 3 – Create Main SQS Queue with DLQ
 
 ```bash
-# Create main queue with RedrivePolicy pointing to DLQ
-echo "Creating main SQS queue..."
-
+# Create main SQS queue with RedrivePolicy (sends to DLQ after 3 failed attempts)
 QUEUE_URL=$(aws sqs create-queue \
   --queue-name "$QUEUE_NAME" \
   --region "$REGION" \
   --attributes '{"RedrivePolicy":"{\"maxReceiveCount\":\"3\",\"deadLetterTargetArn\":\"'"$DLQ_ARN"'\"}"}' \
   --query QueueUrl \
   --output text)
-echo "QUEUE_URL=$QUEUE_URL"
 
-# Get Queue ARN
+# Get Queue ARN (needed for Lambda event source mapping)
 QUEUE_ARN=$(aws sqs get-queue-attributes \
   --queue-url "$QUEUE_URL" \
   --attribute-names QueueArn \
   --region "$REGION" \
   --query Attributes.QueueArn \
   --output text)
-echo "QUEUE_ARN=$QUEUE_ARN"
 
-echo "✅ Main queue created with DLQ redrive policy (max 3 retries)"
+echo "QUEUE_URL=$QUEUE_URL"
+echo "QUEUE_ARN=$QUEUE_ARN"
 ```
 
 **Note**: Messages will move to DLQ after 3 failed processing attempts.
@@ -127,15 +108,13 @@ cat > lambda-trust-policy.json <<'EOF'
 }
 EOF
 
-# Create IAM role
-echo "Creating IAM role..."
-
+# Create IAM role for Lambda service
 aws iam create-role \
   --role-name "$ROLE_NAME" \
   --assume-role-policy-document file://lambda-trust-policy.json \
   --description "Execution role for SQS Lambda processor"
 
-# Create inline policy for SQS access
+# Create permissions policy for SQS access and CloudWatch logs
 cat > lambda-sqs-policy.json <<EOF
 {
   "Version": "2012-10-17",
@@ -163,23 +142,20 @@ cat > lambda-sqs-policy.json <<EOF
 }
 EOF
 
-# Attach inline policy
+# Attach inline policy to role
 aws iam put-role-policy \
   --role-name "$ROLE_NAME" \
   --policy-name "LambdaSQSPolicy" \
   --policy-document file://lambda-sqs-policy.json
 
-echo "✅ IAM role created with SQS permissions"
-
-# Get role ARN
+# Get role ARN for Lambda function creation
 ROLE_ARN=$(aws iam get-role \
   --role-name "$ROLE_NAME" \
   --query 'Role.Arn' \
   --output text)
 echo "ROLE_ARN=$ROLE_ARN"
 
-# Wait for IAM role to propagate
-echo "Waiting for IAM role to propagate..."
+# Wait for IAM role to propagate globally
 sleep 10
 ```
 
@@ -280,8 +256,6 @@ def process_order(order_data):
     # In production: call payment API, send email, update database, etc.
     pass
 EOF
-
-echo "✅ Lambda function code created"
 ```
 
 ---
@@ -289,16 +263,11 @@ echo "✅ Lambda function code created"
 ## Step 6 – Package and Deploy Lambda Function
 
 ```bash
-# Create deployment package
-echo "Creating deployment package..."
+# Create deployment package with Python code
 zip lambda-function.zip lambda_function.py
-
-# Return to parent directory
 cd ..
 
-# Create Lambda function
-echo "Creating Lambda function..."
-
+# Create Lambda function with Python 3.12 runtime
 aws lambda create-function \
   --function-name "$FUNCTION_NAME" \
   --runtime python3.12 \
@@ -310,9 +279,7 @@ aws lambda create-function \
   --description "Process order messages from SQS queue" \
   --region "$REGION"
 
-echo "✅ Lambda function created"
-
-# Get function ARN
+# Get function ARN for event source mapping
 FUNCTION_ARN=$(aws lambda get-function \
   --function-name "$FUNCTION_NAME" \
   --query 'Configuration.FunctionArn' \
@@ -326,9 +293,7 @@ echo "FUNCTION_ARN=$FUNCTION_ARN"
 ## Step 7 – Create Event Source Mapping (SQS → Lambda)
 
 ```bash
-# Configure Lambda to poll SQS queue
-echo "Creating event source mapping..."
-
+# Configure Lambda to automatically poll SQS queue and process messages in batches
 MAPPING_UUID=$(aws lambda create-event-source-mapping \
   --function-name "$FUNCTION_NAME" \
   --batch-size 10 \
@@ -340,14 +305,6 @@ MAPPING_UUID=$(aws lambda create-event-source-mapping \
   --query 'UUID' \
   --output text)
 echo "MAPPING_UUID=$MAPPING_UUID"
-
-echo "✅ Event source mapping created"
-echo ""
-echo "Configuration:"
-echo "  - Batch size: 10 messages"
-echo "  - Batching window: 5 seconds"
-echo "  - Partial batch response: Enabled"
-echo "  - Failed messages: Sent to DLQ after 3 attempts"
 ```
 
 **Event Source Mapping**: Lambda polls the SQS queue automatically and invokes the function with batches of messages.
@@ -357,42 +314,23 @@ echo "  - Failed messages: Sent to DLQ after 3 attempts"
 ## Step 8 – Send Test Messages to Queue
 
 ```bash
-echo ""
-echo "================================================"
-echo "SENDING TEST MESSAGES TO SQS"
-echo "================================================"
-echo ""
-
-# Send order messages
-echo "Sending order messages..."
-
-# Order 1
+# Send test order messages to SQS queue (Lambda will process automatically)
 aws sqs send-message \
   --queue-url "$QUEUE_URL" \
   --message-body '{"order_id":"ORD-001","customer":"Alice Johnson","amount":99.99,"items":["Laptop"]}' \
   --region "$REGION"
 
-echo "✅ Sent order ORD-001"
-
-# Order 2
 aws sqs send-message \
   --queue-url "$QUEUE_URL" \
   --message-body '{"order_id":"ORD-002","customer":"Bob Smith","amount":49.99,"items":["Keyboard","Mouse"]}' \
   --region "$REGION"
 
-echo "✅ Sent order ORD-002"
-
-# Order 3
 aws sqs send-message \
   --queue-url "$QUEUE_URL" \
   --message-body '{"order_id":"ORD-003","customer":"Charlie Brown","amount":149.99,"items":["Monitor"]}' \
   --region "$REGION"
 
-echo "✅ Sent order ORD-003"
-
-echo ""
-echo "Lambda function will process messages automatically..."
-echo "Waiting 10 seconds for processing..."
+# Wait for Lambda to poll and process messages
 sleep 10
 ```
 
@@ -401,10 +339,7 @@ sleep 10
 ## Step 9 – Verify Lambda Execution
 
 ```bash
-echo ""
-echo "Checking Lambda logs..."
-
-# Get latest log stream
+# Get latest log stream from Lambda execution
 LOG_STREAM=$(aws logs describe-log-streams \
   --log-group-name "/aws/lambda/$FUNCTION_NAME" \
   --order-by LastEventTime \
@@ -417,8 +352,7 @@ LOG_STREAM=$(aws logs describe-log-streams \
 
 if [ -n "$LOG_STREAM" ]; then
     echo "LOG_STREAM=$LOG_STREAM"
-    echo ""
-    echo "Recent Lambda execution logs:"
+    # Display recent Lambda execution logs showing message processing
     aws logs get-log-events \
       --log-group-name "/aws/lambda/$FUNCTION_NAME" \
       --log-stream-name "$LOG_STREAM" \
@@ -436,10 +370,7 @@ fi
 ## Step 10 – Check Queue Status
 
 ```bash
-echo ""
-echo "Checking SQS queue status..."
-
-# Get queue attributes
+# Check main queue status (should be empty after processing)
 aws sqs get-queue-attributes \
   --queue-url "$QUEUE_URL" \
   --attribute-names All \
@@ -447,10 +378,7 @@ aws sqs get-queue-attributes \
   --query 'Attributes.{"Messages Available":ApproximateNumberOfMessages,"Messages In Flight":ApproximateNumberOfMessagesNotVisible,"Messages Delayed":ApproximateNumberOfMessagesDelayed}' \
   --output table
 
-echo ""
-echo "Checking Dead Letter Queue..."
-
-# Get DLQ attributes
+# Check Dead Letter Queue for failed messages
 aws sqs get-queue-attributes \
   --queue-url "$DLQ_URL" \
   --attribute-names All \
@@ -464,9 +392,7 @@ aws sqs get-queue-attributes \
 ## Step 11 – View Event Source Mapping Details
 
 ```bash
-echo ""
-echo "Event Source Mapping Configuration:"
-
+# View event source mapping configuration details
 aws lambda get-event-source-mapping \
   --uuid "$MAPPING_UUID" \
   --region "$REGION" \
@@ -479,24 +405,16 @@ aws lambda get-event-source-mapping \
 ## Step 12 – Test Error Handling (Optional)
 
 ```bash
-echo ""
-echo "Testing error handling with invalid message..."
-
-# Send invalid JSON to trigger error
+# Send invalid JSON message to test error handling and DLQ behavior
 aws sqs send-message \
   --queue-url "$QUEUE_URL" \
   --message-body 'INVALID-JSON-DATA' \
   --region "$REGION"
 
-echo "✅ Sent invalid message"
-echo "This message will fail processing and retry 3 times before moving to DLQ"
-echo "Waiting 15 seconds..."
+# Wait for Lambda to retry 3 times and move message to DLQ
 sleep 15
 
-# Check DLQ for failed message
-echo ""
-echo "Checking DLQ for failed messages..."
-
+# Check DLQ for the failed message
 aws sqs receive-message \
   --queue-url "$DLQ_URL" \
   --max-number-of-messages 10 \
@@ -510,28 +428,20 @@ aws sqs receive-message \
 ## Step 13 – Cleanup Resources
 
 ```bash
-echo ""
-echo "Cleaning up resources..."
-
-# Delete event source mapping
-echo "Deleting event source mapping..."
+# Delete event source mapping (stops Lambda from polling SQS)
 aws lambda delete-event-source-mapping \
   --uuid "$MAPPING_UUID" \
   --region "$REGION"
 
-# Wait for mapping to be deleted
-echo "Waiting for event source mapping to be deleted..."
+# Wait for mapping deletion to complete
 sleep 5
 
 # Delete Lambda function
-echo "Deleting Lambda function..."
 aws lambda delete-function \
   --function-name "$FUNCTION_NAME" \
   --region "$REGION"
 
-# Purge and delete SQS queues
-echo "Purging and deleting SQS queues..."
-
+# Purge and delete main SQS queue
 aws sqs purge-queue \
   --queue-url "$QUEUE_URL" \
   --region "$REGION" \
@@ -541,6 +451,7 @@ aws sqs delete-queue \
   --queue-url "$QUEUE_URL" \
   --region "$REGION"
 
+# Purge and delete Dead Letter Queue
 aws sqs purge-queue \
   --queue-url "$DLQ_URL" \
   --region "$REGION" \
@@ -550,9 +461,7 @@ aws sqs delete-queue \
   --queue-url "$DLQ_URL" \
   --region "$REGION"
 
-# Delete IAM role
-echo "Cleaning up IAM role..."
-
+# Delete IAM role policy and role
 aws iam delete-role-policy \
   --role-name "$ROLE_NAME" \
   --policy-name "LambdaSQSPolicy"
@@ -561,27 +470,14 @@ aws iam delete-role \
   --role-name "$ROLE_NAME"
 
 # Delete CloudWatch log group
-echo "Deleting CloudWatch logs..."
 aws logs delete-log-group \
   --log-group-name "/aws/lambda/$FUNCTION_NAME" \
   --region "$REGION" \
   2>/dev/null || true
 
 # Delete local files
-echo "Cleaning up local files..."
 rm -rf sqs-lambda
 rm -f lambda-trust-policy.json lambda-sqs-policy.json
-
-echo ""
-echo "✅ Cleanup completed successfully!"
-echo ""
-echo "All resources deleted:"
-echo "- Event source mapping"
-echo "- Lambda function"
-echo "- SQS queues (main and DLQ)"
-echo "- IAM role and policies"
-echo "- CloudWatch log groups"
-echo "- Local files"
 ```
 
 ---
@@ -621,15 +517,6 @@ In this lab, you have:
 - **DLQ**: Monitor and alert on DLQ message count
 - **FIFO Queues**: Use for strict ordering requirements
 - **Partial Batch Response**: Enable to handle individual message failures
-
----
-
-## Free Tier Notes
-- **SQS**: 1M requests/month free
-- **Lambda**: 1M requests/month + 400,000 GB-seconds compute
-- **CloudWatch Logs**: 5 GB ingestion + 5 GB storage
-
-This lab uses minimal resources, staying well within free tier limits.
 
 ---
 
