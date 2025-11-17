@@ -537,20 +537,6 @@ aws dynamodb describe-table \
 ## Step 19 – Import Existing Resource (Demonstration)
 
 ```bash
-echo ""
-echo "================================================"
-echo "IMPORTING EXISTING AWS RESOURCE"
-echo "================================================"
-echo ""
-
-# Get VPC ID
-VPC_ID=$(terraform output -raw vpc_id)
-echo "VPC_ID=$VPC_ID"
-
-# Create new resource definition (example)
-## Step 19 – Import Existing Resource (Demonstration)
-
-```bash
 # Example: If you had an existing AWS resource not created by Terraform,
 # you could import it into state using terraform import
 
