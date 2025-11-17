@@ -1,5 +1,6 @@
 # Lab 9.A: CloudFormation Two-Tier VPC Architecture
-<img width="1536" height="1024" alt="IMG" src="https://github.com/user-attachments/assets/57d2ef28-31ca-4df8-80b2-937e296ad625" />
+
+<img width="1536" height="1024" alt="IMG" src="https://github.com/user-attachments/assets/46c28389-c8fe-4ccc-b4fa-cef2fce94ae5" />
 
 ## Overview
 Deploy a two-tier VPC architecture using CloudFormation Infrastructure as Code. The template creates a VPC with public and private subnets, a web server behind a Classic Load Balancer, and a backend API in a private subnet. Single template deployment demonstrates repeatable, version-controlled infrastructure.
