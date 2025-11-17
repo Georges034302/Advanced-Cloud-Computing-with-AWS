@@ -1,4 +1,5 @@
 # Lab 9.C: AWS CDK Python - Serverless API Deployment
+<img width="1536" height="1024" alt="IMG" src="https://github.com/user-attachments/assets/ee3963a1-e2eb-4a9b-b872-50432544b05b" />
 
 ## Overview
 This lab introduces AWS Cloud Development Kit (CDK) using Python to deploy a serverless API. You'll define infrastructure as code using Python (instead of YAML/JSON), deploy a Lambda function with DynamoDB table and API Gateway HTTP API, and experience the CDK workflow: synth, diff, deploy, and destroy.
