@@ -3,8 +3,6 @@
 ## Overview
 This lab demonstrates AWS CloudTrail for API activity logging and security auditing. CloudTrail records all API calls made in your AWS account, creating a complete audit trail for compliance, security analysis, and troubleshooting. You'll enable CloudTrail, store logs in S3, send logs to CloudWatch for real-time monitoring, query logs with Logs Insights, and create alarms for critical API operations.
 
-**💰 Cost**: FREE (CloudTrail management events free, S3 storage minimal, 5GB CloudWatch Logs free)
-
 ---
 
 ## Objectives
@@ -27,61 +25,20 @@ This lab demonstrates AWS CloudTrail for API activity logging and security audit
 
 ---
 
-## Architecture
-
-```
-AWS API Calls → CloudTrail → S3 Bucket (encrypted storage)
-(Console/CLI/SDK)      ↓
-                CloudWatch Logs → Logs Insights (SQL queries)
-                       ↓
-               Metric Filter → Alarm → SNS Email
-```
-
----
-
-## Step 1 – Set Variables and Verify Prerequisites
+## Step 1 – Set Environment Variables
 
 ```bash
-# Get AWS account ID
-ACCOUNT_ID=$(aws sts get-caller-identity \
-  --query Account \
-  --output text)
-echo "ACCOUNT_ID=$ACCOUNT_ID"
-
-# Set region
+# Configure environment variables
 REGION="ap-southeast-2"
-echo "REGION=$REGION"
-
-# Set resource names with unique suffix
-SUFFIX=$(date +%s)
-echo "SUFFIX=$SUFFIX"
-
-TRAIL_NAME="security-audit-trail-${SUFFIX}"
-echo "TRAIL_NAME=$TRAIL_NAME"
-
-BUCKET_NAME="cloudtrail-logs-${ACCOUNT_ID}-${SUFFIX}"
-echo "BUCKET_NAME=$BUCKET_NAME"
-
-LOG_GROUP_NAME="/aws/cloudtrail/security-logs"
-echo "LOG_GROUP_NAME=$LOG_GROUP_NAME"
-
-ROLE_NAME="CloudTrailToCloudWatchRole"
-echo "ROLE_NAME=$ROLE_NAME"
-
+ACCOUNT_ID="013709423315"
 TOPIC_NAME="cloudtrail-security-alerts"
-echo "TOPIC_NAME=$TOPIC_NAME"
+BUCKET_NAME="cloudtrail-logs-${ACCOUNT_ID}"
+TRAIL_NAME="security-audit-trail"
+LOG_GROUP_NAME="/aws/cloudtrail/security-audit"
+ROLE_NAME="CloudTrailLogsRole"
+ALARM_NAME="DeleteBucket-Alert"
 
-ALARM_NAME="Suspicious-API-Activity"
-echo "ALARM_NAME=$ALARM_NAME"
-
-# Set your email for security alerts (CHANGE THIS!)
-EMAIL_ADDRESS="your-email@example.com"
-echo "EMAIL_ADDRESS=$EMAIL_ADDRESS"
-
-echo ""
-echo "⚠️  IMPORTANT: Change EMAIL_ADDRESS to your real email!"
-echo ""
-echo "✅ Prerequisites verified"
+echo "Trail: $TRAIL_NAME | Bucket: $BUCKET_NAME | Region: $REGION"
 ```
 
 ---
@@ -90,16 +47,13 @@ echo "✅ Prerequisites verified"
 
 ```bash
 # Create SNS topic for CloudTrail alarms
-echo "Creating SNS topic for security alerts..."
-
 TOPIC_ARN=$(aws sns create-topic \
   --name "$TOPIC_NAME" \
   --region "$REGION" \
   --query TopicArn \
   --output text)
-echo "TOPIC_ARN=$TOPIC_ARN"
 
-echo "✅ SNS topic created"
+echo "Topic ARN: $TOPIC_ARN"
 ```
 
 ---
@@ -108,7 +62,7 @@ echo "✅ SNS topic created"
 
 ```bash
 # Subscribe email to receive security notifications
-echo "Subscribing email to SNS topic..."
+read -p "Enter your email address: " EMAIL_ADDRESS
 
 aws sns subscribe \
   --topic-arn "$TOPIC_ARN" \
@@ -116,18 +70,7 @@ aws sns subscribe \
   --notification-endpoint "$EMAIL_ADDRESS" \
   --region "$REGION"
 
-echo ""
-echo "✅ Email subscription created"
-echo ""
-echo "================================================"
-echo "⚠️  ACTION REQUIRED"
-echo "================================================"
-echo "Check your email inbox: $EMAIL_ADDRESS"
-echo "Subject: 'AWS Notification - Subscription Confirmation'"
-echo "Click the 'Confirm subscription' link"
-echo ""
-echo "Press Enter after confirming..."
-read
+read -p "Confirm subscription in email, then press Enter..."
 ```
 
 ---
@@ -135,22 +78,13 @@ read
 ## Step 4 – Create S3 Bucket for CloudTrail Logs
 
 ```bash
-echo ""
-echo "Creating S3 bucket for CloudTrail logs..."
+# Create S3 bucket for CloudTrail logs
+aws s3api create-bucket \
+  --bucket "$BUCKET_NAME" \
+  --region "$REGION" \
+  --create-bucket-configuration LocationConstraint="$REGION"
 
-# Create S3 bucket (handle us-east-1 special case)
-if [ "$REGION" = "us-east-1" ]; then
-    aws s3api create-bucket \
-      --bucket "$BUCKET_NAME" \
-      --region "$REGION"
-else
-    aws s3api create-bucket \
-      --bucket "$BUCKET_NAME" \
-      --region "$REGION" \
-      --create-bucket-configuration LocationConstraint="$REGION"
-fi
-
-echo "✅ S3 bucket created: $BUCKET_NAME"
+echo "Bucket: $BUCKET_NAME"
 ```
 
 ---
@@ -159,17 +93,13 @@ echo "✅ S3 bucket created: $BUCKET_NAME"
 
 ```bash
 # Block all public access
-echo "Blocking public access to S3 bucket..."
-
 aws s3api put-public-access-block \
   --bucket "$BUCKET_NAME" \
   --public-access-block-configuration \
     "BlockPublicAcls=true,IgnorePublicAcls=true,BlockPublicPolicy=true,RestrictPublicBuckets=true" \
   --region "$REGION"
 
-# Enable default encryption (AES256)
-echo "Enabling bucket encryption..."
-
+# Enable server-side encryption (AES256)
 aws s3api put-bucket-encryption \
   --bucket "$BUCKET_NAME" \
   --server-side-encryption-configuration '{
@@ -180,8 +110,6 @@ aws s3api put-bucket-encryption \
     }]
   }' \
   --region "$REGION"
-
-echo "✅ S3 bucket secured with encryption and public access blocked"
 ```
 
 ---
@@ -189,9 +117,7 @@ echo "✅ S3 bucket secured with encryption and public access blocked"
 ## Step 6 – Create S3 Bucket Policy for CloudTrail
 
 ```bash
-echo "Creating S3 bucket policy for CloudTrail..."
-
-# Create bucket policy JSON
+# Create bucket policy allowing CloudTrail to write logs
 cat > bucket-policy.json <<EOF
 {
   "Version": "2012-10-17",
@@ -228,8 +154,6 @@ aws s3api put-bucket-policy \
   --bucket "$BUCKET_NAME" \
   --policy file://bucket-policy.json \
   --region "$REGION"
-
-echo "✅ S3 bucket policy created"
 ```
 
 ---
@@ -237,14 +161,12 @@ echo "✅ S3 bucket policy created"
 ## Step 7 – Create CloudWatch Logs Group
 
 ```bash
-echo ""
-echo "Creating CloudWatch Logs group..."
-
+# Create CloudWatch Logs group for real-time log analysis
 aws logs create-log-group \
   --log-group-name "$LOG_GROUP_NAME" \
   --region "$REGION"
 
-echo "✅ CloudWatch Logs group created: $LOG_GROUP_NAME"
+echo "Log group: $LOG_GROUP_NAME"
 ```
 
 ---
@@ -252,9 +174,7 @@ echo "✅ CloudWatch Logs group created: $LOG_GROUP_NAME"
 ## Step 8 – Create IAM Role for CloudTrail to CloudWatch Logs
 
 ```bash
-echo "Creating IAM role for CloudTrail..."
-
-# Create trust policy for CloudTrail
+# Create trust policy allowing CloudTrail to assume role
 cat > trust-policy.json <<'EOF'
 {
   "Version": "2012-10-17",
@@ -279,9 +199,8 @@ ROLE_ARN=$(aws iam get-role \
   --role-name "$ROLE_NAME" \
   --query 'Role.Arn' \
   --output text)
-echo "ROLE_ARN=$ROLE_ARN"
 
-echo "✅ IAM role created"
+echo "Role ARN: $ROLE_ARN"
 ```
 
 ---
@@ -289,7 +208,7 @@ echo "✅ IAM role created"
 ## Step 9 – Attach Policy to IAM Role
 
 ```bash
-# Create inline policy for CloudWatch Logs access
+# Create policy allowing CloudTrail to write to CloudWatch Logs
 cat > logs-policy.json <<EOF
 {
   "Version": "2012-10-17",
@@ -311,8 +230,6 @@ aws iam put-role-policy \
   --role-name "$ROLE_NAME" \
   --policy-name "CloudTrailLogsPolicy" \
   --policy-document file://logs-policy.json
-
-echo "✅ IAM policy attached to role"
 ```
 
 ---
@@ -320,17 +237,10 @@ echo "✅ IAM policy attached to role"
 ## Step 10 – Create CloudTrail
 
 ```bash
-echo ""
-echo "================================================"
-echo "CREATING CLOUDTRAIL"
-echo "================================================"
-echo ""
-
-# Wait a few seconds for IAM role to propagate
-echo "Waiting for IAM role to propagate..."
+# Wait for IAM role to propagate
 sleep 10
 
-# Create CloudTrail
+# Create multi-region CloudTrail with log file validation
 aws cloudtrail create-trail \
   --name "$TRAIL_NAME" \
   --s3-bucket-name "$BUCKET_NAME" \
@@ -340,13 +250,7 @@ aws cloudtrail create-trail \
   --cloud-watch-logs-role-arn "$ROLE_ARN" \
   --region "$REGION"
 
-echo "✅ CloudTrail created"
-echo ""
-echo "CloudTrail features enabled:"
-echo "  - Multi-region trail (captures all regions)"
-echo "  - Log file validation (prevents tampering)"
-echo "  - S3 delivery (long-term storage)"
-echo "  - CloudWatch Logs delivery (real-time monitoring)"
+echo "CloudTrail features: multi-region, log validation, S3 + CloudWatch Logs"
 ```
 
 ---
@@ -354,9 +258,7 @@ echo "  - CloudWatch Logs delivery (real-time monitoring)"
 ## Step 11 – Start Logging
 
 ```bash
-echo ""
-echo "Starting CloudTrail logging..."
-
+# Start CloudTrail logging
 aws cloudtrail start-logging \
   --name "$TRAIL_NAME" \
   --region "$REGION"
@@ -368,7 +270,7 @@ TRAIL_STATUS=$(aws cloudtrail get-trail-status \
   --query 'IsLogging' \
   --output text)
 
-echo "✅ CloudTrail logging started: $TRAIL_STATUS"
+echo "CloudTrail logging status: $TRAIL_STATUS"
 ```
 
 ---
@@ -376,35 +278,17 @@ echo "✅ CloudTrail logging started: $TRAIL_STATUS"
 ## Step 12 – Generate Test API Calls
 
 ```bash
-echo ""
-echo "Generating test API calls to capture in CloudTrail..."
-
-# Make some API calls that will be logged
-echo "Creating test S3 bucket..."
-TEST_BUCKET="cloudtrail-test-${SUFFIX}"
-aws s3api create-bucket \
-  --bucket "$TEST_BUCKET" \
-  --region "$REGION" \
-  $( [ "$REGION" = "us-east-1" ] || echo "--create-bucket-configuration LocationConstraint=$REGION" )
-
-echo "Listing S3 buckets..."
+# Generate S3 API calls for CloudTrail to capture
 aws s3api list-buckets --region "$REGION" > /dev/null
+aws s3api get-bucket-location --bucket "$BUCKET_NAME" --region "$REGION" > /dev/null
 
-echo "Deleting test S3 bucket..."
-aws s3api delete-bucket \
-  --bucket "$TEST_BUCKET" \
-  --region "$REGION"
-
-echo "Listing EC2 instances..."
+# Generate EC2 API call
 aws ec2 describe-instances --region "$REGION" > /dev/null
 
-echo "Getting IAM user info..."
+# Generate IAM API call
 aws iam get-user 2>/dev/null || echo "No IAM user (using role)"
 
-echo ""
-echo "✅ Test API calls generated"
-echo ""
-echo "Waiting 2 minutes for logs to be delivered to CloudWatch Logs..."
+echo "Waiting 2min for logs to be delivered to CloudWatch Logs..."
 sleep 120
 ```
 
@@ -413,20 +297,11 @@ sleep 120
 ## Step 13 – Query Logs with CloudWatch Logs Insights
 
 ```bash
-echo ""
-echo "================================================"
-echo "QUERYING CLOUDTRAIL LOGS"
-echo "================================================"
-echo ""
-
 # Calculate time range (last 10 minutes)
 START_TIME=$(($(date +%s) - 600))
 END_TIME=$(date +%s)
 
-# Query 1: All API calls
-echo "Query 1: Recent API calls"
-echo ""
-
+# Query 1: Recent API calls
 aws logs start-query \
   --log-group-name "$LOG_GROUP_NAME" \
   --start-time "$START_TIME" \
@@ -440,18 +315,14 @@ aws logs start-query \
 QUERY_ID=$(cat query-result.json | grep -o '"queryId": "[^"]*' | grep -o '[^"]*$')
 echo "Query ID: $QUERY_ID"
 
-# Wait for query to complete
-echo "Waiting for query to complete..."
+# Wait for query to complete and get results
 sleep 5
 
-# Get query results
 aws logs get-query-results \
   --query-id "$QUERY_ID" \
   --region "$REGION" \
   --query 'results[*]' \
   --output table
-
-echo ""
 ```
 
 ---
@@ -459,9 +330,7 @@ echo ""
 ## Step 14 – Query for S3 Operations
 
 ```bash
-echo "Query 2: S3 operations only"
-echo ""
-
+# Query 2: S3 operations only
 aws logs start-query \
   --log-group-name "$LOG_GROUP_NAME" \
   --start-time "$START_TIME" \
@@ -481,8 +350,6 @@ aws logs get-query-results \
   --region "$REGION" \
   --query 'results[*]' \
   --output table
-
-echo ""
 ```
 
 ---
@@ -490,9 +357,10 @@ echo ""
 ## Step 15 – Query for Failed API Calls
 
 ```bash
-echo "Query 3: Failed API calls (errors)"
-echo ""
+## Step 15 – Query for Failed API Calls
 
+```bash
+# Query 3: Failed API calls (errors)
 aws logs start-query \
   --log-group-name "$LOG_GROUP_NAME" \
   --start-time "$START_TIME" \
@@ -512,9 +380,6 @@ aws logs get-query-results \
   --region "$REGION" \
   --query 'results[*]' \
   --output table
-
-echo ""
-echo "✅ CloudWatch Logs Insights queries completed"
 ```
 
 ---
@@ -522,13 +387,9 @@ echo "✅ CloudWatch Logs Insights queries completed"
 ## Step 16 – Create Metric Filter for DeleteBucket Calls
 
 ```bash
-echo ""
-echo "Creating metric filter for DeleteBucket API calls..."
-
-# Create metric filter pattern
+# Create metric filter to track DeleteBucket API calls
 FILTER_PATTERN='{ $.eventName = "DeleteBucket" }'
 
-# Create metric filter
 aws logs put-metric-filter \
   --log-group-name "$LOG_GROUP_NAME" \
   --filter-name "DeleteBucketCalls" \
@@ -536,8 +397,6 @@ aws logs put-metric-filter \
   --metric-transformations \
     metricName=DeleteBucketCount,metricNamespace=CloudTrail/Security,metricValue=1,defaultValue=0 \
   --region "$REGION"
-
-echo "✅ Metric filter created for DeleteBucket calls"
 ```
 
 ---
@@ -545,8 +404,7 @@ echo "✅ Metric filter created for DeleteBucket calls"
 ## Step 17 – Create CloudWatch Alarm for DeleteBucket
 
 ```bash
-echo "Creating CloudWatch alarm for DeleteBucket calls..."
-
+# Create alarm to trigger on DeleteBucket API calls
 aws cloudwatch put-metric-alarm \
   --alarm-name "$ALARM_NAME" \
   --alarm-description "Alert when S3 bucket is deleted" \
@@ -561,11 +419,7 @@ aws cloudwatch put-metric-alarm \
   --treat-missing-data notBreaching \
   --region "$REGION"
 
-echo "✅ CloudWatch alarm created"
-echo ""
-echo "Alarm will trigger when:"
-echo "  - DeleteBucket API call is detected"
-echo "  - Email notification sent via SNS"
+echo "Alarm will trigger on DeleteBucket calls → SNS email notification"
 ```
 
 ---
@@ -573,17 +427,12 @@ echo "  - Email notification sent via SNS"
 ## Step 18 – View CloudTrail Event History
 
 ```bash
-echo ""
-echo "Viewing recent CloudTrail event history..."
-
+# View recent CloudTrail events via API
 aws cloudtrail lookup-events \
   --max-results 10 \
   --region "$REGION" \
   --query 'Events[*].{Time:EventTime,Event:EventName,User:Username,Resource:Resources[0].ResourceName}' \
   --output table
-
-echo ""
-echo "✅ Event history retrieved"
 ```
 
 ---
@@ -591,19 +440,8 @@ echo "✅ Event history retrieved"
 ## Step 19 – View CloudTrail Console URL
 
 ```bash
-echo ""
-echo "================================================"
-echo "CLOUDTRAIL CONSOLE ACCESS"
-echo "================================================"
-echo ""
-echo "View CloudTrail events in AWS Console:"
+# View CloudTrail events in AWS Console
 echo "https://${REGION}.console.aws.amazon.com/cloudtrail/home?region=${REGION}#/events"
-echo ""
-echo "View CloudWatch Logs:"
-echo "https://${REGION}.console.aws.amazon.com/cloudwatch/home?region=${REGION}#logsV2:log-groups/log-group/${LOG_GROUP_NAME//\//%2F}"
-echo ""
-echo "View CloudWatch Alarms:"
-echo "https://${REGION}.console.aws.amazon.com/cloudwatch/home?region=${REGION}#alarmsV2:"
 ```
 
 ---
@@ -611,63 +449,49 @@ echo "https://${REGION}.console.aws.amazon.com/cloudwatch/home?region=${REGION}#
 ## Step 20 – Cleanup Resources
 
 ```bash
-echo ""
-echo "Cleaning up resources..."
-
-# Stop logging
-echo "Stopping CloudTrail logging..."
+# Stop CloudTrail logging
 aws cloudtrail stop-logging \
   --name "$TRAIL_NAME" \
   --region "$REGION"
 
 # Delete CloudTrail
-echo "Deleting CloudTrail..."
 aws cloudtrail delete-trail \
   --name "$TRAIL_NAME" \
   --region "$REGION"
 
 # Delete CloudWatch alarm
-echo "Deleting CloudWatch alarm..."
 aws cloudwatch delete-alarms \
   --alarm-names "$ALARM_NAME" \
   --region "$REGION"
 
 # Delete metric filter
-echo "Deleting metric filter..."
 aws logs delete-metric-filter \
   --log-group-name "$LOG_GROUP_NAME" \
   --filter-name "DeleteBucketCalls" \
   --region "$REGION"
 
 # Delete CloudWatch Logs group
-echo "Deleting CloudWatch Logs group..."
 aws logs delete-log-group \
   --log-group-name "$LOG_GROUP_NAME" \
   --region "$REGION"
 
 # Delete IAM role policy
-echo "Deleting IAM role policy..."
 aws iam delete-role-policy \
   --role-name "$ROLE_NAME" \
   --policy-name "CloudTrailLogsPolicy"
 
 # Delete IAM role
-echo "Deleting IAM role..."
 aws iam delete-role \
   --role-name "$ROLE_NAME"
 
-# Empty S3 bucket
-echo "Emptying S3 bucket..."
+# Empty and delete S3 bucket
 aws s3 rm s3://"$BUCKET_NAME" --recursive --region "$REGION"
 
-# Delete S3 bucket
-echo "Deleting S3 bucket..."
 aws s3api delete-bucket \
   --bucket "$BUCKET_NAME" \
   --region "$REGION"
 
 # Unsubscribe email from SNS
-echo "Unsubscribing email from SNS..."
 SUBSCRIPTION_ARN=$(aws sns list-subscriptions-by-topic \
   --topic-arn "$TOPIC_ARN" \
   --region "$REGION" \
@@ -681,24 +505,14 @@ if [ "$SUBSCRIPTION_ARN" != "PendingConfirmation" ] && [ -n "$SUBSCRIPTION_ARN" 
 fi
 
 # Delete SNS topic
-echo "Deleting SNS topic..."
 aws sns delete-topic \
   --topic-arn "$TOPIC_ARN" \
   --region "$REGION"
 
-# Delete local files
+# Delete local policy files
 rm -f bucket-policy.json trust-policy.json logs-policy.json query-result*.json
 
-echo ""
-echo "✅ Cleanup completed successfully!"
-echo ""
-echo "All resources deleted:"
-echo "- CloudTrail trail"
-echo "- S3 bucket and logs"
-echo "- CloudWatch Logs group"
-echo "- CloudWatch alarm and metric filter"
-echo "- IAM role and policy"
-echo "- SNS topic and subscription"
+echo "Cleanup complete: CloudTrail, S3, CloudWatch Logs, IAM role, SNS deleted"
 ```
 
 ---
@@ -801,24 +615,6 @@ filter eventName = "ConsoleLogin"
   * Security group changes
   * CloudTrail configuration changes
   * Unauthorized API calls (AccessDenied)
-
-**Cost Optimization:**
-- Management events are FREE (first copy per region)
-- Data events cost $0.10 per 100,000 events
-- S3 storage costs apply (~$0.023/GB/month)
-- CloudWatch Logs: $0.50/GB ingested, $0.03/GB stored
-- Use S3 lifecycle to move old logs to Glacier ($0.004/GB/month)
-
----
-
-## Free Tier Notes
-- **CloudTrail**: First trail is FREE (management events only)
-- **S3**: 5GB storage free for 12 months
-- **CloudWatch Logs**: 5GB ingestion, 5GB storage free
-- **SNS**: 1,000 email notifications/month free
-- **Lambda**: 1M requests, 400,000 GB-seconds free (if using for analysis)
-
-This lab uses minimal resources, staying well within free tier limits.
 
 ---
 
