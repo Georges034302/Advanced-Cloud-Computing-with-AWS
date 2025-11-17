@@ -3,8 +3,6 @@
 ## Overview
 This lab demonstrates advanced CloudFormation patterns using nested stacks for modular infrastructure and Change Sets for safe deployments. You'll create a parent stack that references child stacks (network and compute), use cross-stack exports, preview changes with Change Sets before applying, and detect configuration drift.
 
-**💰 Cost**: FREE TIER (t2.micro 750 hrs/month)
-
 ---
 
 ## Objectives
@@ -41,19 +39,18 @@ Parent Stack
 ## Step 1 – Set Variables and Create Project Directory
 
 ```bash
-# Set region
+# Set AWS region for nested stacks deployment
 REGION="ap-southeast-2"
-echo "REGION=$REGION"
 
-# Create S3 bucket for nested stack templates
+# Create S3 bucket name for storing child stack templates (required for nested stacks)
 BUCKET_NAME="cf-nested-stacks-$(aws sts get-caller-identity --query Account --output text)"
-echo "BUCKET_NAME=$BUCKET_NAME"
 
-# Create project directory
+# Create working directory for templates
 mkdir -p /tmp/nested-stacks-lab
 cd /tmp/nested-stacks-lab
 
-echo "✅ Variables set and directory created"
+echo "REGION: $REGION"
+echo "BUCKET_NAME: $BUCKET_NAME"
 ```
 
 ---
@@ -61,10 +58,7 @@ echo "✅ Variables set and directory created"
 ## Step 2 – Create S3 Bucket for Templates
 
 ```bash
-echo ""
-echo "Creating S3 bucket for nested stack templates..."
-
-# Create S3 bucket (handle us-east-1 special case)
+# Create S3 bucket to store child templates (nested stacks require S3 URLs)
 if [ "$REGION" = "us-east-1" ]; then
     aws s3api create-bucket \
       --bucket "$BUCKET_NAME" \
@@ -76,7 +70,7 @@ else
       --create-bucket-configuration LocationConstraint="$REGION"
 fi
 
-echo "✅ S3 bucket created: $BUCKET_NAME"
+echo "$BUCKET_NAME"
 ```
 
 ---
@@ -84,10 +78,7 @@ echo "✅ S3 bucket created: $BUCKET_NAME"
 ## Step 3 – Create Network Child Stack Template
 
 ```bash
-echo ""
-echo "Creating network stack template..."
-
-# Create network.yaml (VPC, Subnet, IGW, Routes)
+# Create network child stack (VPC, subnet, IGW, routes with cross-stack exports)
 cat > network.yaml <<'EOF'
 AWSTemplateFormatVersion: '2010-09-09'
 Description: 'Network Stack - VPC with Public Subnet'
@@ -168,7 +159,7 @@ Outputs:
       Name: !Sub '${AWS::StackName}-VPC-CIDR'
 EOF
 
-echo "✅ Network stack template created: network.yaml"
+echo "network.yaml"
 ```
 
 ---
@@ -176,10 +167,7 @@ echo "✅ Network stack template created: network.yaml"
 ## Step 4 – Create Compute Child Stack Template
 
 ```bash
-echo ""
-echo "Creating compute stack template..."
-
-# Create compute.yaml (EC2 with Security Group)
+# Create compute child stack (EC2 instance that imports VPC/subnet from network stack)
 cat > compute.yaml <<'EOF'
 AWSTemplateFormatVersion: '2010-09-09'
 Description: 'Compute Stack - EC2 Instance with Security Group'
@@ -264,7 +252,7 @@ Outputs:
     Value: !Sub 'http://${WebInstance.PublicIp}'
 EOF
 
-echo "✅ Compute stack template created: compute.yaml"
+echo "compute.yaml"
 ```
 
 ---
@@ -272,26 +260,16 @@ echo "✅ Compute stack template created: compute.yaml"
 ## Step 5 – Upload Child Templates to S3
 
 ```bash
-echo ""
-echo "Uploading child stack templates to S3..."
+# Upload child templates to S3 (parent stack will reference these URLs)
+aws s3 cp network.yaml s3://"$BUCKET_NAME"/network.yaml --region "$REGION"
+aws s3 cp compute.yaml s3://"$BUCKET_NAME"/compute.yaml --region "$REGION"
 
-# Upload network template
-aws s3 cp network.yaml s3://"$BUCKET_NAME"/network.yaml \
-  --region "$REGION"
-echo "✅ Uploaded: network.yaml"
-
-# Upload compute template
-aws s3 cp compute.yaml s3://"$BUCKET_NAME"/compute.yaml \
-  --region "$REGION"
-echo "✅ Uploaded: compute.yaml"
-
-# Get S3 URLs
+# Generate S3 URLs for parent stack template
 NETWORK_URL="https://s3.${REGION}.amazonaws.com/${BUCKET_NAME}/network.yaml"
 COMPUTE_URL="https://s3.${REGION}.amazonaws.com/${BUCKET_NAME}/compute.yaml"
 
-echo ""
-echo "Network template URL: $NETWORK_URL"
-echo "Compute template URL: $COMPUTE_URL"
+echo "NETWORK_URL: $NETWORK_URL"
+echo "COMPUTE_URL: $COMPUTE_URL"
 ```
 
 ---
@@ -299,10 +277,7 @@ echo "Compute template URL: $COMPUTE_URL"
 ## Step 6 – Create Parent Stack Template
 
 ```bash
-echo ""
-echo "Creating parent stack template..."
-
-# Create parent.yaml (references child stacks)
+# Create parent stack that orchestrates network and compute child stacks
 cat > parent.yaml <<EOF
 AWSTemplateFormatVersion: '2010-09-09'
 Description: 'Parent Stack - Orchestrates Network and Compute Stacks'
@@ -345,7 +320,7 @@ Outputs:
     Value: !GetAtt ComputeStack.Outputs.WebURL
 EOF
 
-echo "✅ Parent stack template created: parent.yaml"
+echo "parent.yaml"
 ```
 
 ---
@@ -353,16 +328,12 @@ echo "✅ Parent stack template created: parent.yaml"
 ## Step 7 – Validate Parent Template
 
 ```bash
-echo ""
-echo "Validating parent stack template..."
-
+# Validate parent template syntax and structure
 aws cloudformation validate-template \
   --template-body file://parent.yaml \
   --region "$REGION" \
   --query 'Description' \
   --output text
-
-echo "✅ Template is valid"
 ```
 
 ---
@@ -370,19 +341,10 @@ echo "✅ Template is valid"
 ## Step 8 – Create Change Set (Preview Changes)
 
 ```bash
-echo ""
-echo "================================================"
-echo "CREATING CHANGE SET (PREVIEW DEPLOYMENT)"
-echo "================================================"
-echo ""
-
+# Create Change Set to preview what will be deployed (safe preview before execution)
 STACK_NAME="nested-stacks-parent"
 CHANGE_SET_NAME="initial-deployment"
 
-echo "STACK_NAME=$STACK_NAME"
-echo "CHANGE_SET_NAME=$CHANGE_SET_NAME"
-
-# Create Change Set
 aws cloudformation create-change-set \
   --stack-name "$STACK_NAME" \
   --change-set-name "$CHANGE_SET_NAME" \
@@ -391,17 +353,14 @@ aws cloudformation create-change-set \
   --region "$REGION" \
   --tags Key=Project,Value=Nested-Stacks-Lab
 
-echo ""
-echo "✅ Change Set created"
-echo ""
-echo "Waiting for Change Set to be available..."
-
+# Wait for Change Set to be ready for review
 aws cloudformation wait change-set-create-complete \
   --stack-name "$STACK_NAME" \
   --change-set-name "$CHANGE_SET_NAME" \
   --region "$REGION"
 
-echo "✅ Change Set is ready"
+echo "STACK_NAME: $STACK_NAME"
+echo "CHANGE_SET_NAME: $CHANGE_SET_NAME"
 ```
 
 ---
@@ -409,18 +368,13 @@ echo "✅ Change Set is ready"
 ## Step 9 – View Change Set Details
 
 ```bash
-echo ""
-echo "Viewing Change Set details (what will be created)..."
-
+# Display what resources will be created/modified/deleted
 aws cloudformation describe-change-set \
   --stack-name "$STACK_NAME" \
   --change-set-name "$CHANGE_SET_NAME" \
   --region "$REGION" \
   --query 'Changes[*].ResourceChange.{Action:Action,Resource:LogicalResourceId,Type:ResourceType}' \
   --output table
-
-echo ""
-echo "Change Set shows all resources that will be created"
 ```
 
 ---
@@ -428,23 +382,18 @@ echo "Change Set shows all resources that will be created"
 ## Step 10 – Execute Change Set (Deploy Stack)
 
 ```bash
-echo ""
-echo "Executing Change Set (deploying stack)..."
-
+# Execute Change Set to deploy all resources (parent and child stacks)
 aws cloudformation execute-change-set \
   --stack-name "$STACK_NAME" \
   --change-set-name "$CHANGE_SET_NAME" \
   --region "$REGION"
 
-echo "✅ Change Set execution initiated"
-echo ""
-echo "Waiting for stack creation (5-7 minutes)..."
-
+# Wait for stack creation to complete (5-7 minutes)
 aws cloudformation wait stack-create-complete \
   --stack-name "$STACK_NAME" \
   --region "$REGION"
 
-echo "✅ Stack created successfully!"
+echo "$STACK_NAME"
 ```
 
 ---
@@ -452,24 +401,21 @@ echo "✅ Stack created successfully!"
 ## Step 11 – View Stack Outputs
 
 ```bash
-echo ""
-echo "Parent stack outputs:"
-
+# Display parent stack outputs (aggregated from child stacks)
 aws cloudformation describe-stacks \
   --stack-name "$STACK_NAME" \
   --region "$REGION" \
   --query 'Stacks[0].Outputs[*].{Key:OutputKey,Value:OutputValue}' \
   --output table
 
-# Get web URL
+# Extract web application URL
 WEB_URL=$(aws cloudformation describe-stacks \
   --stack-name "$STACK_NAME" \
   --region "$REGION" \
   --query 'Stacks[0].Outputs[?OutputKey==`WebURL`].OutputValue' \
   --output text)
 
-echo ""
-echo "Web Application: $WEB_URL"
+echo "WEB_URL: $WEB_URL"
 ```
 
 ---
@@ -477,17 +423,12 @@ echo "Web Application: $WEB_URL"
 ## Step 12 – View Nested Stacks
 
 ```bash
-echo ""
-echo "Listing all nested stacks:"
-
+# List all stacks (parent + child stacks created automatically)
 aws cloudformation list-stacks \
   --region "$REGION" \
   --stack-status-filter CREATE_COMPLETE \
   --query 'StackSummaries[?contains(StackName, `nested-stacks`)].{Name:StackName,Status:StackStatus,Created:CreationTime}' \
   --output table
-
-echo ""
-echo "Note: Parent stack creates child stacks automatically"
 ```
 
 ---
@@ -495,16 +436,13 @@ echo "Note: Parent stack creates child stacks automatically"
 ## Step 13 – Test Application
 
 ```bash
-echo ""
-echo "Testing application (waiting 2 minutes for initialization)..."
+# Wait for UserData script to install and start httpd
 sleep 120
 
+# Test web application
 curl -s "$WEB_URL"
 
-echo ""
-echo ""
-echo "✅ Application working!"
-echo "Open in browser: $WEB_URL"
+echo "Browser: $WEB_URL"
 ```
 
 ---
@@ -512,31 +450,20 @@ echo "Open in browser: $WEB_URL"
 ## Step 14 – Make Manual Change (Simulate Drift)
 
 ```bash
-echo ""
-echo "================================================"
-echo "SIMULATING CONFIGURATION DRIFT"
-echo "================================================"
-echo ""
-
-# Get instance ID
+# Get instance ID from stack outputs
 INSTANCE_ID=$(aws cloudformation describe-stacks \
   --stack-name "$STACK_NAME" \
   --region "$REGION" \
   --query 'Stacks[0].Outputs[?OutputKey==`InstanceId`].OutputValue' \
   --output text)
 
-echo "INSTANCE_ID=$INSTANCE_ID"
-
-# Add a manual tag (simulates drift)
-echo ""
-echo "Adding manual tag to instance (outside CloudFormation)..."
-
+# Add manual tag outside CloudFormation (simulates configuration drift)
 aws ec2 create-tags \
   --resources "$INSTANCE_ID" \
   --tags Key=ManualTag,Value=This-Was-Added-Manually \
   --region "$REGION"
 
-echo "✅ Manual tag added (configuration drift introduced)"
+echo "INSTANCE_ID: $INSTANCE_ID (manual tag added)"
 ```
 
 ---
@@ -544,32 +471,24 @@ echo "✅ Manual tag added (configuration drift introduced)"
 ## Step 15 – Detect Drift
 
 ```bash
-echo ""
-echo "Detecting configuration drift..."
-
-# Start drift detection
+# Start drift detection to identify manual changes outside CloudFormation
 DRIFT_ID=$(aws cloudformation detect-stack-drift \
   --stack-name "$STACK_NAME" \
   --region "$REGION" \
   --query 'StackDriftDetectionId' \
   --output text)
 
-echo "DRIFT_ID=$DRIFT_ID"
-
 # Wait for drift detection to complete
-echo "Waiting for drift detection..."
 sleep 10
 
-# Get drift status
+# Display drift detection results
 aws cloudformation describe-stack-drift-detection-status \
   --stack-drift-detection-id "$DRIFT_ID" \
   --region "$REGION" \
   --query '{Status:DetectionStatus,DriftStatus:StackDriftStatus}' \
   --output table
 
-echo ""
-echo "✅ Drift detection completed"
-echo "Manual tag added outside CloudFormation was detected"
+echo "DRIFT_ID: $DRIFT_ID"
 ```
 
 ---
@@ -577,13 +496,7 @@ echo "Manual tag added outside CloudFormation was detected"
 ## Step 16 – Create Change Set for Update
 
 ```bash
-echo ""
-echo "================================================"
-echo "CREATING CHANGE SET FOR UPDATE"
-echo "================================================"
-echo ""
-
-# Modify parent template (add tag to output)
+# Create updated parent template with additional tags
 cat > parent-updated.yaml <<EOF
 AWSTemplateFormatVersion: '2010-09-09'
 Description: 'Parent Stack - Orchestrates Network and Compute Stacks (Updated)'
@@ -634,9 +547,7 @@ Outputs:
     Value: 'v2.0'
 EOF
 
-echo "✅ Updated template created with new tags"
-
-# Create Change Set for update
+# Create Change Set to preview update (shows what will be modified)
 UPDATE_CHANGE_SET="update-tags"
 
 aws cloudformation create-change-set \
@@ -646,14 +557,9 @@ aws cloudformation create-change-set \
   --change-set-type UPDATE \
   --region "$REGION"
 
-echo ""
-echo "Waiting for Change Set..."
 sleep 10
 
-# View changes
-echo ""
-echo "Changes to be applied:"
-
+# Display what will be modified
 aws cloudformation describe-change-set \
   --stack-name "$STACK_NAME" \
   --change-set-name "$UPDATE_CHANGE_SET" \
@@ -661,13 +567,7 @@ aws cloudformation describe-change-set \
   --query 'Changes[*].ResourceChange.{Action:Action,Resource:LogicalResourceId,Details:Details}' \
   --output table
 
-echo ""
-echo "Change Set shows MODIFY operations (tags will be added)"
-echo ""
-echo "To apply changes, run:"
-echo "aws cloudformation execute-change-set --stack-name $STACK_NAME --change-set-name $UPDATE_CHANGE_SET --region $REGION"
-echo ""
-echo "⚠️  We'll skip execution to keep lab simple (cleanup next)"
+echo "UPDATE_CHANGE_SET: $UPDATE_CHANGE_SET (not executed, will be deleted in cleanup)"
 ```
 
 ---
@@ -675,40 +575,30 @@ echo "⚠️  We'll skip execution to keep lab simple (cleanup next)"
 ## Step 17 – Cleanup
 
 ```bash
-echo ""
-echo "Cleaning up resources..."
-
-# Delete Change Sets
-echo "Deleting Change Sets..."
+# Delete Change Set (not executed)
 aws cloudformation delete-change-set \
   --stack-name "$STACK_NAME" \
   --change-set-name "$UPDATE_CHANGE_SET" \
   --region "$REGION" 2>/dev/null || true
 
-# Delete parent stack (automatically deletes child stacks)
-echo "Deleting parent stack (and all child stacks)..."
-
+# Delete parent stack (automatically deletes all child stacks)
 aws cloudformation delete-stack \
   --stack-name "$STACK_NAME" \
   --region "$REGION"
 
-echo "Waiting for stack deletion..."
-
+# Wait for complete deletion
 aws cloudformation wait stack-delete-complete \
   --stack-name "$STACK_NAME" \
   --region "$REGION"
 
-echo "✅ Stack deleted"
-
-# Empty and delete S3 bucket
-echo "Deleting S3 bucket..."
-
+# Delete S3 bucket and templates
 aws s3 rm s3://"$BUCKET_NAME" --recursive --region "$REGION"
 aws s3api delete-bucket --bucket "$BUCKET_NAME" --region "$REGION"
 
-echo "✅ S3 bucket deleted"
-echo ""
-echo "All resources cleaned up!"
+# Delete local files
+cd ~ && rm -rf /tmp/nested-stacks-lab
+
+echo "Cleanup complete"
 ```
 
 ---
