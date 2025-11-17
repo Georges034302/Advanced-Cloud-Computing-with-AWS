@@ -27,31 +27,18 @@ This lab demonstrates how to build a serverless REST API using AWS Lambda and AP
 ## Step 1 – Set Variables and Verify Prerequisites
 
 ```bash
-# Get AWS account ID
-ACCOUNT_ID=$(aws sts get-caller-identity \
-  --query Account \
-  --output text)
-echo "ACCOUNT_ID=$ACCOUNT_ID"
-
-# Set region
+# Get AWS account ID and set variables
+ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
 REGION="ap-southeast-2"
+FUNCTION_NAME="joke-api"
+ROLE_NAME="lambda-joke-api-role"
+API_NAME="joke-api"
+
+echo "ACCOUNT_ID=$ACCOUNT_ID"
 echo "REGION=$REGION"
 
-# Set resource names
-FUNCTION_NAME="joke-api"
-echo "FUNCTION_NAME=$FUNCTION_NAME"
-
-ROLE_NAME="lambda-joke-api-role"
-echo "ROLE_NAME=$ROLE_NAME"
-
-API_NAME="joke-api"
-echo "API_NAME=$API_NAME"
-
-# Verify Python
-python3 --version || { echo "❌ Python 3 not installed"; exit 1; }
-
-echo ""
-echo "✅ Prerequisites verified"
+# Verify Python 3 is installed
+python3 --version
 ```
 
 ---
@@ -176,8 +163,6 @@ def add_joke(event):
             'body': json.dumps({'error': str(e)})
         }
 EOF
-
-echo "✅ Lambda function created"
 ```
 
 ---
@@ -188,9 +173,7 @@ echo "✅ Lambda function created"
 # Create deployment package
 zip -r lambda-function.zip lambda_function.py
 
-echo "✅ Lambda deployment package created"
-
-# Verify package
+# Verify package contents
 unzip -l lambda-function.zip
 ```
 
@@ -216,8 +199,6 @@ cat > lambda-trust-policy.json <<'EOF'
 EOF
 
 # Create IAM role
-echo "Creating IAM role for Lambda..."
-
 aws iam create-role \
   --role-name "$ROLE_NAME" \
   --assume-role-policy-document file://lambda-trust-policy.json \
@@ -228,8 +209,6 @@ aws iam attach-role-policy \
   --role-name "$ROLE_NAME" \
   --policy-arn arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
 
-echo "✅ IAM role created"
-
 # Get role ARN
 ROLE_ARN=$(aws iam get-role \
   --role-name "$ROLE_NAME" \
@@ -237,8 +216,7 @@ ROLE_ARN=$(aws iam get-role \
   --output text)
 echo "ROLE_ARN=$ROLE_ARN"
 
-# Wait for role to propagate
-echo "Waiting for IAM role to propagate..."
+# Wait for IAM role to propagate
 sleep 10
 ```
 
@@ -248,8 +226,6 @@ sleep 10
 
 ```bash
 # Create Lambda function
-echo "Creating Lambda function..."
-
 aws lambda create-function \
   --function-name "$FUNCTION_NAME" \
   --runtime python3.12 \
@@ -260,8 +236,6 @@ aws lambda create-function \
   --memory-size 128 \
   --description "Serverless joke API" \
   --region "$REGION"
-
-echo "✅ Lambda function created"
 
 # Get function ARN
 FUNCTION_ARN=$(aws lambda get-function \
@@ -290,8 +264,6 @@ cat > test-event-get-joke.json <<'EOF'
 EOF
 
 # Invoke Lambda function
-echo "Testing Lambda function..."
-
 aws lambda invoke \
   --function-name "$FUNCTION_NAME" \
   --payload file://test-event-get-joke.json \
@@ -299,12 +271,7 @@ aws lambda invoke \
   response.json
 
 # Display response
-echo ""
-echo "Lambda Response:"
 cat response.json | python3 -m json.tool
-
-echo ""
-echo "✅ Lambda function test successful"
 ```
 
 ---
@@ -312,12 +279,7 @@ echo "✅ Lambda function test successful"
 ## Step 7 – Create API Gateway HTTP API
 
 ```bash
-# Return to parent directory
-cd ..
-
 # Create HTTP API with Lambda integration
-echo "Creating API Gateway HTTP API..."
-
 API_ID=$(aws apigatewayv2 create-api \
   --name "$API_NAME" \
   --protocol-type HTTP \
@@ -326,8 +288,6 @@ API_ID=$(aws apigatewayv2 create-api \
   --query 'ApiId' \
   --output text)
 echo "API_ID=$API_ID"
-
-echo "✅ API Gateway HTTP API created"
 ```
 
 ---
@@ -335,9 +295,7 @@ echo "✅ API Gateway HTTP API created"
 ## Step 8 – Create Lambda Integration
 
 ```bash
-# Create integration with Lambda
-echo "Creating Lambda integration..."
-
+# Create integration with Lambda function
 INTEGRATION_ID=$(aws apigatewayv2 create-integration \
   --api-id "$API_ID" \
   --integration-type AWS_PROXY \
@@ -347,8 +305,6 @@ INTEGRATION_ID=$(aws apigatewayv2 create-integration \
   --query 'IntegrationId' \
   --output text)
 echo "INTEGRATION_ID=$INTEGRATION_ID"
-
-echo "✅ Lambda integration created"
 ```
 
 ---
@@ -357,8 +313,6 @@ echo "✅ Lambda integration created"
 
 ```bash
 # Create route for GET /joke
-echo "Creating API routes..."
-
 aws apigatewayv2 create-route \
   --api-id "$API_ID" \
   --route-key "GET /joke" \
@@ -385,8 +339,6 @@ aws apigatewayv2 create-route \
   --route-key "GET /" \
   --target "integrations/$INTEGRATION_ID" \
   --region "$REGION"
-
-echo "✅ API routes created"
 ```
 
 ---
@@ -394,9 +346,7 @@ echo "✅ API routes created"
 ## Step 10 – Grant API Gateway Permission to Invoke Lambda
 
 ```bash
-# Grant API Gateway permission to invoke Lambda
-echo "Granting API Gateway permission to invoke Lambda..."
-
+# Grant API Gateway permission to invoke Lambda function
 aws lambda add-permission \
   --function-name "$FUNCTION_NAME" \
   --statement-id "apigateway-invoke-$API_ID" \
@@ -404,8 +354,6 @@ aws lambda add-permission \
   --principal apigateway.amazonaws.com \
   --source-arn "arn:aws:execute-api:${REGION}:${ACCOUNT_ID}:${API_ID}/*/*" \
   --region "$REGION"
-
-echo "✅ Permission granted"
 ```
 
 ---
@@ -413,18 +361,14 @@ echo "✅ Permission granted"
 ## Step 11 – Create and Deploy Stage
 
 ```bash
-# Create $default stage (auto-deploy)
-echo "Creating and deploying API stage..."
-
+# Create $default stage with auto-deploy
 aws apigatewayv2 create-stage \
   --api-id "$API_ID" \
   --stage-name '$default' \
   --auto-deploy \
   --region "$REGION"
 
-echo "✅ Stage deployed"
-
-# Get API endpoint
+# Get API endpoint URL
 API_ENDPOINT=$(aws apigatewayv2 get-api \
   --api-id "$API_ID" \
   --query 'ApiEndpoint' \
@@ -438,9 +382,7 @@ echo "API_ENDPOINT=$API_ENDPOINT"
 ## Step 12 – Enable CORS
 
 ```bash
-# Enable CORS for browser access
-echo "Enabling CORS..."
-
+# Enable CORS for browser-based API access
 aws apigatewayv2 update-api \
   --api-id "$API_ID" \
   --cors-configuration \
@@ -448,8 +390,6 @@ aws apigatewayv2 update-api \
 AllowMethods='["GET","POST","OPTIONS"]',\
 AllowHeaders='["Content-Type"]' \
   --region "$REGION"
-
-echo "✅ CORS enabled"
 ```
 
 ---
@@ -457,58 +397,37 @@ echo "✅ CORS enabled"
 ## Step 13 – Test API Endpoints
 
 ```bash
-echo ""
-echo "================================================"
-echo "SERVERLESS JOKE API DEPLOYED"
-echo "================================================"
-echo ""
-echo "API Base URL: ${API_ENDPOINT}"
-echo ""
-echo "Testing endpoints..."
-echo ""
+echo "API_ENDPOINT=$API_ENDPOINT"
 
-# Wait a moment for deployment to complete
+# Wait for deployment to complete
 sleep 5
 
-# Test welcome endpoint
-echo "1. Testing GET / (welcome):"
-curl -s "${API_ENDPOINT}/" | python3 -m json.tool
-echo ""
+# Test welcome endpoint (GET /)
+echo "\n1. Testing GET / (welcome):"
+curl -s "${API_ENDPOINT}/" | python3 -m json.tool  # Test via curl
+"$BROWSER" "${API_ENDPOINT}/"  # Open in browser
 
-# Test random joke endpoint
-echo "2. Testing GET /joke (random joke):"
-curl -s "${API_ENDPOINT}/joke" | python3 -m json.tool
-echo ""
+# Test random joke endpoint (GET /joke)
+echo "\n2. Testing GET /joke (random joke):"
+curl -s "${API_ENDPOINT}/joke" | python3 -m json.tool  # Get random joke via curl
+"$BROWSER" "${API_ENDPOINT}/joke"  # Open in browser
 
-# Test all jokes endpoint
-echo "3. Testing GET /jokes (all jokes):"
-curl -s "${API_ENDPOINT}/jokes" | python3 -m json.tool
-echo ""
+# Test all jokes endpoint (GET /jokes)
+echo "\n3. Testing GET /jokes (all jokes):"
+curl -s "${API_ENDPOINT}/jokes" | python3 -m json.tool  # Get all jokes via curl
+"$BROWSER" "${API_ENDPOINT}/jokes"  # Open in browser
 
-# Test POST endpoint
-echo "4. Testing POST /joke (add new joke):"
+# Test POST endpoint to add new joke
+echo "\n4. Testing POST /joke (add new joke):"
 curl -s -X POST "${API_ENDPOINT}/joke" \
   -H "Content-Type: application/json" \
-  -d '{"joke":"Why do programmers always mix up Halloween and Christmas? Because Oct 31 == Dec 25!"}' | python3 -m json.tool
-echo ""
+  -d '{"joke":"Why do programmers always mix up Halloween and Christmas? Because Oct 31 == Dec 25!"}' | python3 -m json.tool  # Add new joke via POST request
 
-# Get all jokes again to see the new one
-echo "5. Testing GET /jokes again (verify new joke added):"
-curl -s "${API_ENDPOINT}/jokes" | python3 -m json.tool
-echo ""
+# Verify new joke was added (GET /jokes again)
+echo "\n5. Testing GET /jokes again (verify new joke added):"
+curl -s "${API_ENDPOINT}/jokes" | python3 -m json.tool  # Verify joke list includes new joke
+"$BROWSER" "${API_ENDPOINT}/jokes"  # Open in browser to see updated list
 
-echo "================================================"
-echo "✅ All endpoints working!"
-echo ""
-echo "Try in browser or Postman:"
-echo "  ${API_ENDPOINT}/"
-echo "  ${API_ENDPOINT}/joke"
-echo "  ${API_ENDPOINT}/jokes"
-echo ""
-echo "POST request example:"
-echo "  curl -X POST ${API_ENDPOINT}/joke \\"
-echo "    -H \"Content-Type: application/json\" \\"
-echo "    -d '{\"joke\":\"Your joke here\"}'"
 ```
 
 ---
@@ -516,9 +435,6 @@ echo "    -d '{\"joke\":\"Your joke here\"}'"
 ## Step 14 – View Lambda Logs
 
 ```bash
-echo ""
-echo "Viewing Lambda logs..."
-
 # Get latest log stream
 LOG_STREAM=$(aws logs describe-log-streams \
   --log-group-name "/aws/lambda/$FUNCTION_NAME" \
@@ -531,8 +447,7 @@ LOG_STREAM=$(aws logs describe-log-streams \
 echo "LOG_STREAM=$LOG_STREAM"
 
 # Get recent log events
-echo ""
-echo "Recent Lambda invocations:"
+echo "\nRecent Lambda invocations:"
 aws logs get-log-events \
   --log-group-name "/aws/lambda/$FUNCTION_NAME" \
   --log-stream-name "$LOG_STREAM" \
@@ -547,24 +462,24 @@ aws logs get-log-events \
 ## Step 15 – View API Gateway Details
 
 ```bash
-echo ""
-echo "API Gateway Configuration:"
+# View API configuration
+echo "\nAPI Gateway Configuration:"
 aws apigatewayv2 get-api \
   --api-id "$API_ID" \
   --query '{Name:Name,Endpoint:ApiEndpoint,Protocol:ProtocolType,CreatedDate:CreatedDate}' \
   --output table \
   --region "$REGION"
 
-echo ""
-echo "API Routes:"
+# View routes
+echo "\nAPI Routes:"
 aws apigatewayv2 get-routes \
   --api-id "$API_ID" \
   --query 'Items[*].{RouteKey:RouteKey,Target:Target}' \
   --output table \
   --region "$REGION"
 
-echo ""
-echo "API Integrations:"
+# View integrations
+echo "\nAPI Integrations:"
 aws apigatewayv2 get-integrations \
   --api-id "$API_ID" \
   --query 'Items[*].{IntegrationId:IntegrationId,IntegrationType:IntegrationType,IntegrationUri:IntegrationUri}' \
@@ -577,23 +492,17 @@ aws apigatewayv2 get-integrations \
 ## Step 16 – Cleanup Resources
 
 ```bash
-echo ""
-echo "Cleaning up resources..."
-
-# Delete API Gateway
-echo "Deleting API Gateway..."
+# Delete API Gateway HTTP API
 aws apigatewayv2 delete-api \
   --api-id "$API_ID" \
   --region "$REGION"
 
 # Delete Lambda function
-echo "Deleting Lambda function..."
 aws lambda delete-function \
   --function-name "$FUNCTION_NAME" \
   --region "$REGION"
 
-# Detach and delete IAM role
-echo "Cleaning up IAM role..."
+# Detach policy and delete IAM role
 aws iam detach-role-policy \
   --role-name "$ROLE_NAME" \
   --policy-arn arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
@@ -602,26 +511,14 @@ aws iam delete-role \
   --role-name "$ROLE_NAME"
 
 # Delete CloudWatch log group
-echo "Deleting CloudWatch logs..."
 aws logs delete-log-group \
   --log-group-name "/aws/lambda/$FUNCTION_NAME" \
   --region "$REGION" \
   2>/dev/null || true
 
 # Delete local files
-echo "Cleaning up local files..."
-rm -rf joke-api-lambda
-rm -f response.json
-
-echo ""
-echo "✅ Cleanup completed successfully!"
-echo ""
-echo "All resources deleted:"
-echo "- API Gateway HTTP API"
-echo "- Lambda function"
-echo "- IAM role and policies"
-echo "- CloudWatch log groups"
-echo "- Local files"
+rm -f lambda_function.py lambda-function.zip lambda-trust-policy.json
+rm -f test-event-get-joke.json response.json
 ```
 
 ---
@@ -683,16 +580,6 @@ Client → API Gateway → Lambda → Response
 | **Latency** | Lower | Higher |
 | **Features** | Basic | Advanced (caching, models) |
 | **Best For** | Simple APIs | Complex APIs |
-
----
-
-## Free Tier Notes
-- **Lambda**: 1M requests/month + 400,000 GB-seconds compute
-- **API Gateway**: 1M API calls/month (HTTP API free for 12 months)
-- **CloudWatch Logs**: 5 GB ingestion, 5 GB storage
-- **Data Transfer**: 1 GB outbound
-
-This lab uses minimal Lambda executions and API calls, staying well within free tier limits.
 
 ---
 
