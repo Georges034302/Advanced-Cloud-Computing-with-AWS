@@ -1,4 +1,5 @@
 # Lab 9.D: Terraform Basics - Multi-Region VPC Deployment
+<img width="1536" height="1024" alt="IMG" src="https://github.com/user-attachments/assets/b64f1b5b-fee9-437c-91c4-3dd2981692ec" />
 
 ## Overview
 This lab introduces Terraform, an alternative Infrastructure as Code tool to CloudFormation. You'll learn Terraform basics, deploy a VPC in ap-southeast-2, configure remote state storage in S3 with DynamoDB locking, and use core Terraform commands: init, plan, apply, and destroy.
