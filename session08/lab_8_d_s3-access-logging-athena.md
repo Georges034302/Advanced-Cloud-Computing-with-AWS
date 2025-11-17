@@ -542,62 +542,6 @@ echo "Cleanup complete: S3 buckets, Athena database/table deleted"
 ---
 
 ## Summary
-  --region "$REGION" > /dev/null
-
-sleep 2
-
-# Delete Athena database
-echo "Deleting Athena database..."
-aws athena start-query-execution \
-  --query-string "DROP DATABASE IF EXISTS ${ATHENA_DATABASE}" \
-  --result-configuration "OutputLocation=s3://${ATHENA_RESULTS}/" \
-  --region "$REGION" > /dev/null
-
-sleep 2
-
-# Empty and delete source bucket
-echo "Emptying source bucket..."
-aws s3 rm s3://"$SOURCE_BUCKET" --recursive --region "$REGION"
-
-echo "Deleting source bucket..."
-aws s3api delete-bucket \
-  --bucket "$SOURCE_BUCKET" \
-  --region "$REGION"
-
-# Empty and delete logs bucket
-echo "Emptying logs bucket..."
-aws s3 rm s3://"$LOGS_BUCKET" --recursive --region "$REGION"
-
-echo "Deleting logs bucket..."
-aws s3api delete-bucket \
-  --bucket "$LOGS_BUCKET" \
-  --region "$REGION"
-
-# Empty and delete Athena results bucket
-echo "Emptying Athena results bucket..."
-aws s3 rm s3://"$ATHENA_RESULTS" --recursive --region "$REGION"
-
-echo "Deleting Athena results bucket..."
-aws s3api delete-bucket \
-  --bucket "$ATHENA_RESULTS" \
-  --region "$REGION"
-
-# Delete local files
-rm -f logging-config.json create-table.sql index.html data.txt image.jpg file1.txt file2.txt
-
-echo ""
-echo "✅ Cleanup completed successfully!"
-echo ""
-echo "All resources deleted:"
-echo "- Source S3 bucket and objects"
-echo "- Logs S3 bucket and access logs"
-echo "- Athena results bucket"
-echo "- Athena database and table"
-```
-
----
-
-## Summary
 
 In this lab, you have:
 - Created source S3 bucket for monitoring
@@ -808,12 +752,6 @@ LIMIT 10;
 - Verify table and database names
 - Ensure enough data scanned (empty results != error)
 - Review query execution details in console
-
-**High Athena costs:**
-- Use partitioning (scan less data)
-- Query specific columns, not SELECT *
-- Convert logs to Parquet format (70% less data scanned)
-- Use views to pre-filter data
 
 ---
 
