@@ -1,4 +1,5 @@
 # Lab 8.A: Monitor EC2 with CloudWatch Dashboard and Alarms
+<img width="1536" height="1024" alt="IMG" src="https://github.com/user-attachments/assets/28a8e389-bdf8-4932-9b4f-a2ae05f62b31" />
 
 ## Overview
 This lab demonstrates AWS CloudWatch monitoring by creating dashboards to visualize EC2 metrics and configuring alarms to detect high resource utilization. You'll launch an EC2 instance, monitor CPU and network metrics in real-time, create a custom dashboard, set up SNS email alerts, and trigger alarms through simulated load.
