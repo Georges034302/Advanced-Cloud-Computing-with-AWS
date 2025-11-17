@@ -38,34 +38,19 @@ CSV File Upload → S3 Bucket → Event Notification → Lambda (Node.js)
 ## Step 1 – Set Variables and Verify Prerequisites
 
 ```bash
-# Get AWS account ID
-ACCOUNT_ID=$(aws sts get-caller-identity \
-  --query Account \
-  --output text)
-echo "ACCOUNT_ID=$ACCOUNT_ID"
-
-# Set region
+# Get AWS account ID and set variables
+ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
 REGION="ap-southeast-2"
-echo "REGION=$REGION"
-
-# Set resource names
 BUCKET_NAME="student-csv-uploads-${ACCOUNT_ID}"
+TABLE_NAME="Students"
+FUNCTION_NAME="csv-to-dynamodb"
+ROLE_NAME="lambda-s3-dynamodb-role"
+
+echo "ACCOUNT_ID=$ACCOUNT_ID"
 echo "BUCKET_NAME=$BUCKET_NAME"
 
-TABLE_NAME="Students"
-echo "TABLE_NAME=$TABLE_NAME"
-
-FUNCTION_NAME="csv-to-dynamodb"
-echo "FUNCTION_NAME=$FUNCTION_NAME"
-
-ROLE_NAME="lambda-s3-dynamodb-role"
-echo "ROLE_NAME=$ROLE_NAME"
-
-# Verify Node.js
-node --version || { echo "❌ Node.js not installed"; exit 1; }
-
-echo ""
-echo "✅ Prerequisites verified"
+# Verify Node.js is installed
+node --version
 ```
 
 ---
@@ -73,20 +58,16 @@ echo "✅ Prerequisites verified"
 ## Step 2 – Create S3 Bucket
 
 ```bash
-# Create S3 bucket for CSV uploads
-echo "Creating S3 bucket..."
-
+# Create S3 bucket for CSV file uploads
 aws s3api create-bucket \
   --bucket "$BUCKET_NAME" \
   --region "$REGION" \
   --create-bucket-configuration LocationConstraint="$REGION"
 
-# Enable versioning (optional but recommended)
+# Enable versioning for file history
 aws s3api put-bucket-versioning \
   --bucket "$BUCKET_NAME" \
   --versioning-configuration Status=Enabled
-
-echo "✅ S3 bucket created: $BUCKET_NAME"
 ```
 
 ---
@@ -94,27 +75,18 @@ echo "✅ S3 bucket created: $BUCKET_NAME"
 ## Step 3 – Create DynamoDB Table
 
 ```bash
-# Create DynamoDB table for student records
-echo "Creating DynamoDB table..."
-
+# Create DynamoDB table with StudentID as partition key
 aws dynamodb create-table \
   --table-name "$TABLE_NAME" \
-  --attribute-definitions \
-    AttributeName=StudentID,AttributeType=S \
-  --key-schema \
-    AttributeName=StudentID,KeyType=HASH \
+  --attribute-definitions AttributeName=StudentID,AttributeType=S \
+  --key-schema AttributeName=StudentID,KeyType=HASH \
   --billing-mode PAY_PER_REQUEST \
   --region "$REGION"
 
-# Wait for table to be active
-echo "Waiting for table to become active..."
-aws dynamodb wait table-exists \
-  --table-name "$TABLE_NAME" \
-  --region "$REGION"
+# Wait for table to become active
+aws dynamodb wait table-exists --table-name "$TABLE_NAME" --region "$REGION"
 
-echo "✅ DynamoDB table created: $TABLE_NAME"
-
-# Describe table
+# View table details
 aws dynamodb describe-table \
   --table-name "$TABLE_NAME" \
   --query 'Table.{Name:TableName,Status:TableStatus,ItemCount:ItemCount}' \
@@ -280,8 +252,6 @@ function parseCSV(csvContent) {
     return students;
 }
 EOF
-
-echo "✅ Lambda function code created"
 ```
 
 ---
@@ -289,17 +259,11 @@ echo "✅ Lambda function code created"
 ## Step 5 – Install Dependencies and Package Lambda
 
 ```bash
-# Install dependencies
-echo "Installing Node.js dependencies..."
+# Install Node.js dependencies
 npm install
 
-echo "✅ Dependencies installed"
-
-# Create deployment package
-echo "Creating deployment package..."
+# Create deployment package with all dependencies
 zip -r lambda-function.zip index.js package.json node_modules/
-
-echo "✅ Deployment package created"
 
 # Check package size
 ls -lh lambda-function.zip
@@ -313,7 +277,7 @@ ls -lh lambda-function.zip
 # Return to parent directory
 cd ..
 
-# Create trust policy
+# Create IAM trust policy for Lambda service
 cat > lambda-trust-policy.json <<'EOF'
 {
   "Version": "2012-10-17",
@@ -330,14 +294,12 @@ cat > lambda-trust-policy.json <<'EOF'
 EOF
 
 # Create IAM role
-echo "Creating IAM role..."
-
 aws iam create-role \
   --role-name "$ROLE_NAME" \
   --assume-role-policy-document file://lambda-trust-policy.json \
   --description "Execution role for CSV processing Lambda"
 
-# Create inline policy for S3 and DynamoDB access
+# Create permissions policy for S3 read, DynamoDB write, and CloudWatch logs
 cat > lambda-permissions-policy.json <<EOF
 {
   "Version": "2012-10-17",
@@ -371,13 +333,11 @@ cat > lambda-permissions-policy.json <<EOF
 }
 EOF
 
-# Attach inline policy
+# Attach inline policy to role
 aws iam put-role-policy \
   --role-name "$ROLE_NAME" \
   --policy-name "LambdaS3DynamoDBPolicy" \
   --policy-document file://lambda-permissions-policy.json
-
-echo "✅ IAM role created with permissions"
 
 # Get role ARN
 ROLE_ARN=$(aws iam get-role \
@@ -387,7 +347,6 @@ ROLE_ARN=$(aws iam get-role \
 echo "ROLE_ARN=$ROLE_ARN"
 
 # Wait for IAM role to propagate
-echo "Waiting for IAM role to propagate..."
 sleep 10
 ```
 
@@ -396,9 +355,7 @@ sleep 10
 ## Step 7 – Create Lambda Function
 
 ```bash
-# Create Lambda function
-echo "Creating Lambda function..."
-
+# Create Lambda function with Node.js runtime
 aws lambda create-function \
   --function-name "$FUNCTION_NAME" \
   --runtime nodejs20.x \
@@ -410,8 +367,6 @@ aws lambda create-function \
   --environment "Variables={TABLE_NAME=$TABLE_NAME}" \
   --description "Process CSV files from S3 and store in DynamoDB" \
   --region "$REGION"
-
-echo "✅ Lambda function created"
 
 # Get function ARN
 FUNCTION_ARN=$(aws lambda get-function \
@@ -427,9 +382,7 @@ echo "FUNCTION_ARN=$FUNCTION_ARN"
 ## Step 8 – Grant S3 Permission to Invoke Lambda
 
 ```bash
-# Allow S3 to invoke Lambda function
-echo "Granting S3 permission to invoke Lambda..."
-
+# Allow S3 bucket to invoke Lambda function on file upload
 aws lambda add-permission \
   --function-name "$FUNCTION_NAME" \
   --statement-id "s3-invoke-permission" \
@@ -437,8 +390,6 @@ aws lambda add-permission \
   --principal s3.amazonaws.com \
   --source-arn "arn:aws:s3:::${BUCKET_NAME}" \
   --region "$REGION"
-
-echo "✅ Permission granted"
 ```
 
 ---
@@ -446,7 +397,7 @@ echo "✅ Permission granted"
 ## Step 9 – Configure S3 Event Notification
 
 ```bash
-# Create S3 event notification configuration
+# Create S3 event notification configuration to trigger Lambda on .csv uploads
 cat > s3-notification.json <<EOF
 {
   "LambdaFunctionConfigurations": [
@@ -469,14 +420,10 @@ cat > s3-notification.json <<EOF
 }
 EOF
 
-# Apply notification configuration
-echo "Configuring S3 event notification..."
-
+# Apply notification configuration to bucket
 aws s3api put-bucket-notification-configuration \
   --bucket "$BUCKET_NAME" \
   --notification-configuration file://s3-notification.json
-
-echo "✅ S3 event notification configured"
 
 # Verify configuration
 aws s3api get-bucket-notification-configuration \
@@ -490,7 +437,7 @@ aws s3api get-bucket-notification-configuration \
 ## Step 10 – Create Sample CSV File
 
 ```bash
-# Create sample students.csv file
+# Create sample CSV file with student records
 cat > students.csv <<'EOF'
 ID,NAME,MARK,GRADE
 S001,Alice Johnson,95,A
@@ -505,11 +452,7 @@ S009,Isaac Newton,98,A
 S010,Julia Roberts,84,B
 EOF
 
-echo "✅ Sample CSV file created"
-
-# Display contents
-echo ""
-echo "Sample CSV content:"
+# Display file contents
 cat students.csv
 ```
 
@@ -518,19 +461,10 @@ cat students.csv
 ## Step 11 – Upload CSV to S3 and Trigger Lambda
 
 ```bash
-echo ""
-echo "================================================"
-echo "UPLOADING CSV FILE TO S3"
-echo "================================================"
-echo ""
-
-# Upload CSV file to S3
+# Upload CSV file to S3 (triggers Lambda automatically)
 aws s3 cp students.csv "s3://${BUCKET_NAME}/students.csv"
 
-echo "✅ CSV file uploaded to S3"
-echo ""
-echo "Lambda function will be triggered automatically..."
-echo "Waiting 5 seconds for processing..."
+# Wait for Lambda processing to complete
 sleep 5
 ```
 
@@ -539,10 +473,7 @@ sleep 5
 ## Step 12 – Verify Lambda Execution
 
 ```bash
-echo ""
-echo "Checking Lambda logs..."
-
-# Get latest log stream
+# Get latest log stream name
 LOG_STREAM=$(aws logs describe-log-streams \
   --log-group-name "/aws/lambda/$FUNCTION_NAME" \
   --order-by LastEventTime \
@@ -555,8 +486,7 @@ LOG_STREAM=$(aws logs describe-log-streams \
 
 if [ -n "$LOG_STREAM" ]; then
     echo "LOG_STREAM=$LOG_STREAM"
-    echo ""
-    echo "Recent Lambda execution logs:"
+    echo "\nRecent Lambda execution logs:"
     aws logs get-log-events \
       --log-group-name "/aws/lambda/$FUNCTION_NAME" \
       --log-stream-name "$LOG_STREAM" \
@@ -574,28 +504,21 @@ fi
 ## Step 13 – Query DynamoDB Table
 
 ```bash
-echo ""
-echo "================================================"
-echo "QUERYING DYNAMODB TABLE"
-echo "================================================"
-echo ""
-
-# Scan DynamoDB table
+# Scan DynamoDB table to view all student records
 aws dynamodb scan \
   --table-name "$TABLE_NAME" \
   --region "$REGION" \
   --query 'Items[*].{StudentID:StudentID.S,Name:Name.S,Mark:Mark.N,Grade:Grade.S}' \
   --output table
 
-# Get item count
+# Get total item count
 ITEM_COUNT=$(aws dynamodb describe-table \
   --table-name "$TABLE_NAME" \
   --query 'Table.ItemCount' \
   --output text \
   --region "$REGION")
 
-echo ""
-echo "Total records in DynamoDB: $ITEM_COUNT"
+echo "\nTotal records in DynamoDB: $ITEM_COUNT"
 ```
 
 ---
@@ -603,9 +526,7 @@ echo "Total records in DynamoDB: $ITEM_COUNT"
 ## Step 14 – Query Specific Student
 
 ```bash
-echo ""
-echo "Querying specific student (S001)..."
-
+# Query specific student record by ID
 aws dynamodb get-item \
   --table-name "$TABLE_NAME" \
   --key '{"StudentID": {"S": "S001"}}' \
@@ -631,10 +552,7 @@ else:
 ## Step 15 – Test with Another CSV File
 
 ```bash
-echo ""
-echo "Testing with another CSV file..."
-
-# Create second CSV file
+# Create second CSV file with additional students
 cat > students2.csv <<'EOF'
 ID,NAME,MARK,GRADE
 S011,Kevin Hart,78,C
@@ -642,16 +560,14 @@ S012,Laura Croft,94,A
 S013,Michael Scott,82,B
 EOF
 
-# Upload second file
+# Upload second file (triggers Lambda again)
 aws s3 cp students2.csv "s3://${BUCKET_NAME}/students2.csv"
 
-echo "✅ Second CSV uploaded"
-echo "Waiting 5 seconds for processing..."
+# Wait for processing
 sleep 5
 
-# Query table again
-echo ""
-echo "Updated DynamoDB records:"
+# Query updated table
+echo "\nUpdated DynamoDB records:"
 aws dynamodb scan \
   --table-name "$TABLE_NAME" \
   --region "$REGION" \
@@ -664,15 +580,8 @@ aws dynamodb scan \
 ## Step 16 – View S3 Bucket Contents
 
 ```bash
-echo ""
-echo "S3 Bucket contents:"
+# List all files in S3 bucket
 aws s3 ls "s3://${BUCKET_NAME}/" --human-readable
-
-echo ""
-echo "S3 Bucket details:"
-aws s3api head-bucket \
-  --bucket "$BUCKET_NAME" \
-  2>&1 || echo "Bucket accessible"
 ```
 
 ---
@@ -680,16 +589,16 @@ aws s3api head-bucket \
 ## Step 17 – View Lambda Function Details
 
 ```bash
-echo ""
-echo "Lambda Function Configuration:"
+# View Lambda function configuration
+echo "\nLambda Function Configuration:"
 aws lambda get-function-configuration \
   --function-name "$FUNCTION_NAME" \
   --query '{Name:FunctionName,Runtime:Runtime,Memory:MemorySize,Timeout:Timeout,Handler:Handler}' \
   --output table \
   --region "$REGION"
 
-echo ""
-echo "Lambda Environment Variables:"
+# View environment variables
+echo "\nLambda Environment Variables:"
 aws lambda get-function-configuration \
   --function-name "$FUNCTION_NAME" \
   --query 'Environment.Variables' \
@@ -702,69 +611,34 @@ aws lambda get-function-configuration \
 ## Step 18 – Cleanup Resources
 
 ```bash
-echo ""
-echo "Cleaning up resources..."
-
 # Remove S3 event notification
-echo "Removing S3 event notification..."
 aws s3api put-bucket-notification-configuration \
   --bucket "$BUCKET_NAME" \
   --notification-configuration '{}'
 
-# Delete S3 objects
-echo "Deleting S3 objects..."
+# Delete all S3 objects
 aws s3 rm "s3://${BUCKET_NAME}/" --recursive
 
 # Delete S3 bucket
-echo "Deleting S3 bucket..."
-aws s3api delete-bucket \
-  --bucket "$BUCKET_NAME" \
-  --region "$REGION"
+aws s3api delete-bucket --bucket "$BUCKET_NAME" --region "$REGION"
 
 # Delete DynamoDB table
-echo "Deleting DynamoDB table..."
-aws dynamodb delete-table \
-  --table-name "$TABLE_NAME" \
-  --region "$REGION"
+aws dynamodb delete-table --table-name "$TABLE_NAME" --region "$REGION"
 
 # Delete Lambda function
-echo "Deleting Lambda function..."
-aws lambda delete-function \
-  --function-name "$FUNCTION_NAME" \
-  --region "$REGION"
+aws lambda delete-function --function-name "$FUNCTION_NAME" --region "$REGION"
 
 # Delete IAM role policy and role
-echo "Cleaning up IAM role..."
-aws iam delete-role-policy \
-  --role-name "$ROLE_NAME" \
-  --policy-name "LambdaS3DynamoDBPolicy"
-
-aws iam delete-role \
-  --role-name "$ROLE_NAME"
+aws iam delete-role-policy --role-name "$ROLE_NAME" --policy-name "LambdaS3DynamoDBPolicy"
+aws iam delete-role --role-name "$ROLE_NAME"
 
 # Delete CloudWatch log group
-echo "Deleting CloudWatch logs..."
-aws logs delete-log-group \
-  --log-group-name "/aws/lambda/$FUNCTION_NAME" \
-  --region "$REGION" \
-  2>/dev/null || true
+aws logs delete-log-group --log-group-name "/aws/lambda/$FUNCTION_NAME" --region "$REGION" 2>/dev/null || true
 
 # Delete local files
-echo "Cleaning up local files..."
 rm -rf csv-lambda
 rm -f students.csv students2.csv
 rm -f lambda-trust-policy.json lambda-permissions-policy.json s3-notification.json
-
-echo ""
-echo "✅ Cleanup completed successfully!"
-echo ""
-echo "All resources deleted:"
-echo "- S3 bucket and objects"
-echo "- DynamoDB table"
-echo "- Lambda function"
-echo "- IAM role and policies"
-echo "- CloudWatch log groups"
-echo "- Local files"
 ```
 
 ---
