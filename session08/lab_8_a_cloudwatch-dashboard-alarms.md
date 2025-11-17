@@ -3,8 +3,6 @@
 ## Overview
 This lab demonstrates AWS CloudWatch monitoring by creating dashboards to visualize EC2 metrics and configuring alarms to detect high resource utilization. You'll launch an EC2 instance, monitor CPU and network metrics in real-time, create a custom dashboard, set up SNS email alerts, and trigger alarms through simulated load.
 
-**💰 Cost**: FREE (CloudWatch basic monitoring, 10 alarms free, 1K SNS emails/month)
-
 ---
 
 ## Objectives
@@ -26,50 +24,25 @@ This lab demonstrates AWS CloudWatch monitoring by creating dashboards to visual
 
 ---
 
-## Architecture
-
-```
-EC2 Instance → CloudWatch Metrics → Dashboard (Visualization)
-                    ↓
-              Alarm Threshold → SNS Topic → Email Notification
-```
-
----
-
 ## Step 1 – Set Variables and Verify Prerequisites
 
 ```bash
-# Get AWS account ID
-ACCOUNT_ID=$(aws sts get-caller-identity \
-  --query Account \
-  --output text)
-echo "ACCOUNT_ID=$ACCOUNT_ID"
-
-# Set region
+# Get AWS account ID and set region
+ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
 REGION="ap-southeast-2"
-echo "REGION=$REGION"
 
 # Set resource names
 INSTANCE_NAME="cloudwatch-monitored-instance"
-echo "INSTANCE_NAME=$INSTANCE_NAME"
-
 DASHBOARD_NAME="EC2-Monitoring-Dashboard"
-echo "DASHBOARD_NAME=$DASHBOARD_NAME"
-
 ALARM_NAME="High-CPU-Alarm"
-echo "ALARM_NAME=$ALARM_NAME"
-
 TOPIC_NAME="cloudwatch-alerts"
-echo "TOPIC_NAME=$TOPIC_NAME"
 
-# Set your email for alarms (CHANGE THIS!)
+# Email address for alarm notifications (IMPORTANT: Change this!)
 EMAIL_ADDRESS="your-email@example.com"
-echo "EMAIL_ADDRESS=$EMAIL_ADDRESS"
 
-echo ""
-echo "⚠️  IMPORTANT: Change EMAIL_ADDRESS to your real email!"
-echo ""
-echo "✅ Prerequisites verified"
+echo "ACCOUNT_ID=$ACCOUNT_ID"
+echo "REGION=$REGION"
+echo "EMAIL_ADDRESS=$EMAIL_ADDRESS"
 ```
 
 ---
@@ -77,17 +50,13 @@ echo "✅ Prerequisites verified"
 ## Step 2 – Create SNS Topic for Alarm Notifications
 
 ```bash
-# Create SNS topic for CloudWatch alarms
-echo "Creating SNS topic..."
-
+# Create SNS topic for CloudWatch alarm notifications
 TOPIC_ARN=$(aws sns create-topic \
   --name "$TOPIC_NAME" \
   --region "$REGION" \
   --query TopicArn \
   --output text)
 echo "TOPIC_ARN=$TOPIC_ARN"
-
-echo "✅ SNS topic created"
 ```
 
 ---
@@ -95,27 +64,16 @@ echo "✅ SNS topic created"
 ## Step 3 – Subscribe Email to SNS Topic
 
 ```bash
-# Subscribe email to receive alarm notifications
-echo "Subscribing email to SNS topic..."
-
+# Subscribe email to SNS topic for alarm notifications
 aws sns subscribe \
   --topic-arn "$TOPIC_ARN" \
   --protocol email \
   --notification-endpoint "$EMAIL_ADDRESS" \
   --region "$REGION"
 
-echo ""
-echo "✅ Email subscription created"
-echo ""
-echo "================================================"
-echo "⚠️  ACTION REQUIRED"
-echo "================================================"
-echo "Check your email inbox: $EMAIL_ADDRESS"
-echo "Subject: 'AWS Notification - Subscription Confirmation'"
-echo "Click the 'Confirm subscription' link"
-echo ""
-echo "Press Enter after confirming..."
-read
+# ACTION REQUIRED: Check email and confirm subscription
+echo "⚠️  Check $EMAIL_ADDRESS for confirmation email and click the link"
+read -p "Press Enter after confirming..."
 ```
 
 ---
@@ -123,31 +81,30 @@ read
 ## Step 4 – Get Default VPC and Latest AMI
 
 ```bash
-# Get default VPC
-echo "Getting default VPC..."
-
+# Get default VPC for EC2 instance
 DEFAULT_VPC=$(aws ec2 describe-vpcs \
   --filters "Name=isDefault,Values=true" \
   --query 'Vpcs[0].VpcId' \
   --output text \
   --region "$REGION")
-echo "DEFAULT_VPC=$DEFAULT_VPC"
 
-# Get default subnet
+# Get default subnet from VPC
 DEFAULT_SUBNET=$(aws ec2 describe-subnets \
   --filters "Name=vpc-id,Values=$DEFAULT_VPC" \
   --query 'Subnets[0].SubnetId' \
   --output text \
   --region "$REGION")
-echo "DEFAULT_SUBNET=$DEFAULT_SUBNET"
 
-# Get latest Amazon Linux 2023 AMI
+# Get latest Amazon Linux 2023 AMI ID
 AMI_ID=$(aws ec2 describe-images \
   --owners amazon \
   --filters "Name=name,Values=al2023-ami-2023.*-x86_64" \
   --query 'sort_by(Images, &CreationDate)[-1].ImageId' \
   --output text \
   --region "$REGION")
+
+echo "DEFAULT_VPC=$DEFAULT_VPC"
+echo "DEFAULT_SUBNET=$DEFAULT_SUBNET"
 echo "AMI_ID=$AMI_ID"
 ```
 
@@ -156,9 +113,7 @@ echo "AMI_ID=$AMI_ID"
 ## Step 5 – Create Security Group
 
 ```bash
-# Create security group for EC2 instance
-echo "Creating security group..."
-
+# Create security group with SSH access (for potential stress testing)
 SG_ID=$(aws ec2 create-security-group \
   --group-name "cloudwatch-monitoring-sg" \
   --description "Security group for CloudWatch monitoring lab" \
@@ -166,9 +121,8 @@ SG_ID=$(aws ec2 create-security-group \
   --region "$REGION" \
   --query 'GroupId' \
   --output text)
-echo "SG_ID=$SG_ID"
 
-# Allow SSH access (for stress testing later)
+# Allow SSH access from anywhere
 aws ec2 authorize-security-group-ingress \
   --group-id "$SG_ID" \
   --protocol tcp \
@@ -176,7 +130,7 @@ aws ec2 authorize-security-group-ingress \
   --cidr 0.0.0.0/0 \
   --region "$REGION"
 
-echo "✅ Security group created with SSH access"
+echo "SG_ID=$SG_ID"
 ```
 
 ---
@@ -184,13 +138,7 @@ echo "✅ Security group created with SSH access"
 ## Step 6 – Launch EC2 Instance with Detailed Monitoring
 
 ```bash
-echo ""
-echo "================================================"
-echo "LAUNCHING EC2 INSTANCE"
-echo "================================================"
-echo ""
-
-# Launch t2.micro instance with detailed monitoring
+# Launch t2.micro EC2 instance with detailed monitoring enabled (1-minute metric intervals)
 INSTANCE_ID=$(aws ec2 run-instances \
   --image-id "$AMI_ID" \
   --instance-type t2.micro \
@@ -203,14 +151,9 @@ INSTANCE_ID=$(aws ec2 run-instances \
   --output text)
 echo "INSTANCE_ID=$INSTANCE_ID"
 
-echo "✅ EC2 instance launched with detailed monitoring enabled"
-echo ""
-echo "Waiting for instance to be running..."
-aws ec2 wait instance-running \
-  --instance-ids "$INSTANCE_ID" \
-  --region "$REGION"
-
-echo "✅ Instance is running"
+# Wait for instance to reach running state
+aws ec2 wait instance-running --instance-ids "$INSTANCE_ID" --region "$REGION"
+echo "Instance is running"
 ```
 
 ---
@@ -218,28 +161,16 @@ echo "✅ Instance is running"
 ## Step 7 – View CloudWatch Metrics
 
 ```bash
-echo ""
-echo "Waiting 2 minutes for metrics to populate..."
+# Wait for CloudWatch metrics to populate (takes ~2 minutes)
 sleep 120
 
-echo ""
-echo "Available CloudWatch metrics for instance:"
-
-# List available metrics for the instance
+# List all available CloudWatch metrics for the instance
 aws cloudwatch list-metrics \
   --namespace AWS/EC2 \
   --dimensions Name=InstanceId,Value="$INSTANCE_ID" \
   --region "$REGION" \
   --query 'Metrics[*].MetricName' \
   --output table
-
-echo ""
-echo "Common EC2 metrics:"
-echo "  - CPUUtilization: Percentage of CPU used"
-echo "  - NetworkIn: Bytes received"
-echo "  - NetworkOut: Bytes sent"
-echo "  - DiskReadBytes: Bytes read from disk"
-echo "  - DiskWriteBytes: Bytes written to disk"
 ```
 
 ---
@@ -247,10 +178,7 @@ echo "  - DiskWriteBytes: Bytes written to disk"
 ## Step 8 – Get Current CPU Utilization
 
 ```bash
-echo ""
-echo "Getting current CPU utilization..."
-
-# Get CPU utilization for last 5 minutes
+# Get CPU utilization statistics for last 5 minutes
 aws cloudwatch get-metric-statistics \
   --namespace AWS/EC2 \
   --metric-name CPUUtilization \
@@ -269,10 +197,7 @@ aws cloudwatch get-metric-statistics \
 ## Step 9 – Create CloudWatch Dashboard
 
 ```bash
-echo ""
-echo "Creating CloudWatch dashboard..."
-
-# Create dashboard with CPU and Network metrics
+# Create CloudWatch dashboard JSON with CPU, Network, and Disk I/O widgets
 cat > dashboard-config.json <<EOF
 {
   "widgets": [
@@ -332,16 +257,13 @@ cat > dashboard-config.json <<EOF
 }
 EOF
 
-# Create dashboard
+# Create dashboard from JSON configuration
 aws cloudwatch put-dashboard \
   --dashboard-name "$DASHBOARD_NAME" \
   --dashboard-body file://dashboard-config.json \
   --region "$REGION"
 
-echo "✅ CloudWatch dashboard created"
-echo ""
-echo "Dashboard URL:"
-echo "https://${REGION}.console.aws.amazon.com/cloudwatch/home?region=${REGION}#dashboards:name=${DASHBOARD_NAME}"
+echo "Dashboard URL: https://${REGION}.console.aws.amazon.com/cloudwatch/home?region=${REGION}#dashboards:name=${DASHBOARD_NAME}"
 ```
 
 ---
@@ -349,10 +271,7 @@ echo "https://${REGION}.console.aws.amazon.com/cloudwatch/home?region=${REGION}#
 ## Step 10 – Create CloudWatch Alarm for High CPU
 
 ```bash
-echo ""
-echo "Creating CloudWatch alarm for high CPU..."
-
-# Create alarm that triggers when CPU > 70% for 2 consecutive periods
+# Create CloudWatch alarm that triggers when CPU > 70% for 2 consecutive 1-minute periods
 aws cloudwatch put-metric-alarm \
   --alarm-name "$ALARM_NAME" \
   --alarm-description "Alert when CPU exceeds 70%" \
@@ -366,14 +285,6 @@ aws cloudwatch put-metric-alarm \
   --dimensions Name=InstanceId,Value="$INSTANCE_ID" \
   --alarm-actions "$TOPIC_ARN" \
   --region "$REGION"
-
-echo "✅ CloudWatch alarm created"
-echo ""
-echo "Alarm configuration:"
-echo "  - Metric: CPUUtilization"
-echo "  - Threshold: > 70%"
-echo "  - Evaluation: 2 periods of 60 seconds"
-echo "  - Action: Send email via SNS"
 ```
 
 ---
@@ -381,20 +292,12 @@ echo "  - Action: Send email via SNS"
 ## Step 11 – View Alarm Status
 
 ```bash
-echo ""
-echo "Checking alarm status..."
-
+# Check alarm status (OK, ALARM, or INSUFFICIENT_DATA)
 aws cloudwatch describe-alarms \
   --alarm-names "$ALARM_NAME" \
   --region "$REGION" \
   --query 'MetricAlarms[0].{Name:AlarmName,State:StateValue,Reason:StateReason}' \
   --output table
-
-echo ""
-echo "Alarm states:"
-echo "  - OK: Metric is below threshold"
-echo "  - ALARM: Metric exceeded threshold"
-echo "  - INSUFFICIENT_DATA: Not enough data yet"
 ```
 
 ---
@@ -402,13 +305,7 @@ echo "  - INSUFFICIENT_DATA: Not enough data yet"
 ## Step 12 – Generate CPU Load to Trigger Alarm
 
 ```bash
-echo ""
-echo "================================================"
-echo "TRIGGERING ALARM WITH CPU LOAD"
-echo "================================================"
-echo ""
-
-# Get instance public IP for SSH (optional - for manual testing)
+# Get instance public IP for reference
 PUBLIC_IP=$(aws ec2 describe-instances \
   --instance-ids "$INSTANCE_ID" \
   --query 'Reservations[0].Instances[0].PublicIpAddress' \
@@ -416,11 +313,7 @@ PUBLIC_IP=$(aws ec2 describe-instances \
   --region "$REGION")
 echo "Instance Public IP: $PUBLIC_IP"
 
-echo ""
-echo "Option 1: Using SSM (no SSH key needed)"
-echo "Running CPU stress test via SSM..."
-
-# Install stress tool and run it
+# Run CPU stress test via SSM (installs stress tool and runs for 3 minutes)
 aws ssm send-command \
   --instance-ids "$INSTANCE_ID" \
   --document-name "AWS-RunShellScript" \
@@ -428,14 +321,9 @@ aws ssm send-command \
   --region "$REGION" \
   2>/dev/null || echo "⚠️  SSM not available, skipping automated stress test"
 
-echo ""
-echo "Stress test running for 3 minutes..."
-echo "CPU will spike to ~100% triggering the alarm"
-echo ""
-echo "Monitoring alarm status (checking every 30 seconds)..."
-echo ""
+echo "Stress test running - monitoring alarm status every 30 seconds..."
 
-# Monitor alarm for 4 minutes
+# Monitor alarm status for up to 4 minutes
 for i in {1..8}; do
     ALARM_STATE=$(aws cloudwatch describe-alarms \
       --alarm-names "$ALARM_NAME" \
@@ -446,9 +334,7 @@ for i in {1..8}; do
     echo "Check $i/8: Alarm state = $ALARM_STATE"
     
     if [ "$ALARM_STATE" = "ALARM" ]; then
-        echo ""
-        echo "🚨 ALARM TRIGGERED! 🚨"
-        echo "Check your email for notification"
+        echo "🚨 ALARM TRIGGERED! Check your email for notification"
         break
     fi
     
@@ -461,9 +347,7 @@ done
 ## Step 13 – View Alarm History
 
 ```bash
-echo ""
-echo "Viewing alarm history..."
-
+# View alarm state change history (last 5 updates)
 aws cloudwatch describe-alarm-history \
   --alarm-name "$ALARM_NAME" \
   --history-item-type StateUpdate \
@@ -478,24 +362,8 @@ aws cloudwatch describe-alarm-history \
 ## Step 14 – View Dashboard Metrics
 
 ```bash
-echo ""
-echo "================================================"
-echo "DASHBOARD CREATED"
-echo "================================================"
-echo ""
-echo "View your dashboard in AWS Console:"
-echo "https://${REGION}.console.aws.amazon.com/cloudwatch/home?region=${REGION}#dashboards:name=${DASHBOARD_NAME}"
-echo ""
-echo "Dashboard widgets:"
-echo "  1. CPU Utilization (should show spike)"
-echo "  2. Network Traffic"
-echo "  3. Disk I/O"
-echo ""
-echo "You can customize dashboards with additional widgets:"
-echo "  - Line graphs, bar charts, numbers"
-echo "  - Multiple metrics per widget"
-echo "  - Custom time ranges"
-echo "  - Annotations and alarms"
+# Display dashboard URL to view CPU spike, network traffic, and disk I/O
+echo "View dashboard: https://${REGION}.console.aws.amazon.com/cloudwatch/home?region=${REGION}#dashboards:name=${DASHBOARD_NAME}"
 ```
 
 ---
@@ -503,9 +371,7 @@ echo "  - Annotations and alarms"
 ## Step 15 – List All Alarms
 
 ```bash
-echo ""
-echo "All CloudWatch alarms in this region:"
-
+# List all CloudWatch alarms in the region
 aws cloudwatch describe-alarms \
   --region "$REGION" \
   --query 'MetricAlarms[*].{Name:AlarmName,Metric:MetricName,State:StateValue,Threshold:Threshold}' \
@@ -517,40 +383,20 @@ aws cloudwatch describe-alarms \
 ## Step 16 – Cleanup Resources
 
 ```bash
-echo ""
-echo "Cleaning up resources..."
-
 # Delete CloudWatch alarm
-echo "Deleting CloudWatch alarm..."
-aws cloudwatch delete-alarms \
-  --alarm-names "$ALARM_NAME" \
-  --region "$REGION"
+aws cloudwatch delete-alarms --alarm-names "$ALARM_NAME" --region "$REGION"
 
 # Delete CloudWatch dashboard
-echo "Deleting CloudWatch dashboard..."
-aws cloudwatch delete-dashboards \
-  --dashboard-names "$DASHBOARD_NAME" \
-  --region "$REGION"
+aws cloudwatch delete-dashboards --dashboard-names "$DASHBOARD_NAME" --region "$REGION"
 
-# Terminate EC2 instance
-echo "Terminating EC2 instance..."
-aws ec2 terminate-instances \
-  --instance-ids "$INSTANCE_ID" \
-  --region "$REGION"
-
-echo "Waiting for instance to terminate..."
-aws ec2 wait instance-terminated \
-  --instance-ids "$INSTANCE_ID" \
-  --region "$REGION"
+# Terminate EC2 instance and wait for termination
+aws ec2 terminate-instances --instance-ids "$INSTANCE_ID" --region "$REGION"
+aws ec2 wait instance-terminated --instance-ids "$INSTANCE_ID" --region "$REGION"
 
 # Delete security group
-echo "Deleting security group..."
-aws ec2 delete-security-group \
-  --group-id "$SG_ID" \
-  --region "$REGION"
+aws ec2 delete-security-group --group-id "$SG_ID" --region "$REGION"
 
-# Unsubscribe email from SNS
-echo "Unsubscribing email from SNS..."
+# Unsubscribe email from SNS topic
 SUBSCRIPTION_ARN=$(aws sns list-subscriptions-by-topic \
   --topic-arn "$TOPIC_ARN" \
   --region "$REGION" \
@@ -558,29 +404,16 @@ SUBSCRIPTION_ARN=$(aws sns list-subscriptions-by-topic \
   --output text)
 
 if [ "$SUBSCRIPTION_ARN" != "PendingConfirmation" ] && [ -n "$SUBSCRIPTION_ARN" ]; then
-    aws sns unsubscribe \
-      --subscription-arn "$SUBSCRIPTION_ARN" \
-      --region "$REGION"
+    aws sns unsubscribe --subscription-arn "$SUBSCRIPTION_ARN" --region "$REGION"
 fi
 
 # Delete SNS topic
-echo "Deleting SNS topic..."
-aws sns delete-topic \
-  --topic-arn "$TOPIC_ARN" \
-  --region "$REGION"
+aws sns delete-topic --topic-arn "$TOPIC_ARN" --region "$REGION"
 
-# Delete local files
+# Delete local dashboard configuration file
 rm -f dashboard-config.json
 
-echo ""
-echo "✅ Cleanup completed successfully!"
-echo ""
-echo "All resources deleted:"
-echo "- CloudWatch alarm"
-echo "- CloudWatch dashboard"
-echo "- EC2 instance"
-echo "- Security group"
-echo "- SNS topic and subscription"
+echo "Cleanup complete"
 ```
 
 ---
@@ -658,15 +491,6 @@ EC2 Instance → CloudWatch Agent → Metrics (every 1 or 5 minutes)
 - Add horizontal annotations for thresholds
 - Include alarm status in dashboards
 - Share dashboards across teams
-
----
-
-## Free Tier Notes
-- **CloudWatch**: 10 alarms free, 1M API requests, 5GB logs ingestion
-- **SNS**: 1,000 email notifications/month free
-- **EC2**: t2.micro 750 hours/month free (first year)
-
-This lab uses minimal resources, staying well within free tier limits.
 
 ---
 

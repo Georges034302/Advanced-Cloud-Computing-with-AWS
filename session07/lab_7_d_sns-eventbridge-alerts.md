@@ -23,15 +23,6 @@ This lab demonstrates event-driven alerting using Amazon SNS and EventBridge. Yo
 
 ---
 
-## Architecture
-
-```
-EC2 State Change → EventBridge Rule → SNS Topic → Email Notification
-(Start/Stop/Terminate)   (Captures)     (Publishes)   (You receive)
-```
-
----
-
 ## Step 1 – Set Variables and Verify Prerequisites
 
 ```bash
