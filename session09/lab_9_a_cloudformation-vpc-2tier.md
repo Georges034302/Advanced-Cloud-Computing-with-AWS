@@ -36,11 +36,10 @@ Internet → Classic Load Balancer → Web Server (public) → Backend API (priv
 ## Step 1 – Create CloudFormation Template
 
 ```bash
-# Set region
+# Set AWS region for stack deployment
 REGION="ap-southeast-2"
-echo "REGION=$REGION"
 
-# Create template file
+# Create CloudFormation template (VPC, subnets, instances, load balancer)
 cat > two-tier-stack.yaml <<'EOF'
 AWSTemplateFormatVersion: '2010-09-09'
 Description: 'Two-Tier VPC with Web and Backend API'
@@ -294,7 +293,7 @@ Outputs:
     Value: !Ref VPC
 EOF
 
-echo "✅ CloudFormation template created: two-tier-stack.yaml"
+echo "two-tier-stack.yaml"
 ```
 
 ---
@@ -302,14 +301,12 @@ echo "✅ CloudFormation template created: two-tier-stack.yaml"
 ## Step 2 – Validate Template
 
 ```bash
-echo ""
-echo "Validating CloudFormation template..."
-
+# Validate CloudFormation template syntax and parameters
 aws cloudformation validate-template \
   --template-body file://two-tier-stack.yaml \
-  --region "$REGION"
-
-echo "✅ Template is valid"
+  --region "$REGION" \
+  --query 'Description' \
+  --output text
 ```
 
 ---
@@ -317,11 +314,8 @@ echo "✅ Template is valid"
 ## Step 3 – Deploy Stack
 
 ```bash
-echo ""
-echo "Deploying CloudFormation stack..."
-
+# Deploy CloudFormation stack (creates all resources)
 STACK_NAME="two-tier-vpc-stack"
-echo "STACK_NAME=$STACK_NAME"
 
 aws cloudformation create-stack \
   --stack-name "$STACK_NAME" \
@@ -329,15 +323,12 @@ aws cloudformation create-stack \
   --region "$REGION" \
   --tags Key=Project,Value=CloudFormation-Lab
 
-echo "✅ Stack deployment initiated"
-echo ""
-echo "Waiting for stack creation (5-7 minutes)..."
-
+# Wait for stack creation to complete (5-7 minutes)
 aws cloudformation wait stack-create-complete \
   --stack-name "$STACK_NAME" \
   --region "$REGION"
 
-echo "✅ Stack created successfully!"
+echo "$STACK_NAME"
 ```
 
 ---
@@ -345,16 +336,14 @@ echo "✅ Stack created successfully!"
 ## Step 4 – View Stack Outputs
 
 ```bash
-echo ""
-echo "Stack outputs:"
-
+# Display stack outputs (URLs, VPC ID)
 aws cloudformation describe-stacks \
   --stack-name "$STACK_NAME" \
   --region "$REGION" \
   --query 'Stacks[0].Outputs[*].{Key:OutputKey,Value:OutputValue}' \
   --output table
 
-# Get URLs
+# Extract application and API URLs
 APP_URL=$(aws cloudformation describe-stacks \
   --stack-name "$STACK_NAME" \
   --region "$REGION" \
@@ -367,9 +356,8 @@ JOKE_URL=$(aws cloudformation describe-stacks \
   --query 'Stacks[0].Outputs[?OutputKey==`JokeAPIURL`].OutputValue' \
   --output text)
 
-echo ""
-echo "Application URL: $APP_URL"
-echo "Joke API: $JOKE_URL"
+echo "APP_URL: $APP_URL"
+echo "JOKE_URL: $JOKE_URL"
 ```
 
 ---
@@ -377,23 +365,17 @@ echo "Joke API: $JOKE_URL"
 ## Step 5 – Test Application
 
 ```bash
-echo ""
-echo "Testing application (waiting 2 minutes for initialization)..."
+# Wait for UserData scripts to complete (install packages, start services)
 sleep 120
 
-echo ""
-echo "Test 1: Backend status"
+# Test backend API status endpoint
 curl -s "${APP_URL}/api/" | python3 -m json.tool
 
-echo ""
-echo ""
-echo "Test 2: Get joke"
+# Test backend API joke endpoint
 curl -s "$JOKE_URL" | python3 -m json.tool
 
-echo ""
-echo ""
-echo "✅ Application working!"
-echo "Open in browser: $APP_URL"
+# Display browser URL
+echo "Browser: $APP_URL"
 ```
 
 ---
@@ -401,9 +383,7 @@ echo "Open in browser: $APP_URL"
 ## Step 6 – View Stack Resources
 
 ```bash
-echo ""
-echo "Stack resources:"
-
+# List all CloudFormation stack resources (VPC, subnets, instances, load balancer, security groups)
 aws cloudformation describe-stack-resources \
   --stack-name "$STACK_NAME" \
   --region "$REGION" \
@@ -416,20 +396,20 @@ aws cloudformation describe-stack-resources \
 ## Step 7 – Cleanup
 
 ```bash
-echo ""
-echo "Deleting CloudFormation stack..."
-
+# Delete CloudFormation stack (removes all resources)
 aws cloudformation delete-stack \
   --stack-name "$STACK_NAME" \
   --region "$REGION"
 
-echo "Waiting for stack deletion..."
-
+# Wait for stack deletion to complete
 aws cloudformation wait stack-delete-complete \
   --stack-name "$STACK_NAME" \
   --region "$REGION"
 
-echo "✅ Stack deleted successfully!"
+# Delete local template file
+rm -f two-tier-stack.yaml
+
+echo "Cleanup complete"
 ```
 
 ---
