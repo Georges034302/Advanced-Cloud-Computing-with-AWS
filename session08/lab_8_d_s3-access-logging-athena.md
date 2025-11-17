@@ -1,4 +1,5 @@
 # Lab 8.D: S3 Access Logging and Analysis with Athena
+<img width="1536" height="1024" alt="IMG" src="https://github.com/user-attachments/assets/fff144d0-c182-46cd-94d8-39424e732f22" />
 
 ## Overview
 This lab demonstrates S3 server access logging for tracking all requests made to your S3 buckets. Access logs capture detailed information about every request, enabling security audits, compliance reporting, and usage analysis. You'll enable S3 access logging, store logs in a dedicated bucket, create an Athena table to query logs with SQL, and analyze access patterns to identify unauthorized activity.
