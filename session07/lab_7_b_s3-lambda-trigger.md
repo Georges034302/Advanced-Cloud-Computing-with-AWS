@@ -1,4 +1,5 @@
 # Lab 7.B: Process CSV Files with S3 Trigger and Lambda
+<img width="1536" height="1024" alt="IMG" src="https://github.com/user-attachments/assets/d5ca586f-3ad2-4758-ae29-99774b9f2036" />
 
 ## Overview
 This lab demonstrates event-driven data processing using S3, Lambda, and DynamoDB. You'll create an S3 bucket that triggers a Node.js Lambda function when CSV files are uploaded. The Lambda function parses student records (ID, NAME, MARK, GRADE) from the CSV and stores them in DynamoDB. This architecture is perfect for automated data ingestion pipelines.
