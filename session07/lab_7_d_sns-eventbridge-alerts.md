@@ -1,4 +1,5 @@
 # Lab 7.D: Monitor EC2 with SNS Email Alerts and EventBridge
+<img width="1536" height="1024" alt="IMG" src="https://github.com/user-attachments/assets/43cda72e-6f7b-4756-b8e4-18d7846ba2c7" />
 
 ## Overview
 This lab demonstrates event-driven alerting using Amazon SNS and EventBridge. You'll create an SNS topic with email subscription, configure EventBridge to monitor EC2 instance state changes, and receive email notifications when instances start, stop, or terminate. This is a fundamental pattern for infrastructure monitoring and alerting.
