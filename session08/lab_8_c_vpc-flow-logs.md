@@ -1,4 +1,5 @@
 # Lab 8.C: VPC Flow Logs for Network Traffic Monitoring
+<img width="1368" height="847" alt="IMG" src="https://github.com/user-attachments/assets/1250e88f-a78e-4e88-b51c-4f6b3c0027e7" />
 
 ## Overview
 This lab demonstrates VPC Flow Logs for monitoring network traffic in your VPC. Flow Logs capture information about IP traffic going to and from network interfaces, enabling security analysis, troubleshooting connectivity issues, and detecting suspicious activity. You'll enable Flow Logs, send logs to CloudWatch, analyze traffic patterns with Logs Insights, and create alarms for security threats.
