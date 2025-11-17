@@ -25,20 +25,6 @@ This lab builds a complete CI/CD pipeline using AWS CodePipeline to orchestrate 
 
 ---
 
-## Architecture
-
-```
-CodeCommit (Source)
-      ↓
-CodeBuild (Build Docker Image)
-      ↓
-Manual Approval (Optional)
-      ↓
-ECS Deployment (Deploy Container)
-```
-
----
-
 ## Step 1 – Set Variables
 
 ```bash

@@ -26,22 +26,6 @@ This lab demonstrates CI/CD using GitHub Actions to deploy serverless applicatio
 
 ---
 
-## Architecture
-
-```
-GitHub Repository
-      ↓
-  git push (trigger)
-      ↓
-GitHub Actions Workflow
-      ↓
-AWS OIDC Authentication
-      ↓
-Deploy Lambda Function / S3 Website
-```
-
----
-
 ## Step 1 – Set Variables
 
 ```bash

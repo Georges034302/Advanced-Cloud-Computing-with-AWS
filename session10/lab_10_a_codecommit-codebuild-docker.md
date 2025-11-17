@@ -25,21 +25,6 @@ This lab demonstrates AWS-native CI/CD by using CodeCommit for source control an
 
 ---
 
-## Architecture
-
-```
-Developer → git push → CodeCommit Repository
-                            ↓
-                      CodeBuild Project
-                       (buildspec.yml)
-                            ↓
-                     Build Docker Image
-                            ↓
-                  Push to Amazon ECR
-```
-
----
-
 ## Step 1 – Set Variables
 
 ```bash

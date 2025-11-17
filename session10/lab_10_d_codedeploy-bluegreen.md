@@ -23,21 +23,6 @@ This lab demonstrates zero-downtime deployments using AWS CodeDeploy with blue/g
 
 ---
 
-## Architecture
-
-```
-Blue Environment (v1.0)          Green Environment (v2.0)
-    EC2 Instance                     EC2 Instance
-        ↓                                ↓
-    Application Load Balancer
-            ↓
-      Traffic Shift (10% → 50% → 100%)
-            ↓
-    CodeDeploy manages deployment
-```
-
----
-
 ## Step 1 – Set Variables
 
 ```bash
