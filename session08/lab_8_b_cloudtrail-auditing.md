@@ -1,4 +1,5 @@
 # Lab 8.B: CloudTrail API Auditing and Monitoring
+<img width="1536" height="1024" alt="IMG" src="https://github.com/user-attachments/assets/cf80cee3-04cf-42ab-a6bb-c66241e7b5f8" />
 
 ## Overview
 This lab demonstrates AWS CloudTrail for API activity logging and security auditing. CloudTrail records all API calls made in your AWS account, creating a complete audit trail for compliance, security analysis, and troubleshooting. You'll enable CloudTrail, store logs in S3, send logs to CloudWatch for real-time monitoring, query logs with Logs Insights, and create alarms for critical API operations.
