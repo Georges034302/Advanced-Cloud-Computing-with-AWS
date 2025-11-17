@@ -3,8 +3,6 @@
 ## Overview
 This lab demonstrates S3 server access logging for tracking all requests made to your S3 buckets. Access logs capture detailed information about every request, enabling security audits, compliance reporting, and usage analysis. You'll enable S3 access logging, store logs in a dedicated bucket, create an Athena table to query logs with SQL, and analyze access patterns to identify unauthorized activity.
 
-**💰 Cost**: FREE (S3 access logging free, 5GB S3 storage free, 1TB Athena queries free)
-
 ---
 
 ## Objectives
@@ -27,52 +25,20 @@ This lab demonstrates S3 server access logging for tracking all requests made to
 
 ---
 
-## Architecture
-
-```
-S3 Bucket (source) → Access Logs → S3 Bucket (logs)
-                                          ↓
-                                    Athena Table → SQL Queries
-                                          ↓
-                                    Analysis (top IPs, errors, bandwidth)
-```
-
----
-
-## Step 1 – Set Variables and Verify Prerequisites
+## Step 1 – Set Environment Variables
 
 ```bash
-# Get AWS account ID
-ACCOUNT_ID=$(aws sts get-caller-identity \
-  --query Account \
-  --output text)
-echo "ACCOUNT_ID=$ACCOUNT_ID"
-
-# Set region
+# Configure environment variables
 REGION="ap-southeast-2"
-echo "REGION=$REGION"
-
-# Set resource names with unique suffix
+ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
 SUFFIX=$(date +%s)
-echo "SUFFIX=$SUFFIX"
-
 SOURCE_BUCKET="my-website-${SUFFIX}"
-echo "SOURCE_BUCKET=$SOURCE_BUCKET"
-
 LOGS_BUCKET="s3-access-logs-${SUFFIX}"
-echo "LOGS_BUCKET=$LOGS_BUCKET"
-
 ATHENA_DATABASE="s3_access_logs_db"
-echo "ATHENA_DATABASE=$ATHENA_DATABASE"
-
 ATHENA_TABLE="access_logs"
-echo "ATHENA_TABLE=$ATHENA_TABLE"
-
 ATHENA_RESULTS="athena-query-results-${SUFFIX}"
-echo "ATHENA_RESULTS=$ATHENA_RESULTS"
 
-echo ""
-echo "✅ Prerequisites verified"
+echo "Source: $SOURCE_BUCKET | Logs: $LOGS_BUCKET | Region: $REGION"
 ```
 
 ---
@@ -80,22 +46,13 @@ echo "✅ Prerequisites verified"
 ## Step 2 – Create Source S3 Bucket
 
 ```bash
-echo ""
-echo "Creating source S3 bucket..."
-
 # Create source bucket (the one we'll monitor)
-if [ "$REGION" = "us-east-1" ]; then
-    aws s3api create-bucket \
-      --bucket "$SOURCE_BUCKET" \
-      --region "$REGION"
-else
-    aws s3api create-bucket \
-      --bucket "$SOURCE_BUCKET" \
-      --region "$REGION" \
-      --create-bucket-configuration LocationConstraint="$REGION"
-fi
+aws s3api create-bucket \
+  --bucket "$SOURCE_BUCKET" \
+  --region "$REGION" \
+  --create-bucket-configuration LocationConstraint="$REGION"
 
-echo "✅ Source bucket created: $SOURCE_BUCKET"
+echo "Source bucket: $SOURCE_BUCKET"
 ```
 
 ---
@@ -103,21 +60,13 @@ echo "✅ Source bucket created: $SOURCE_BUCKET"
 ## Step 3 – Create Logging S3 Bucket
 
 ```bash
-echo "Creating logging S3 bucket..."
-
 # Create logging bucket (stores access logs)
-if [ "$REGION" = "us-east-1" ]; then
-    aws s3api create-bucket \
-      --bucket "$LOGS_BUCKET" \
-      --region "$REGION"
-else
-    aws s3api create-bucket \
-      --bucket "$LOGS_BUCKET" \
-      --region "$REGION" \
-      --create-bucket-configuration LocationConstraint="$REGION"
-fi
+aws s3api create-bucket \
+  --bucket "$LOGS_BUCKET" \
+  --region "$REGION" \
+  --create-bucket-configuration LocationConstraint="$REGION"
 
-echo "✅ Logging bucket created: $LOGS_BUCKET"
+echo "Logs bucket: $LOGS_BUCKET"
 ```
 
 ---
@@ -125,17 +74,12 @@ echo "✅ Logging bucket created: $LOGS_BUCKET"
 ## Step 4 – Configure Logging Bucket Permissions
 
 ```bash
-echo ""
-echo "Configuring logging bucket permissions..."
-
-# Put bucket ACL to allow S3 log delivery
+# Grant S3 Log Delivery group write and read-acp permissions
 aws s3api put-bucket-acl \
   --bucket "$LOGS_BUCKET" \
   --grant-write 'URI="http://acs.amazonaws.com/groups/s3/LogDelivery"' \
   --grant-read-acp 'URI="http://acs.amazonaws.com/groups/s3/LogDelivery"' \
   --region "$REGION"
-
-echo "✅ Logging bucket ACL configured for log delivery"
 ```
 
 ---
@@ -143,9 +87,7 @@ echo "✅ Logging bucket ACL configured for log delivery"
 ## Step 5 – Enable S3 Access Logging
 
 ```bash
-echo "Enabling S3 access logging on source bucket..."
-
-# Create logging configuration JSON
+# Create logging configuration pointing to logs bucket
 cat > logging-config.json <<EOF
 {
   "LoggingEnabled": {
@@ -155,18 +97,13 @@ cat > logging-config.json <<EOF
 }
 EOF
 
-# Enable logging
+# Enable logging on source bucket
 aws s3api put-bucket-logging \
   --bucket "$SOURCE_BUCKET" \
   --bucket-logging-status file://logging-config.json \
   --region "$REGION"
 
-echo "✅ S3 access logging enabled"
-echo ""
-echo "Logging configuration:"
-echo "  - Source bucket: $SOURCE_BUCKET"
-echo "  - Logs bucket: $LOGS_BUCKET"
-echo "  - Log prefix: access-logs/"
+echo "Logging enabled: $SOURCE_BUCKET → $LOGS_BUCKET/access-logs/"
 ```
 
 ---
@@ -174,9 +111,6 @@ echo "  - Log prefix: access-logs/"
 ## Step 6 – Upload Sample Files to Source Bucket
 
 ```bash
-echo ""
-echo "Uploading sample files to generate access logs..."
-
 # Create sample HTML file
 cat > index.html <<'EOF'
 <!DOCTYPE html>
@@ -189,18 +123,13 @@ cat > index.html <<'EOF'
 </html>
 EOF
 
-# Create sample data file
 echo "Sample data for logging demo" > data.txt
-
-# Create sample image placeholder
 echo "This would be an image file" > image.jpg
 
-# Upload files
+# Upload files to source bucket
 aws s3 cp index.html s3://"$SOURCE_BUCKET"/index.html --region "$REGION"
 aws s3 cp data.txt s3://"$SOURCE_BUCKET"/data/data.txt --region "$REGION"
 aws s3 cp image.jpg s3://"$SOURCE_BUCKET"/images/image.jpg --region "$REGION"
-
-echo "✅ Sample files uploaded"
 ```
 
 ---
@@ -208,9 +137,6 @@ echo "✅ Sample files uploaded"
 ## Step 7 – Generate Access Logs
 
 ```bash
-echo ""
-echo "Generating access logs by accessing bucket objects..."
-
 # List bucket contents (generates ListBucket request)
 aws s3 ls s3://"$SOURCE_BUCKET" --region "$REGION"
 
@@ -222,9 +148,6 @@ aws s3 cp s3://"$SOURCE_BUCKET"/images/image.jpg /tmp/image.jpg --region "$REGIO
 # Try to access non-existent file (generates 404 error)
 aws s3 cp s3://"$SOURCE_BUCKET"/notfound.txt /tmp/notfound.txt --region "$REGION" 2>/dev/null || echo "404 error generated"
 
-# Try to access without permission (generates 403 error - will fail gracefully)
-echo "Simulating unauthorized access..."
-
 # Upload more files
 echo "Additional content" > file1.txt
 echo "More data" > file2.txt
@@ -234,11 +157,7 @@ aws s3 cp file2.txt s3://"$SOURCE_BUCKET"/file2.txt --region "$REGION"
 # Delete a file (generates DELETE request)
 aws s3 rm s3://"$SOURCE_BUCKET"/file2.txt --region "$REGION"
 
-echo ""
-echo "✅ Access logs generated"
-echo ""
-echo "Waiting 2 minutes for logs to be delivered to logging bucket..."
-echo "(S3 access logs are delivered on a best-effort basis, usually within a few minutes)"
+echo "Waiting 2min for logs to be delivered to logging bucket..."
 sleep 120
 ```
 
@@ -247,20 +166,14 @@ sleep 120
 ## Step 8 – Verify Logs Delivered
 
 ```bash
-echo ""
-echo "Checking if access logs have been delivered..."
-
-# List log files
+# Check if access logs have been delivered
 LOG_COUNT=$(aws s3 ls s3://"$LOGS_BUCKET"/access-logs/ --recursive --region "$REGION" | wc -l)
 echo "Log files found: $LOG_COUNT"
 
 if [ "$LOG_COUNT" -gt 0 ]; then
-    echo "✅ Access logs delivered successfully"
-    echo ""
-    echo "Sample log files:"
     aws s3 ls s3://"$LOGS_BUCKET"/access-logs/ --recursive --region "$REGION" | head -5
 else
-    echo "⚠️  No logs yet, waiting another minute..."
+    echo "No logs yet, waiting another minute..."
     sleep 60
     aws s3 ls s3://"$LOGS_BUCKET"/access-logs/ --recursive --region "$REGION"
 fi
@@ -271,22 +184,13 @@ fi
 ## Step 9 – Create Athena Query Results Bucket
 
 ```bash
-echo ""
-echo "Creating Athena query results bucket..."
-
 # Create bucket for Athena query results
-if [ "$REGION" = "us-east-1" ]; then
-    aws s3api create-bucket \
-      --bucket "$ATHENA_RESULTS" \
-      --region "$REGION"
-else
-    aws s3api create-bucket \
-      --bucket "$ATHENA_RESULTS" \
-      --region "$REGION" \
-      --create-bucket-configuration LocationConstraint="$REGION"
-fi
+aws s3api create-bucket \
+  --bucket "$ATHENA_RESULTS" \
+  --region "$REGION" \
+  --create-bucket-configuration LocationConstraint="$REGION"
 
-echo "✅ Athena results bucket created: $ATHENA_RESULTS"
+echo "Athena results bucket: $ATHENA_RESULTS"
 ```
 
 ---
@@ -396,16 +300,7 @@ echo "✅ Athena table created"
 ## Step 12 – Query All Access Logs
 
 ```bash
-echo ""
-echo "================================================"
-echo "QUERYING S3 ACCESS LOGS WITH ATHENA"
-echo "================================================"
-echo ""
-
-# Query 1: Show all access logs
-echo "Query 1: Recent access log entries"
-echo ""
-
+# Query 1: Recent access log entries
 QUERY_ID=$(aws athena start-query-execution \
   --query-string "SELECT requestdatetime, remoteip, operation, key, httpstatus FROM ${ATHENA_DATABASE}.${ATHENA_TABLE} ORDER BY requestdatetime DESC LIMIT 20" \
   --result-configuration "OutputLocation=s3://${ATHENA_RESULTS}/" \
@@ -414,17 +309,13 @@ QUERY_ID=$(aws athena start-query-execution \
   --query 'QueryExecutionId' \
   --output text)
 
-# Wait for query to complete
 sleep 5
 
-# Get query results
 aws athena get-query-results \
   --query-execution-id "$QUERY_ID" \
   --region "$REGION" \
   --query 'ResultSet.Rows[*].Data[*].VarCharValue' \
   --output table
-
-echo ""
 ```
 
 ---
@@ -432,9 +323,7 @@ echo ""
 ## Step 13 – Query Top Source IPs
 
 ```bash
-echo "Query 2: Top source IP addresses (most active)"
-echo ""
-
+# Query 2: Top source IP addresses (most active)
 QUERY_ID=$(aws athena start-query-execution \
   --query-string "SELECT remoteip, COUNT(*) as request_count FROM ${ATHENA_DATABASE}.${ATHENA_TABLE} GROUP BY remoteip ORDER BY request_count DESC LIMIT 10" \
   --result-configuration "OutputLocation=s3://${ATHENA_RESULTS}/" \
@@ -450,8 +339,6 @@ aws athena get-query-results \
   --region "$REGION" \
   --query 'ResultSet.Rows[*].Data[*].VarCharValue' \
   --output table
-
-echo ""
 ```
 
 ---
@@ -459,9 +346,7 @@ echo ""
 ## Step 14 – Query by HTTP Status Codes
 
 ```bash
-echo "Query 3: Requests by HTTP status code"
-echo ""
-
+# Query 3: Requests by HTTP status code (200=Success, 404=NotFound, 403=Forbidden)
 QUERY_ID=$(aws athena start-query-execution \
   --query-string "SELECT httpstatus, COUNT(*) as count FROM ${ATHENA_DATABASE}.${ATHENA_TABLE} GROUP BY httpstatus ORDER BY count DESC" \
   --result-configuration "OutputLocation=s3://${ATHENA_RESULTS}/" \
@@ -477,14 +362,6 @@ aws athena get-query-results \
   --region "$REGION" \
   --query 'ResultSet.Rows[*].Data[*].VarCharValue' \
   --output table
-
-echo ""
-echo "HTTP status codes:"
-echo "  - 200: Success"
-echo "  - 404: Not Found"
-echo "  - 403: Forbidden (unauthorized)"
-echo "  - 500: Server Error"
-echo ""
 ```
 
 ---
@@ -492,9 +369,7 @@ echo ""
 ## Step 15 – Query Top Accessed Objects
 
 ```bash
-echo "Query 4: Most accessed objects"
-echo ""
-
+# Query 4: Most accessed objects
 QUERY_ID=$(aws athena start-query-execution \
   --query-string "SELECT key, COUNT(*) as access_count FROM ${ATHENA_DATABASE}.${ATHENA_TABLE} WHERE key IS NOT NULL GROUP BY key ORDER BY access_count DESC LIMIT 10" \
   --result-configuration "OutputLocation=s3://${ATHENA_RESULTS}/" \
@@ -510,8 +385,6 @@ aws athena get-query-results \
   --region "$REGION" \
   --query 'ResultSet.Rows[*].Data[*].VarCharValue' \
   --output table
-
-echo ""
 ```
 
 ---
@@ -519,9 +392,7 @@ echo ""
 ## Step 16 – Query Failed Requests (Errors)
 
 ```bash
-echo "Query 5: Failed requests (4xx and 5xx errors)"
-echo ""
-
+# Query 5: Failed requests (4xx and 5xx errors)
 QUERY_ID=$(aws athena start-query-execution \
   --query-string "SELECT requestdatetime, remoteip, operation, key, httpstatus, errorcode FROM ${ATHENA_DATABASE}.${ATHENA_TABLE} WHERE httpstatus LIKE '4%' OR httpstatus LIKE '5%' ORDER BY requestdatetime DESC LIMIT 20" \
   --result-configuration "OutputLocation=s3://${ATHENA_RESULTS}/" \
@@ -537,8 +408,6 @@ aws athena get-query-results \
   --region "$REGION" \
   --query 'ResultSet.Rows[*].Data[*].VarCharValue' \
   --output table
-
-echo ""
 ```
 
 ---
@@ -546,9 +415,7 @@ echo ""
 ## Step 17 – Query Bandwidth Usage
 
 ```bash
-echo "Query 6: Total bandwidth by object"
-echo ""
-
+# Query 6: Total bandwidth by object
 QUERY_ID=$(aws athena start-query-execution \
   --query-string "SELECT key, SUM(bytessent) as total_bytes, COUNT(*) as requests FROM ${ATHENA_DATABASE}.${ATHENA_TABLE} WHERE key IS NOT NULL GROUP BY key ORDER BY total_bytes DESC LIMIT 10" \
   --result-configuration "OutputLocation=s3://${ATHENA_RESULTS}/" \
@@ -564,9 +431,6 @@ aws athena get-query-results \
   --region "$REGION" \
   --query 'ResultSet.Rows[*].Data[*].VarCharValue' \
   --output table
-
-echo ""
-echo "✅ Athena queries completed"
 ```
 
 ---
@@ -574,28 +438,52 @@ echo "✅ Athena queries completed"
 ## Step 18 – View Athena Console
 
 ```bash
-echo ""
-echo "================================================"
-echo "ATHENA CONSOLE ACCESS"
-echo "================================================"
-echo ""
-echo "Query S3 access logs in Athena Console:"
+# Query S3 access logs in Athena Console
 echo "https://${REGION}.console.aws.amazon.com/athena/home?region=${REGION}#/query-editor"
-echo ""
-echo "Database: ${ATHENA_DATABASE}"
-echo "Table: ${ATHENA_TABLE}"
-echo ""
-echo "Example queries to try:"
-echo ""
-echo "-- Find all DELETE operations"
-echo "SELECT * FROM ${ATHENA_DATABASE}.${ATHENA_TABLE} WHERE operation = 'REST.DELETE.OBJECT';"
-echo ""
-echo "-- Unauthorized access attempts"
-echo "SELECT * FROM ${ATHENA_DATABASE}.${ATHENA_TABLE} WHERE httpstatus = '403';"
-echo ""
-echo "-- Total bytes transferred per day"
-echo "SELECT DATE(requestdatetime) as day, SUM(bytessent) as total_bytes FROM ${ATHENA_DATABASE}.${ATHENA_TABLE} GROUP BY DATE(requestdatetime);"
+echo "Database: ${ATHENA_DATABASE} | Table: ${ATHENA_TABLE}"
 ```
+
+---
+
+## Step 19 – Cleanup Resources
+
+```bash
+# Delete Athena table
+aws athena start-query-execution \
+  --query-string "DROP TABLE IF EXISTS ${ATHENA_DATABASE}.${ATHENA_TABLE}" \
+  --result-configuration "OutputLocation=s3://${ATHENA_RESULTS}/" \
+  --query-execution-context "Database=${ATHENA_DATABASE}" \
+  --region "$REGION" > /dev/null
+
+sleep 2
+
+# Delete Athena database
+aws athena start-query-execution \
+  --query-string "DROP DATABASE IF EXISTS ${ATHENA_DATABASE}" \
+  --result-configuration "OutputLocation=s3://${ATHENA_RESULTS}/" \
+  --region "$REGION" > /dev/null
+
+sleep 2
+
+# Empty and delete source bucket
+aws s3 rm s3://"$SOURCE_BUCKET" --recursive --region "$REGION"
+aws s3api delete-bucket --bucket "$SOURCE_BUCKET" --region "$REGION"
+
+# Empty and delete logs bucket
+aws s3 rm s3://"$LOGS_BUCKET" --recursive --region "$REGION"
+aws s3api delete-bucket --bucket "$LOGS_BUCKET" --region "$REGION"
+
+# Empty and delete Athena results bucket
+aws s3 rm s3://"$ATHENA_RESULTS" --recursive --region "$REGION"
+aws s3api delete-bucket --bucket "$ATHENA_RESULTS" --region "$REGION"
+
+# Delete local files
+rm -f logging-config.json create-table.sql index.html data.txt image.jpg file1.txt file2.txt
+
+echo "Cleanup complete: S3 buckets, Athena database/table deleted"
+```
+
+---
 
 ---
 
@@ -774,23 +662,6 @@ LIMIT 10;
 - Track requests from unusual IPs
 - Analyze failed login attempts (S3 access via STS)
 - Review high-bandwidth transfers (data exfiltration)
-
-**Cost Optimization:**
-- S3 access logging is FREE (delivery to S3)
-- Storage costs apply ($0.023/GB/month)
-- Athena charges $5 per TB of data scanned
-- Use partitioning to reduce scanned data
-- Archive old logs to Glacier ($0.004/GB)
-
----
-
-## Free Tier Notes
-- **S3 Access Logging**: FREE (no charge for logging)
-- **S3 Storage**: 5GB free for 12 months
-- **Athena**: First 1TB of data scanned per month free (first year only, limited regions)
-- **Glue Data Catalog**: 1M objects free
-
-This lab uses minimal resources, staying well within free tier limits.
 
 ---
 
