@@ -34,9 +34,11 @@ REGION="ap-southeast-2"
 # Create S3 bucket name for storing child stack templates (required for nested stacks)
 BUCKET_NAME="cf-nested-stacks-$(aws sts get-caller-identity --query Account --output text)"
 
-# Create working directory for templates
-mkdir -p /tmp/nested-stacks-lab
-cd /tmp/nested-stacks-lab
+# Get repository root directory and create working directory for templates
+REPO_DIR=$(git rev-parse --show-toplevel)
+PROJECT_DIR="$REPO_DIR/nested-stacks-lab"
+mkdir -p "$PROJECT_DIR"
+cd "$PROJECT_DIR"
 
 echo "REGION: $REGION"
 echo "BUCKET_NAME: $BUCKET_NAME"
@@ -592,7 +594,9 @@ aws s3 rm s3://"$BUCKET_NAME" --recursive --region "$REGION"
 aws s3api delete-bucket --bucket "$BUCKET_NAME" --region "$REGION"
 
 # Delete local files
-cd ~ && rm -rf /tmp/nested-stacks-lab
+REPO_DIR=$(git rev-parse --show-toplevel)
+cd "$REPO_DIR"
+rm -rf nested-stacks-lab
 
 echo "Cleanup complete"
 ```

@@ -64,8 +64,13 @@ REGION="ap-southeast-2"
 export AWS_REGION="$REGION"
 
 # Create CDK project directory
-mkdir -p /tmp/cdk-serverless-api
-cd /tmp/cdk-serverless-api
+# Get repository root directory
+REPO_DIR=$(git rev-parse --show-toplevel)
+
+# Create CDK project directory in repo
+PROJECT_DIR="$REPO_DIR/cdk-serverless-api"
+mkdir -p "$PROJECT_DIR"
+cd "$PROJECT_DIR"
 
 echo "REGION: $REGION"
 echo "PROJECT_DIR: $(pwd)"
@@ -437,7 +442,9 @@ aws cloudformation list-stack-resources \
 cdk destroy --force
 
 # Delete project directory
-cd ~ && rm -rf /tmp/cdk-serverless-api
+REPO_DIR=$(git rev-parse --show-toplevel)
+cd "$REPO_DIR"
+rm -rf cdk-serverless-api
 
 echo "Cleanup complete"
 ```

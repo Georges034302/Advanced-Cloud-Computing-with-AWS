@@ -74,9 +74,11 @@ ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
 STATE_BUCKET="terraform-state-${ACCOUNT_ID}"
 LOCK_TABLE="terraform-state-lock"
 
-# Create Terraform project directory
-mkdir -p /tmp/terraform-vpc
-cd /tmp/terraform-vpc
+# Get repository root directory and create Terraform project directory
+REPO_DIR=$(git rev-parse --show-toplevel)
+PROJECT_DIR="$REPO_DIR/terraform-vpc"
+mkdir -p "$PROJECT_DIR"
+cd "$PROJECT_DIR"
 
 echo "REGION: $REGION"
 echo "STATE_BUCKET: $STATE_BUCKET"
@@ -565,8 +567,9 @@ aws dynamodb delete-table \
   --region "$REGION"
 
 # Remove project directory
-cd /tmp
-rm -rf "$PROJECT_DIR"
+REPO_DIR=$(git rev-parse --show-toplevel)
+cd "$REPO_DIR"
+rm -rf terraform-vpc
 
 echo "Cleanup completed"
 ```
