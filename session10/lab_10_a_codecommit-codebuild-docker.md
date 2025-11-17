@@ -1,4 +1,5 @@
 # Lab 10.A: CodeCommit + CodeBuild - Automated Docker Image Build
+<img width="1536" height="1024" alt="IMG10A" src="https://github.com/user-attachments/assets/7ca3374a-6590-4e8c-aa47-e9300501dee9" />
 
 ## Overview
 This lab demonstrates AWS-native CI/CD by using CodeCommit for source control and CodeBuild to automatically build Docker images. You'll create a Git repository in AWS, commit a simple Python Flask application, and configure CodeBuild to build and push Docker images to Amazon ECR on every commit.
