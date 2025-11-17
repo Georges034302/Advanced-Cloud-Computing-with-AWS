@@ -3,8 +3,6 @@
 ## Overview
 This lab demonstrates zero-downtime deployments using AWS CodeDeploy with blue/green deployment strategy. You'll deploy a Flask application to EC2 instances, perform automated blue/green deployments with traffic shifting, and implement automatic rollback on deployment failures.
 
-**💰 Cost**: FREE TIER (EC2 t2.micro 750 hrs/month, CodeDeploy free)
-
 ---
 
 ## Objectives
@@ -43,21 +41,21 @@ Blue Environment (v1.0)          Green Environment (v2.0)
 ## Step 1 – Set Variables
 
 ```bash
-# Set region
+# Set deployment region
 REGION="ap-southeast-2"
 export AWS_REGION="$REGION"
-echo "REGION=$REGION"
 
-# Set names
+# Set resource names for CodeDeploy application and deployment
 APP_NAME="flask-bluegreen-app"
 DEPLOYMENT_GROUP="flask-deployment-group"
 KEY_NAME="codedeploy-key"
 
+# Get AWS account ID for resource ARNs
+ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
+
+echo "REGION=$REGION"
 echo "APP_NAME=$APP_NAME"
 echo "DEPLOYMENT_GROUP=$DEPLOYMENT_GROUP"
-
-# Get account ID
-ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
 echo "ACCOUNT_ID=$ACCOUNT_ID"
 ```
 
@@ -66,20 +64,17 @@ echo "ACCOUNT_ID=$ACCOUNT_ID"
 ## Step 2 – Create Key Pair for EC2
 
 ```bash
-echo ""
-echo "Creating EC2 key pair..."
-
-# Create key pair
+# Create EC2 key pair and save private key to file
 aws ec2 create-key-pair \
   --key-name "$KEY_NAME" \
   --region "$REGION" \
   --query 'KeyMaterial' \
   --output text > /tmp/"${KEY_NAME}".pem
 
-# Set permissions
+# Set restrictive permissions on private key file
 chmod 400 /tmp/"${KEY_NAME}".pem
 
-echo "✅ Key pair created: /tmp/${KEY_NAME}.pem"
+echo "Key pair: /tmp/${KEY_NAME}.pem"
 ```
 
 ---
@@ -87,10 +82,7 @@ echo "✅ Key pair created: /tmp/${KEY_NAME}.pem"
 ## Step 3 – Create IAM Role for EC2
 
 ```bash
-echo ""
-echo "Creating IAM role for EC2 instances..."
-
-# Create trust policy
+# Create trust policy allowing EC2 service to assume role
 cat > ec2-trust-policy.json <<'EOF'
 {
   "Version": "2012-10-17",
@@ -106,30 +98,31 @@ cat > ec2-trust-policy.json <<'EOF'
 }
 EOF
 
-# Create role
+# Create IAM role for EC2 instances running CodeDeploy agent
 aws iam create-role \
   --role-name CodeDeployEC2Role \
   --assume-role-policy-document file://ec2-trust-policy.json
 
-# Attach managed policies
+# Attach AWS managed policy for S3 read access (CodeDeploy artifacts)
 aws iam attach-role-policy \
   --role-name CodeDeployEC2Role \
   --policy-arn arn:aws:iam::aws:policy/AmazonS3ReadOnlyAccess
 
+# Attach AWS managed policy for CloudWatch metrics and logs
 aws iam attach-role-policy \
   --role-name CodeDeployEC2Role \
   --policy-arn arn:aws:iam::aws:policy/CloudWatchAgentServerPolicy
 
-# Create instance profile
+# Create instance profile for attaching role to EC2 instances
 aws iam create-instance-profile \
   --instance-profile-name CodeDeployEC2Profile
 
-# Add role to instance profile
+# Associate role with instance profile
 aws iam add-role-to-instance-profile \
   --instance-profile-name CodeDeployEC2Profile \
   --role-name CodeDeployEC2Role
 
-echo "✅ EC2 IAM role and instance profile created"
+# Wait for IAM role to propagate globally
 sleep 10
 ```
 
@@ -138,10 +131,7 @@ sleep 10
 ## Step 4 – Create IAM Role for CodeDeploy
 
 ```bash
-echo ""
-echo "Creating IAM role for CodeDeploy..."
-
-# Create trust policy
+# Create trust policy allowing CodeDeploy service to assume role
 cat > codedeploy-trust-policy.json <<'EOF'
 {
   "Version": "2012-10-17",
@@ -157,26 +147,26 @@ cat > codedeploy-trust-policy.json <<'EOF'
 }
 EOF
 
-# Create role
+# Create IAM role for CodeDeploy service
 aws iam create-role \
   --role-name CodeDeployServiceRole \
   --assume-role-policy-document file://codedeploy-trust-policy.json
 
-# Attach managed policy
+# Attach AWS managed policy for CodeDeploy permissions
 aws iam attach-role-policy \
   --role-name CodeDeployServiceRole \
   --policy-arn arn:aws:iam::aws:policy/AWSCodeDeployRole
 
-echo "✅ CodeDeploy IAM role created"
+# Wait for IAM role to propagate globally
 sleep 10
 
-# Get role ARN
+# Get role ARN for deployment group configuration
 CODEDEPLOY_ROLE_ARN=$(aws iam get-role \
   --role-name CodeDeployServiceRole \
   --query 'Role.Arn' \
   --output text)
 
-echo "CodeDeploy Role ARN: $CODEDEPLOY_ROLE_ARN"
+echo "CODEDEPLOY_ROLE_ARN=$CODEDEPLOY_ROLE_ARN"
 ```
 
 ---
@@ -184,10 +174,7 @@ echo "CodeDeploy Role ARN: $CODEDEPLOY_ROLE_ARN"
 ## Step 5 – Create Security Group
 
 ```bash
-echo ""
-echo "Creating security group..."
-
-# Get default VPC
+# Get default VPC ID for security group creation
 VPC_ID=$(aws ec2 describe-vpcs \
   --filters "Name=isDefault,Values=true" \
   --region "$REGION" \
@@ -196,7 +183,7 @@ VPC_ID=$(aws ec2 describe-vpcs \
 
 echo "VPC_ID=$VPC_ID"
 
-# Create security group
+# Create security group for CodeDeploy EC2 instances
 SG_ID=$(aws ec2 create-security-group \
   --group-name codedeploy-sg \
   --description "Security group for CodeDeploy instances" \
@@ -207,7 +194,7 @@ SG_ID=$(aws ec2 create-security-group \
 
 echo "SG_ID=$SG_ID"
 
-# Allow HTTP
+# Allow HTTP traffic on port 80 from anywhere
 aws ec2 authorize-security-group-ingress \
   --group-id "$SG_ID" \
   --protocol tcp \
@@ -215,15 +202,13 @@ aws ec2 authorize-security-group-ingress \
   --cidr 0.0.0.0/0 \
   --region "$REGION"
 
-# Allow SSH
+# Allow SSH access on port 22 from anywhere
 aws ec2 authorize-security-group-ingress \
   --group-id "$SG_ID" \
   --protocol tcp \
   --port 22 \
   --cidr 0.0.0.0/0 \
   --region "$REGION"
-
-echo "✅ Security group created: $SG_ID"
 ```
 
 ---
@@ -231,9 +216,7 @@ echo "✅ Security group created: $SG_ID"
 ## Step 6 – Create User Data Script
 
 ```bash
-echo ""
-echo "Creating user data script..."
-
+# Create user data script to install CodeDeploy agent on EC2 instance
 cat > user-data.sh <<'EOF'
 #!/bin/bash
 # Install CodeDeploy agent and dependencies
@@ -262,8 +245,6 @@ systemctl start nginx
 
 echo "CodeDeploy agent installed and running"
 EOF
-
-echo "✅ User data script created"
 ```
 
 ---
@@ -271,10 +252,7 @@ echo "✅ User data script created"
 ## Step 7 – Launch EC2 Instance (Blue)
 
 ```bash
-echo ""
-echo "Launching EC2 instance (Blue environment)..."
-
-# Get latest Amazon Linux 2023 AMI
+# Get latest Amazon Linux 2023 AMI ID
 AMI_ID=$(aws ec2 describe-images \
   --owners amazon \
   --filters "Name=name,Values=al2023-ami-2023.*-x86_64" \
@@ -285,7 +263,7 @@ AMI_ID=$(aws ec2 describe-images \
 
 echo "AMI_ID=$AMI_ID"
 
-# Launch instance
+# Launch EC2 instance with CodeDeploy agent and tags for deployment group
 INSTANCE_ID=$(aws ec2 run-instances \
   --image-id "$AMI_ID" \
   --instance-type t2.micro \
@@ -301,25 +279,22 @@ INSTANCE_ID=$(aws ec2 run-instances \
 
 echo "INSTANCE_ID=$INSTANCE_ID"
 
-echo ""
+# Wait for instance to reach running state
 echo "Waiting for instance to be running..."
-
 aws ec2 wait instance-running \
   --instance-ids "$INSTANCE_ID" \
   --region "$REGION"
 
-echo "✅ EC2 instance launched and running"
-
-# Get public IP
+# Get public IP address for accessing application
 PUBLIC_IP=$(aws ec2 describe-instances \
   --instance-ids "$INSTANCE_ID" \
   --region "$REGION" \
   --query 'Reservations[0].Instances[0].PublicIpAddress' \
   --output text)
 
-echo "Public IP: $PUBLIC_IP"
+echo "PUBLIC_IP=$PUBLIC_IP"
 
-# Wait for instance to initialize
+# Wait for instance initialization and CodeDeploy agent installation
 echo "Waiting for instance initialization (2 minutes)..."
 sleep 120
 ```
@@ -329,13 +304,13 @@ sleep 120
 ## Step 8 – Create Application Files Locally
 
 ```bash
-echo ""
-echo "Creating application files..."
+# Get repository root and create workspace for CodeDeploy application
+REPO_DIR=$(git rev-parse --show-toplevel)
+WORKSPACE="$REPO_DIR/codedeploy-app"
+mkdir -p "$WORKSPACE"
+cd "$WORKSPACE"
 
-mkdir -p /tmp/codedeploy-app
-cd /tmp/codedeploy-app
-
-# Create Flask application (Version 1.0)
+# Create Flask application version 1.0 with blue theme
 cat > app.py <<'EOF'
 from flask import Flask, render_template_string
 
@@ -396,8 +371,6 @@ cat > requirements.txt <<'EOF'
 Flask==3.0.0
 gunicorn==21.2.0
 EOF
-
-echo "✅ Application files created (Version 1.0 - Blue)"
 ```
 
 ---
@@ -405,12 +378,10 @@ echo "✅ Application files created (Version 1.0 - Blue)"
 ## Step 9 – Create CodeDeploy Scripts
 
 ```bash
-echo ""
-echo "Creating CodeDeploy lifecycle scripts..."
-
+# Create scripts directory for lifecycle hooks
 mkdir -p scripts
 
-# ApplicationStop script
+# Create ApplicationStop script to gracefully stop application
 cat > scripts/stop_application.sh <<'EOF'
 #!/bin/bash
 # Stop the application gracefully
@@ -478,10 +449,8 @@ curl -f http://localhost/health || exit 1
 echo "Application is healthy"
 EOF
 
-# Make scripts executable
+# Make all lifecycle scripts executable
 chmod +x scripts/*.sh
-
-echo "✅ CodeDeploy lifecycle scripts created"
 ```
 
 ---
@@ -489,9 +458,7 @@ echo "✅ CodeDeploy lifecycle scripts created"
 ## Step 10 – Create AppSpec File
 
 ```bash
-echo ""
-echo "Creating appspec.yml..."
-
+# Create AppSpec file defining deployment lifecycle and file mappings
 cat > appspec.yml <<'EOF'
 version: 0.0
 os: linux
@@ -532,8 +499,6 @@ hooks:
       timeout: 30
       runas: root
 EOF
-
-echo "✅ appspec.yml created"
 ```
 
 ---
@@ -541,12 +506,11 @@ echo "✅ appspec.yml created"
 ## Step 11 – Create S3 Bucket for Deployment Artifacts
 
 ```bash
-echo ""
-echo "Creating S3 bucket for deployment artifacts..."
-
+# Create unique S3 bucket name using account ID
 DEPLOY_BUCKET="codedeploy-artifacts-${ACCOUNT_ID}"
 echo "DEPLOY_BUCKET=$DEPLOY_BUCKET"
 
+# Create S3 bucket with region-specific configuration
 if [ "$REGION" = "us-east-1" ]; then
     aws s3api create-bucket \
       --bucket "$DEPLOY_BUCKET" \
@@ -557,8 +521,6 @@ else
       --region "$REGION" \
       --create-bucket-configuration LocationConstraint="$REGION"
 fi
-
-echo "✅ S3 bucket created"
 ```
 
 ---
@@ -566,20 +528,17 @@ echo "✅ S3 bucket created"
 ## Step 12 – Package and Upload Application (v1.0)
 
 ```bash
-echo ""
-echo "Packaging application (Version 1.0)..."
+# Navigate to workspace directory
+REPO_DIR=$(git rev-parse --show-toplevel)
+cd "$REPO_DIR/codedeploy-app"
 
-cd /tmp/codedeploy-app
-
-# Create deployment package
+# Create deployment package excluding git and zip files
 zip -r app-v1.zip . \
   -x "*.git*" "*.zip"
 
-# Upload to S3
+# Upload deployment package to S3 bucket
 aws s3 cp app-v1.zip s3://"$DEPLOY_BUCKET"/app-v1.zip \
   --region "$REGION"
-
-echo "✅ Application package uploaded to S3"
 ```
 
 ---
@@ -587,15 +546,11 @@ echo "✅ Application package uploaded to S3"
 ## Step 13 – Create CodeDeploy Application
 
 ```bash
-echo ""
-echo "Creating CodeDeploy application..."
-
+# Create CodeDeploy application for EC2/on-premises deployments
 aws deploy create-application \
   --application-name "$APP_NAME" \
   --compute-platform Server \
   --region "$REGION"
-
-echo "✅ CodeDeploy application created: $APP_NAME"
 ```
 
 ---
@@ -603,9 +558,7 @@ echo "✅ CodeDeploy application created: $APP_NAME"
 ## Step 14 – Create Deployment Group
 
 ```bash
-echo ""
-echo "Creating deployment group..."
-
+# Create deployment group targeting instances with specific tags
 aws deploy create-deployment-group \
   --application-name "$APP_NAME" \
   --deployment-group-name "$DEPLOYMENT_GROUP" \
@@ -614,8 +567,6 @@ aws deploy create-deployment-group \
   --ec2-tag-filters \
     Key=DeploymentGroup,Value="$DEPLOYMENT_GROUP",Type=KEY_AND_VALUE \
   --region "$REGION"
-
-echo "✅ Deployment group created: $DEPLOYMENT_GROUP"
 ```
 
 ---
@@ -623,12 +574,7 @@ echo "✅ Deployment group created: $DEPLOYMENT_GROUP"
 ## Step 15 – Deploy Application (v1.0)
 
 ```bash
-echo ""
-echo "================================================"
-echo "DEPLOYING APPLICATION VERSION 1.0 (BLUE)"
-echo "================================================"
-echo ""
-
+# Create deployment from S3 artifact (Blue environment v1.0)
 DEPLOYMENT_ID=$(aws deploy create-deployment \
   --application-name "$APP_NAME" \
   --deployment-group-name "$DEPLOYMENT_GROUP" \
@@ -639,16 +585,12 @@ DEPLOYMENT_ID=$(aws deploy create-deployment \
   --output text)
 
 echo "DEPLOYMENT_ID=$DEPLOYMENT_ID"
-echo ""
 echo "Monitoring deployment..."
 
-# Wait for deployment to complete
+# Wait for deployment to complete successfully
 aws deploy wait deployment-successful \
   --deployment-id "$DEPLOYMENT_ID" \
   --region "$REGION"
-
-echo ""
-echo "✅ Deployment successful!"
 ```
 
 ---
@@ -656,16 +598,11 @@ echo "✅ Deployment successful!"
 ## Step 16 – Test Application v1.0
 
 ```bash
-echo ""
-echo "Testing application (Version 1.0 - Blue)..."
-
+# Test deployed Blue environment application
 curl -s "http://${PUBLIC_IP}/" | head -30
 
-echo ""
-echo ""
 echo "Application URL: http://${PUBLIC_IP}/"
 echo "Health endpoint: http://${PUBLIC_IP}/health"
-echo ""
 
 curl -s "http://${PUBLIC_IP}/health" | jq .
 ```
@@ -675,15 +612,11 @@ curl -s "http://${PUBLIC_IP}/health" | jq .
 ## Step 17 – Create Application v2.0 (Green)
 
 ```bash
-echo ""
-echo "================================================"
-echo "CREATING VERSION 2.0 (GREEN)"
-echo "================================================"
-echo ""
+# Navigate to workspace and update application to version 2.0
+REPO_DIR=$(git rev-parse --show-toplevel)
+cd "$REPO_DIR/codedeploy-app"
 
-cd /tmp/codedeploy-app
-
-# Update Flask application to v2.0 (Green)
+# Update Flask application to v2.0 with green theme and new features
 cat > app.py <<'EOF'
 from flask import Flask, render_template_string
 
@@ -739,8 +672,6 @@ def health():
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=5000)
 EOF
-
-echo "✅ Application updated to Version 2.0 (Green)"
 ```
 
 ---
@@ -748,20 +679,15 @@ echo "✅ Application updated to Version 2.0 (Green)"
 ## Step 18 – Package and Deploy v2.0
 
 ```bash
-echo ""
-echo "Packaging and deploying Version 2.0..."
-
-# Package v2.0
+# Create deployment package for version 2.0
 zip -r app-v2.zip . \
   -x "*.git*" "*.zip" "app-v1.zip"
 
-# Upload to S3
+# Upload version 2.0 package to S3
 aws s3 cp app-v2.zip s3://"$DEPLOY_BUCKET"/app-v2.zip \
   --region "$REGION"
 
-echo "✅ Version 2.0 package uploaded"
-
-# Deploy v2.0
+# Create deployment for Green environment (v2.0)
 DEPLOYMENT_ID_V2=$(aws deploy create-deployment \
   --application-name "$APP_NAME" \
   --deployment-group-name "$DEPLOYMENT_GROUP" \
@@ -772,18 +698,13 @@ DEPLOYMENT_ID_V2=$(aws deploy create-deployment \
   --query 'deploymentId' \
   --output text)
 
-echo ""
 echo "DEPLOYMENT_ID=$DEPLOYMENT_ID_V2"
-echo ""
 echo "Monitoring deployment..."
 
-# Wait for deployment
+# Wait for deployment to complete successfully
 aws deploy wait deployment-successful \
   --deployment-id "$DEPLOYMENT_ID_V2" \
   --region "$REGION"
-
-echo ""
-echo "✅ Version 2.0 deployed successfully!"
 ```
 
 ---
@@ -791,16 +712,11 @@ echo "✅ Version 2.0 deployed successfully!"
 ## Step 19 – Test Application v2.0
 
 ```bash
-echo ""
-echo "Testing application (Version 2.0 - Green)..."
-
+# Test deployed Green environment application
 curl -s "http://${PUBLIC_IP}/" | head -30
 
-echo ""
-echo ""
 echo "🟢 Application updated to Green (v2.0)!"
 echo "Refresh your browser to see the green environment"
-echo ""
 
 curl -s "http://${PUBLIC_IP}/health" | jq .
 ```
@@ -810,9 +726,7 @@ curl -s "http://${PUBLIC_IP}/health" | jq .
 ## Step 20 – View Deployment History
 
 ```bash
-echo ""
-echo "Viewing deployment history..."
-
+# List recent deployments for the deployment group
 aws deploy list-deployments \
   --application-name "$APP_NAME" \
   --deployment-group-name "$DEPLOYMENT_GROUP" \
@@ -820,9 +734,7 @@ aws deploy list-deployments \
   --query 'deployments[0:5]' \
   --output table
 
-echo ""
-echo "Deployment details for v2.0:"
-
+# Get detailed information about v2.0 deployment
 aws deploy get-deployment \
   --deployment-id "$DEPLOYMENT_ID_V2" \
   --region "$REGION" \
@@ -835,65 +747,54 @@ aws deploy get-deployment \
 ## Step 21 – Cleanup
 
 ```bash
-echo ""
-echo "Cleaning up resources..."
-
 # Terminate EC2 instance
 aws ec2 terminate-instances \
   --instance-ids "$INSTANCE_ID" \
   --region "$REGION"
 
+# Wait for instance to fully terminate
 echo "Waiting for instance termination..."
-
 aws ec2 wait instance-terminated \
   --instance-ids "$INSTANCE_ID" \
   --region "$REGION"
 
-echo "✅ EC2 instance terminated"
-
-# Delete deployment group
+# Delete CodeDeploy deployment group
 aws deploy delete-deployment-group \
   --application-name "$APP_NAME" \
   --deployment-group-name "$DEPLOYMENT_GROUP" \
   --region "$REGION"
 
-# Delete application
+# Delete CodeDeploy application
 aws deploy delete-application \
   --application-name "$APP_NAME" \
   --region "$REGION"
 
-echo "✅ CodeDeploy resources deleted"
-
-# Empty and delete S3 bucket
+# Empty and delete S3 deployment artifacts bucket
 aws s3 rm s3://"$DEPLOY_BUCKET" --recursive --region "$REGION"
 aws s3api delete-bucket --bucket "$DEPLOY_BUCKET" --region "$REGION"
-
-echo "✅ S3 bucket deleted"
 
 # Delete security group
 aws ec2 delete-security-group \
   --group-id "$SG_ID" \
   --region "$REGION"
 
-echo "✅ Security group deleted"
-
-# Delete key pair
+# Delete EC2 key pair and local key file
 aws ec2 delete-key-pair \
   --key-name "$KEY_NAME" \
   --region "$REGION"
 
 rm -f /tmp/"${KEY_NAME}".pem
 
-echo "✅ Key pair deleted"
-
-# Remove IAM roles
+# Remove EC2 role from instance profile
 aws iam remove-role-from-instance-profile \
   --instance-profile-name CodeDeployEC2Profile \
   --role-name CodeDeployEC2Role
 
+# Delete instance profile
 aws iam delete-instance-profile \
   --instance-profile-name CodeDeployEC2Profile
 
+# Detach policies from EC2 role
 aws iam detach-role-policy \
   --role-name CodeDeployEC2Role \
   --policy-arn arn:aws:iam::aws:policy/AmazonS3ReadOnlyAccess
@@ -902,17 +803,23 @@ aws iam detach-role-policy \
   --role-name CodeDeployEC2Role \
   --policy-arn arn:aws:iam::aws:policy/CloudWatchAgentServerPolicy
 
+# Delete EC2 IAM role
 aws iam delete-role --role-name CodeDeployEC2Role
 
+# Detach policy from CodeDeploy role
 aws iam detach-role-policy \
   --role-name CodeDeployServiceRole \
   --policy-arn arn:aws:iam::aws:policy/AWSCodeDeployRole
 
+# Delete CodeDeploy IAM role
 aws iam delete-role --role-name CodeDeployServiceRole
 
-echo "✅ IAM roles deleted"
-echo ""
-echo "All resources cleaned up!"
+# Remove local workspace directory
+REPO_DIR=$(git rev-parse --show-toplevel)
+cd "$REPO_DIR"
+rm -rf codedeploy-app
+
+echo "✅ Cleanup complete"
 ```
 
 ---

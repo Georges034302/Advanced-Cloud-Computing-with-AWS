@@ -3,8 +3,6 @@
 ## Overview
 This lab builds a complete CI/CD pipeline using AWS CodePipeline to orchestrate source, build, and deploy stages. You'll automatically deploy a Flask application from CodeCommit → CodeBuild (build Docker image) → ECS (deploy container) with manual approval gates and automated testing.
 
-**💰 Cost**: FREE TIER (CodePipeline 1 free pipeline/month, ECS 750 hrs/month)
-
 ---
 
 ## Objectives
@@ -43,24 +41,24 @@ ECS Deployment (Deploy Container)
 ## Step 1 – Set Variables
 
 ```bash
-# Set region
+# Set deployment region
 REGION="ap-southeast-2"
 export AWS_REGION="$REGION"
-echo "REGION=$REGION"
 
-# Set names
+# Set resource names for CodePipeline, ECR, ECS, and CodeCommit
 REPO_NAME="pipeline-flask-app"
 ECR_REPO="pipeline-flask-app"
 CLUSTER_NAME="pipeline-demo-cluster"
 SERVICE_NAME="flask-service"
 PIPELINE_NAME="flask-cicd-pipeline"
 
+# Get AWS account ID for resource ARNs
+ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
+
+echo "REGION=$REGION"
 echo "REPO_NAME=$REPO_NAME"
 echo "CLUSTER_NAME=$CLUSTER_NAME"
 echo "PIPELINE_NAME=$PIPELINE_NAME"
-
-# Get account ID
-ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
 echo "ACCOUNT_ID=$ACCOUNT_ID"
 ```
 
@@ -69,16 +67,11 @@ echo "ACCOUNT_ID=$ACCOUNT_ID"
 ## Step 2 – Create CodeCommit Repository
 
 ```bash
-echo ""
-echo "Creating CodeCommit repository..."
-
-# Create repository
+# Create CodeCommit repository for source control
 aws codecommit create-repository \
   --repository-name "$REPO_NAME" \
   --repository-description "Flask app for CodePipeline demo" \
   --region "$REGION"
-
-echo "✅ CodeCommit repository created: $REPO_NAME"
 ```
 
 ---
@@ -86,18 +79,17 @@ echo "✅ CodeCommit repository created: $REPO_NAME"
 ## Step 3 – Clone and Create Application
 
 ```bash
-echo ""
-echo "Cloning repository and creating application..."
+# Get repository root and create workspace for CodePipeline lab
+REPO_DIR=$(git rev-parse --show-toplevel)
+WORKSPACE="$REPO_DIR/pipeline-lab"
+mkdir -p "$WORKSPACE"
+cd "$WORKSPACE"
 
-# Create workspace
-mkdir -p /tmp/pipeline-lab
-cd /tmp/pipeline-lab
-
-# Clone repository
-git clone codecommit://"$REGION"://"$REPO_NAME"
+# Clone CodeCommit repository using codecommit:// protocol
+git clone codecommit://"$REGION"::"$REPO_NAME"
 cd "$REPO_NAME"
 
-# Create Flask app
+# Create Flask application with version-aware endpoints
 cat > app.py <<'EOF'
 from flask import Flask, jsonify
 import os
@@ -144,8 +136,6 @@ EXPOSE 5000
 ENV APP_VERSION=1.0
 CMD ["gunicorn", "-b", "0.0.0.0:5000", "app:app"]
 EOF
-
-echo "✅ Application files created"
 ```
 
 ---
@@ -153,10 +143,7 @@ echo "✅ Application files created"
 ## Step 4 – Create BuildSpec and TaskDef Template
 
 ```bash
-echo ""
-echo "Creating buildspec.yml and task definition template..."
-
-# Create buildspec.yml
+# Create buildspec.yml defining CodeBuild phases for Docker image build and push
 cat > buildspec.yml <<EOF
 version: 0.2
 
@@ -188,7 +175,7 @@ artifacts:
     - imagedefinitions.json
 EOF
 
-# Create ECS task definition
+# Create ECS task definition for Fargate deployment
 cat > taskdef.json <<EOF
 {
   "family": "flask-task",
@@ -220,8 +207,6 @@ cat > taskdef.json <<EOF
   ]
 }
 EOF
-
-echo "✅ Build and deployment files created"
 ```
 
 ---
@@ -229,14 +214,14 @@ echo "✅ Build and deployment files created"
 ## Step 5 – Commit and Push Code
 
 ```bash
-echo ""
-echo "Committing code to CodeCommit..."
-
+# Stage all files for commit
 git add .
-git commit -m "Initial commit: Flask app with CI/CD configuration"
-git push origin main
 
-echo "✅ Code pushed to CodeCommit"
+# Commit application and CI/CD configuration files
+git commit -m "Initial commit: Flask app with CI/CD configuration"
+
+# Push to CodeCommit main branch
+git push origin main
 ```
 
 ---
@@ -244,15 +229,11 @@ echo "✅ Code pushed to CodeCommit"
 ## Step 6 – Create ECR Repository
 
 ```bash
-echo ""
-echo "Creating ECR repository..."
-
+# Create ECR repository with automatic image scanning on push
 aws ecr create-repository \
   --repository-name "$ECR_REPO" \
   --region "$REGION" \
   --image-scanning-configuration scanOnPush=true
-
-echo "✅ ECR repository created"
 ```
 
 ---
@@ -260,14 +241,10 @@ echo "✅ ECR repository created"
 ## Step 7 – Create ECS Cluster
 
 ```bash
-echo ""
-echo "Creating ECS Fargate cluster..."
-
+# Create ECS cluster for Fargate container deployments
 aws ecs create-cluster \
   --cluster-name "$CLUSTER_NAME" \
   --region "$REGION"
-
-echo "✅ ECS cluster created: $CLUSTER_NAME"
 ```
 
 ---
@@ -275,14 +252,10 @@ echo "✅ ECS cluster created: $CLUSTER_NAME"
 ## Step 8 – Create CloudWatch Log Group
 
 ```bash
-echo ""
-echo "Creating CloudWatch log group..."
-
+# Create CloudWatch log group for ECS task container logs
 aws logs create-log-group \
   --log-group-name "/ecs/flask-task" \
   --region "$REGION"
-
-echo "✅ Log group created"
 ```
 
 ---
@@ -290,14 +263,11 @@ echo "✅ Log group created"
 ## Step 9 – Create ECS Task Execution Role
 
 ```bash
-echo ""
-echo "Creating ECS task execution role..."
-
-# Check if role exists
+# Check if ECS task execution role already exists
 if aws iam get-role --role-name ecsTaskExecutionRole 2>/dev/null; then
-    echo "✅ ecsTaskExecutionRole already exists"
+    echo "ecsTaskExecutionRole already exists"
 else
-    # Create trust policy
+    # Create trust policy allowing ECS tasks service to assume role
     cat > ecs-trust-policy.json <<'EOF'
 {
   "Version": "2012-10-17",
@@ -313,17 +283,17 @@ else
 }
 EOF
 
-    # Create role
+    # Create IAM role for ECS task execution
     aws iam create-role \
       --role-name ecsTaskExecutionRole \
       --assume-role-policy-document file://ecs-trust-policy.json
 
-    # Attach managed policy
+    # Attach AWS managed policy for ECS task execution (ECR, CloudWatch Logs)
     aws iam attach-role-policy \
       --role-name ecsTaskExecutionRole \
       --policy-arn arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy
 
-    echo "✅ ECS task execution role created"
+    # Wait for IAM role to propagate globally
     sleep 10
 fi
 ```
@@ -333,16 +303,14 @@ fi
 ## Step 10 – Register ECS Task Definition
 
 ```bash
-echo ""
-echo "Registering ECS task definition..."
+# Navigate to repository directory
+REPO_DIR=$(git rev-parse --show-toplevel)
+cd "$REPO_DIR/pipeline-lab/$REPO_NAME"
 
-cd /tmp/pipeline-lab/"$REPO_NAME"
-
+# Register ECS task definition from JSON configuration
 aws ecs register-task-definition \
   --cli-input-json file://taskdef.json \
   --region "$REGION"
-
-echo "✅ Task definition registered"
 ```
 
 ---
@@ -350,10 +318,7 @@ echo "✅ Task definition registered"
 ## Step 11 – Create Security Group for ECS
 
 ```bash
-echo ""
-echo "Creating security group for ECS tasks..."
-
-# Get default VPC
+# Get default VPC ID for security group creation
 VPC_ID=$(aws ec2 describe-vpcs \
   --filters "Name=isDefault,Values=true" \
   --region "$REGION" \
@@ -362,7 +327,7 @@ VPC_ID=$(aws ec2 describe-vpcs \
 
 echo "VPC_ID=$VPC_ID"
 
-# Create security group
+# Create security group for ECS tasks
 SG_ID=$(aws ec2 create-security-group \
   --group-name flask-ecs-sg \
   --description "Security group for Flask ECS tasks" \
@@ -373,15 +338,13 @@ SG_ID=$(aws ec2 create-security-group \
 
 echo "SG_ID=$SG_ID"
 
-# Allow inbound on port 5000
+# Allow inbound HTTP traffic on Flask port 5000 from anywhere
 aws ec2 authorize-security-group-ingress \
   --group-id "$SG_ID" \
   --protocol tcp \
   --port 5000 \
   --cidr 0.0.0.0/0 \
   --region "$REGION"
-
-echo "✅ Security group created: $SG_ID"
 ```
 
 ---
@@ -389,10 +352,7 @@ echo "✅ Security group created: $SG_ID"
 ## Step 12 – Create ECS Service
 
 ```bash
-echo ""
-echo "Creating ECS service..."
-
-# Get subnets
+# Get first two subnets from default VPC
 SUBNETS=$(aws ec2 describe-subnets \
   --filters "Name=vpc-id,Values=$VPC_ID" \
   --region "$REGION" \
@@ -401,7 +361,7 @@ SUBNETS=$(aws ec2 describe-subnets \
 
 echo "SUBNETS=$SUBNETS"
 
-# Create service
+# Create ECS service with Fargate launch type and public IP assignment
 aws ecs create-service \
   --cluster "$CLUSTER_NAME" \
   --service-name "$SERVICE_NAME" \
@@ -410,8 +370,6 @@ aws ecs create-service \
   --launch-type FARGATE \
   --network-configuration "awsvpcConfiguration={subnets=[$SUBNETS],securityGroups=[$SG_ID],assignPublicIp=ENABLED}" \
   --region "$REGION"
-
-echo "✅ ECS service created: $SERVICE_NAME"
 ```
 
 ---
@@ -419,11 +377,9 @@ echo "✅ ECS service created: $SERVICE_NAME"
 ## Step 13 – Create CodeBuild Project
 
 ```bash
-echo ""
-echo "Creating CodeBuild project..."
-
-# Create IAM role for CodeBuild (if not exists)
+# Check if CodeBuild service role exists, create if not
 if ! aws iam get-role --role-name CodeBuildServiceRole 2>/dev/null; then
+    # Create trust policy allowing CodeBuild service to assume role
     cat > codebuild-trust.json <<'EOF'
 {
   "Version": "2012-10-17",
@@ -435,10 +391,12 @@ if ! aws iam get-role --role-name CodeBuildServiceRole 2>/dev/null; then
 }
 EOF
 
+    # Create IAM role for CodeBuild
     aws iam create-role \
       --role-name CodeBuildServiceRole \
       --assume-role-policy-document file://codebuild-trust.json
 
+    # Create permissions policy for CloudWatch Logs, ECR, CodeCommit, and S3
     cat > codebuild-policy.json <<EOF
 {
   "Version": "2012-10-17",
@@ -457,15 +415,17 @@ EOF
 }
 EOF
 
+    # Attach permissions policy to CodeBuild role
     aws iam put-role-policy \
       --role-name CodeBuildServiceRole \
       --policy-name CodeBuildPolicy \
       --policy-document file://codebuild-policy.json
 
+    # Wait for IAM role to propagate globally
     sleep 10
 fi
 
-# Create CodeBuild project
+# Create CodeBuild project configuration for pipeline integration
 cat > codebuild-config.json <<EOF
 {
   "name": "flask-pipeline-build",
@@ -485,11 +445,10 @@ cat > codebuild-config.json <<EOF
 }
 EOF
 
+# Create CodeBuild project from JSON configuration
 aws codebuild create-project \
   --cli-input-json file://codebuild-config.json \
   --region "$REGION"
-
-echo "✅ CodeBuild project created"
 ```
 
 ---
@@ -497,9 +456,7 @@ echo "✅ CodeBuild project created"
 ## Step 14 – Create CodePipeline Service Role
 
 ```bash
-echo ""
-echo "Creating CodePipeline service role..."
-
+# Create trust policy allowing CodePipeline service to assume role
 cat > pipeline-trust.json <<'EOF'
 {
   "Version": "2012-10-17",
@@ -511,10 +468,12 @@ cat > pipeline-trust.json <<'EOF'
 }
 EOF
 
+# Create IAM role for CodePipeline
 aws iam create-role \
   --role-name CodePipelineServiceRole \
   --assume-role-policy-document file://pipeline-trust.json
 
+# Create permissions policy for CodeCommit, CodeBuild, ECS, IAM, and S3
 cat > pipeline-policy.json <<EOF
 {
   "Version": "2012-10-17",
@@ -534,12 +493,13 @@ cat > pipeline-policy.json <<EOF
 }
 EOF
 
+# Attach permissions policy to CodePipeline role
 aws iam put-role-policy \
   --role-name CodePipelineServiceRole \
   --policy-name CodePipelinePolicy \
   --policy-document file://pipeline-policy.json
 
-echo "✅ CodePipeline role created"
+# Wait for IAM role to propagate globally
 sleep 10
 ```
 
@@ -548,12 +508,11 @@ sleep 10
 ## Step 15 – Create S3 Bucket for Artifacts
 
 ```bash
-echo ""
-echo "Creating S3 bucket for pipeline artifacts..."
-
+# Create unique S3 bucket name using account ID
 ARTIFACT_BUCKET="pipeline-artifacts-${ACCOUNT_ID}"
 echo "ARTIFACT_BUCKET=$ARTIFACT_BUCKET"
 
+# Create S3 bucket for storing pipeline artifacts between stages
 if [ "$REGION" = "us-east-1" ]; then
     aws s3api create-bucket \
       --bucket "$ARTIFACT_BUCKET" \
@@ -564,8 +523,6 @@ else
       --region "$REGION" \
       --create-bucket-configuration LocationConstraint="$REGION"
 fi
-
-echo "✅ S3 bucket created"
 ```
 
 ---
@@ -573,12 +530,7 @@ echo "✅ S3 bucket created"
 ## Step 16 – Create CodePipeline
 
 ```bash
-echo ""
-echo "================================================"
-echo "CREATING CODEPIPELINE"
-echo "================================================"
-echo ""
-
+# Create CodePipeline configuration with Source, Build, and Deploy stages
 cat > pipeline-config.json <<EOF
 {
   "pipeline": {
@@ -647,13 +599,11 @@ cat > pipeline-config.json <<EOF
 }
 EOF
 
+# Create CodePipeline from JSON configuration
 aws codepipeline create-pipeline \
   --cli-input-json file://pipeline-config.json \
   --region "$REGION"
 
-echo ""
-echo "✅ CodePipeline created: $PIPELINE_NAME"
-echo ""
 echo "Pipeline stages: Source (CodeCommit) → Build (CodeBuild) → Deploy (ECS)"
 ```
 
@@ -662,19 +612,16 @@ echo "Pipeline stages: Source (CodeCommit) → Build (CodeBuild) → Deploy (ECS
 ## Step 17 – Monitor Pipeline Execution
 
 ```bash
-echo ""
-echo "Monitoring pipeline execution (first run)..."
-
+# Wait for pipeline to initialize
 sleep 10
 
-# Get pipeline state
+# Get current state of all pipeline stages
 aws codepipeline get-pipeline-state \
   --name "$PIPELINE_NAME" \
   --region "$REGION" \
   --query 'stageStates[*].{Stage:stageName,Status:latestExecution.status}' \
   --output table
 
-echo ""
 echo "Pipeline is running! Full execution takes 5-7 minutes"
 ```
 
@@ -683,15 +630,11 @@ echo "Pipeline is running! Full execution takes 5-7 minutes"
 ## Step 18 – Wait for Deployment
 
 ```bash
-echo ""
-echo "Waiting for ECS service to stabilize..."
-
+# Wait for ECS service to reach stable state (all tasks running)
 aws ecs wait services-stable \
   --cluster "$CLUSTER_NAME" \
   --services "$SERVICE_NAME" \
   --region "$REGION"
-
-echo "✅ ECS service is stable"
 ```
 
 ---
@@ -699,10 +642,7 @@ echo "✅ ECS service is stable"
 ## Step 19 – Get Application URL
 
 ```bash
-echo ""
-echo "Getting application endpoint..."
-
-# Get task public IP
+# Get ARN of running task in ECS service
 TASK_ARN=$(aws ecs list-tasks \
   --cluster "$CLUSTER_NAME" \
   --service-name "$SERVICE_NAME" \
@@ -710,6 +650,7 @@ TASK_ARN=$(aws ecs list-tasks \
   --query 'taskArns[0]' \
   --output text)
 
+# Get network interface ID from task details
 ENI_ID=$(aws ecs describe-tasks \
   --cluster "$CLUSTER_NAME" \
   --tasks "$TASK_ARN" \
@@ -717,15 +658,14 @@ ENI_ID=$(aws ecs describe-tasks \
   --query 'tasks[0].attachments[0].details[?name==`networkInterfaceId`].value' \
   --output text)
 
+# Get public IP address from network interface
 PUBLIC_IP=$(aws ec2 describe-network-interfaces \
   --network-interface-ids "$ENI_ID" \
   --region "$REGION" \
   --query 'NetworkInterfaces[0].Association.PublicIp' \
   --output text)
 
-echo ""
 echo "Application URL: http://${PUBLIC_IP}:5000"
-echo ""
 echo "Testing application..."
 sleep 10
 curl -s "http://${PUBLIC_IP}:5000" | jq .
@@ -736,29 +676,22 @@ curl -s "http://${PUBLIC_IP}:5000" | jq .
 ## Step 20 – Test Pipeline with Code Change
 
 ```bash
-echo ""
-echo "================================================"
-echo "TESTING PIPELINE WITH CODE CHANGE"
-echo "================================================"
-echo ""
+# Navigate to repository directory
+REPO_DIR=$(git rev-parse --show-toplevel)
+cd "$REPO_DIR/pipeline-lab/$REPO_NAME"
 
-cd /tmp/pipeline-lab/"$REPO_NAME"
-
-# Update version
+# Update application version in Flask app
 sed -i "s/VERSION = os.getenv('APP_VERSION', '1.0')/VERSION = os.getenv('APP_VERSION', '2.0')/" app.py
 
-# Update Dockerfile
+# Update version in Dockerfile environment variable
 sed -i 's/ENV APP_VERSION=1.0/ENV APP_VERSION=2.0/' Dockerfile
 
-# Commit and push
+# Stage, commit, and push code changes
 git add .
 git commit -m "Update to version 2.0"
 git push origin main
 
-echo ""
-echo "✅ Code change pushed!"
 echo "Pipeline will automatically trigger in ~1 minute"
-echo ""
 echo "Monitor pipeline: https://console.aws.amazon.com/codesuite/codepipeline/pipelines/${PIPELINE_NAME}/view"
 ```
 
@@ -767,28 +700,26 @@ echo "Monitor pipeline: https://console.aws.amazon.com/codesuite/codepipeline/pi
 ## Step 21 – Cleanup
 
 ```bash
-echo ""
-echo "Cleaning up resources..."
-
-# Delete pipeline
+# Delete CodePipeline
 aws codepipeline delete-pipeline \
   --name "$PIPELINE_NAME" \
   --region "$REGION"
 
-# Delete ECS service
+# Scale ECS service to zero tasks
 aws ecs update-service \
   --cluster "$CLUSTER_NAME" \
   --service "$SERVICE_NAME" \
   --desired-count 0 \
   --region "$REGION"
 
+# Delete ECS service
 aws ecs delete-service \
   --cluster "$CLUSTER_NAME" \
   --service "$SERVICE_NAME" \
   --region "$REGION" \
   --force
 
-# Delete cluster
+# Delete ECS cluster
 aws ecs delete-cluster \
   --cluster "$CLUSTER_NAME" \
   --region "$REGION"
@@ -798,7 +729,7 @@ aws codebuild delete-project \
   --name flask-pipeline-build \
   --region "$REGION"
 
-# Delete ECR repository
+# Delete ECR repository and all images
 aws ecr delete-repository \
   --repository-name "$ECR_REPO" \
   --region "$REGION" \
@@ -809,7 +740,7 @@ aws codecommit delete-repository \
   --repository-name "$REPO_NAME" \
   --region "$REGION"
 
-# Empty and delete S3 bucket
+# Empty and delete S3 artifacts bucket
 aws s3 rm s3://"$ARTIFACT_BUCKET" --recursive
 aws s3api delete-bucket --bucket "$ARTIFACT_BUCKET" --region "$REGION"
 
@@ -818,26 +749,31 @@ aws ec2 delete-security-group \
   --group-id "$SG_ID" \
   --region "$REGION"
 
-# Delete log group
+# Delete CloudWatch log group
 aws logs delete-log-group \
   --log-group-name "/ecs/flask-task" \
   --region "$REGION"
 
-# Delete IAM roles
+# Delete CodePipeline IAM role and policy
 aws iam delete-role-policy \
   --role-name CodePipelineServiceRole \
   --policy-name CodePipelinePolicy
 
 aws iam delete-role --role-name CodePipelineServiceRole
 
+# Delete CodeBuild IAM role and policy
 aws iam delete-role-policy \
   --role-name CodeBuildServiceRole \
   --policy-name CodeBuildPolicy
 
 aws iam delete-role --role-name CodeBuildServiceRole
 
-echo ""
-echo "✅ All resources cleaned up!"
+# Remove local workspace directory
+REPO_DIR=$(git rev-parse --show-toplevel)
+cd "$REPO_DIR"
+rm -rf pipeline-lab
+
+echo "✅ Cleanup complete"
 ```
 
 ---

@@ -42,20 +42,20 @@ Developer → git push → CodeCommit Repository
 ## Step 1 – Set Variables
 
 ```bash
-# Set region
+# Set deployment region
 REGION="ap-southeast-2"
 export AWS_REGION="$REGION"
-echo "REGION=$REGION"
 
-# Set repository names
+# Set repository names for CodeCommit and ECR
 REPO_NAME="flask-joke-app"
 ECR_REPO_NAME="flask-joke-app"
 
+# Get AWS account ID for ECR URI
+ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
+
+echo "REGION=$REGION"
 echo "REPO_NAME=$REPO_NAME"
 echo "ECR_REPO_NAME=$ECR_REPO_NAME"
-
-# Get account ID
-ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
 echo "ACCOUNT_ID=$ACCOUNT_ID"
 ```
 
@@ -64,26 +64,20 @@ echo "ACCOUNT_ID=$ACCOUNT_ID"
 ## Step 2 – Create CodeCommit Repository
 
 ```bash
-echo ""
-echo "Creating CodeCommit repository..."
-
-# Create repository
+# Create CodeCommit repository for source control
 aws codecommit create-repository \
   --repository-name "$REPO_NAME" \
   --repository-description "Flask joke API for CI/CD demo" \
   --region "$REGION"
 
-echo ""
-echo "✅ CodeCommit repository created: $REPO_NAME"
-
-# Get clone URL
+# Get HTTP clone URL for repository
 CLONE_URL=$(aws codecommit get-repository \
   --repository-name "$REPO_NAME" \
   --region "$REGION" \
   --query 'repositoryMetadata.cloneUrlHttp' \
   --output text)
 
-echo "Clone URL: $CLONE_URL"
+echo "CLONE_URL=$CLONE_URL"
 ```
 
 ---
@@ -91,38 +85,32 @@ echo "Clone URL: $CLONE_URL"
 ## Step 3 – Configure Git Credentials
 
 ```bash
-echo ""
-echo "Configuring Git credentials for CodeCommit..."
-
-# Install git-remote-codecommit (credential helper)
+# Install git-remote-codecommit credential helper for AWS authentication
 pip install git-remote-codecommit --quiet
 
-# Configure Git user
+# Configure Git user information
 git config --global user.name "AWS Student"
 git config --global user.email "student@example.com"
-
-echo "✅ Git configured for CodeCommit"
 ```
 
 ---
 
-## Step 4 – Clone Repository and Create Application
+## Step 4 – Clone Repository
 
 ```bash
-echo ""
-echo "Cloning repository..."
+# Get repository root directory
+REPO_DIR=$(git rev-parse --show-toplevel)
 
-# Create workspace
-mkdir -p /tmp/codecommit-lab
-cd /tmp/codecommit-lab
+# Create workspace directory in repo
+WORKSPACE="$REPO_DIR/codecommit-lab"
+mkdir -p "$WORKSPACE"
+cd "$WORKSPACE"
 
-# Clone repository (using codecommit:// protocol)
-git clone codecommit://"$REGION"://"$REPO_NAME"
-
-# Navigate to repo
+# Clone CodeCommit repository using codecommit:// protocol
+git clone codecommit://"$REGION"::"$REPO_NAME"
 cd "$REPO_NAME"
 
-echo "✅ Repository cloned: $(pwd)"
+echo "Workspace: $(pwd)"
 ```
 
 ---
@@ -130,10 +118,7 @@ echo "✅ Repository cloned: $(pwd)"
 ## Step 5 – Create Flask Application
 
 ```bash
-echo ""
-echo "Creating Flask application..."
-
-# Create app.py (simple joke API)
+# Create Flask application with joke API endpoints
 cat > app.py <<'EOF'
 from flask import Flask, jsonify
 import random
@@ -172,8 +157,6 @@ def health():
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=5000)
 EOF
-
-echo "✅ Flask application created: app.py"
 ```
 
 ---
@@ -181,15 +164,11 @@ echo "✅ Flask application created: app.py"
 ## Step 6 – Create Requirements File
 
 ```bash
-echo ""
-echo "Creating requirements.txt..."
-
+# Create Python dependencies file
 cat > requirements.txt <<'EOF'
 Flask==3.0.0
 gunicorn==21.2.0
 EOF
-
-echo "✅ Requirements file created"
 ```
 
 ---
@@ -197,9 +176,7 @@ echo "✅ Requirements file created"
 ## Step 7 – Create Dockerfile
 
 ```bash
-echo ""
-echo "Creating Dockerfile..."
-
+# Create Dockerfile for containerizing Flask application
 cat > Dockerfile <<'EOF'
 FROM python:3.11-slim
 
@@ -218,8 +195,6 @@ EXPOSE 5000
 # Run application with gunicorn
 CMD ["gunicorn", "-b", "0.0.0.0:5000", "app:app"]
 EOF
-
-echo "✅ Dockerfile created"
 ```
 
 ---
@@ -227,9 +202,7 @@ echo "✅ Dockerfile created"
 ## Step 8 – Create BuildSpec for CodeBuild
 
 ```bash
-echo ""
-echo "Creating buildspec.yml for CodeBuild..."
-
+# Create buildspec.yml defining build phases for CodeBuild
 cat > buildspec.yml <<EOF
 version: 0.2
 
@@ -262,8 +235,6 @@ artifacts:
   files:
     - '**/*'
 EOF
-
-echo "✅ buildspec.yml created"
 ```
 
 ---
@@ -271,20 +242,14 @@ echo "✅ buildspec.yml created"
 ## Step 9 – Commit and Push to CodeCommit
 
 ```bash
-echo ""
-echo "Committing files to CodeCommit..."
-
-# Add all files
+# Stage all files for commit
 git add .
 
-# Commit
+# Commit files with descriptive message
 git commit -m "Initial commit: Flask joke API with Docker"
 
-# Push to CodeCommit
+# Push to CodeCommit main branch
 git push origin main
-
-echo ""
-echo "✅ Code pushed to CodeCommit"
 ```
 
 ---
@@ -292,21 +257,16 @@ echo "✅ Code pushed to CodeCommit"
 ## Step 10 – Create ECR Repository
 
 ```bash
-echo ""
-echo "Creating Amazon ECR repository..."
-
-# Create ECR repository
+# Create ECR repository with image scanning enabled
 aws ecr create-repository \
   --repository-name "$ECR_REPO_NAME" \
   --region "$REGION" \
   --image-scanning-configuration scanOnPush=true
 
-echo ""
-echo "✅ ECR repository created: $ECR_REPO_NAME"
-
-# Get ECR URI
+# Construct ECR repository URI
 ECR_URI="${ACCOUNT_ID}.dkr.ecr.${REGION}.amazonaws.com/${ECR_REPO_NAME}"
-echo "ECR URI: $ECR_URI"
+
+echo "ECR_URI=$ECR_URI"
 ```
 
 ---
@@ -314,10 +274,7 @@ echo "ECR URI: $ECR_URI"
 ## Step 11 – Create IAM Role for CodeBuild
 
 ```bash
-echo ""
-echo "Creating IAM role for CodeBuild..."
-
-# Create trust policy
+# Create trust policy allowing CodeBuild service to assume role
 cat > codebuild-trust-policy.json <<'EOF'
 {
   "Version": "2012-10-17",
@@ -333,15 +290,13 @@ cat > codebuild-trust-policy.json <<'EOF'
 }
 EOF
 
-# Create role
+# Create IAM role for CodeBuild
 aws iam create-role \
   --role-name CodeBuildServiceRole \
   --assume-role-policy-document file://codebuild-trust-policy.json \
   --region "$REGION"
 
-echo "✅ IAM role created: CodeBuildServiceRole"
-
-# Create permissions policy
+# Create permissions policy for CloudWatch Logs, ECR, and CodeCommit
 cat > codebuild-permissions.json <<EOF
 {
   "Version": "2012-10-17",
@@ -380,16 +335,14 @@ cat > codebuild-permissions.json <<EOF
 }
 EOF
 
-# Attach policy
+# Attach permissions policy to IAM role
 aws iam put-role-policy \
   --role-name CodeBuildServiceRole \
   --policy-name CodeBuildPermissions \
   --policy-document file://codebuild-permissions.json
 
-echo "✅ Permissions attached to role"
-
-# Wait for role to propagate
-echo "Waiting for IAM role to propagate..."
+# Wait for IAM role to propagate globally
+echo "Waiting for IAM role propagation..."
 sleep 10
 ```
 
@@ -398,13 +351,7 @@ sleep 10
 ## Step 12 – Create CodeBuild Project
 
 ```bash
-echo ""
-echo "================================================"
-echo "CREATING CODEBUILD PROJECT"
-echo "================================================"
-echo ""
-
-# Create CodeBuild project configuration
+# Create CodeBuild project configuration JSON
 cat > codebuild-project.json <<EOF
 {
   "name": "flask-joke-app-build",
@@ -443,13 +390,10 @@ cat > codebuild-project.json <<EOF
 }
 EOF
 
-# Create CodeBuild project
+# Create CodeBuild project from JSON configuration
 aws codebuild create-project \
   --cli-input-json file://codebuild-project.json \
   --region "$REGION"
-
-echo ""
-echo "✅ CodeBuild project created: flask-joke-app-build"
 ```
 
 ---
@@ -457,10 +401,7 @@ echo "✅ CodeBuild project created: flask-joke-app-build"
 ## Step 13 – Trigger First Build
 
 ```bash
-echo ""
-echo "Triggering first build..."
-
-# Start build
+# Start CodeBuild project build and capture build ID
 BUILD_ID=$(aws codebuild start-build \
   --project-name flask-joke-app-build \
   --region "$REGION" \
@@ -468,8 +409,6 @@ BUILD_ID=$(aws codebuild start-build \
   --output text)
 
 echo "BUILD_ID=$BUILD_ID"
-echo ""
-echo "Build started! Monitoring build progress..."
 ```
 
 ---
@@ -477,10 +416,9 @@ echo "Build started! Monitoring build progress..."
 ## Step 14 – Monitor Build Progress
 
 ```bash
-echo ""
+# Poll build status every 15 seconds until completion
 echo "Waiting for build to complete (3-5 minutes)..."
 
-# Poll build status
 while true; do
     BUILD_STATUS=$(aws codebuild batch-get-builds \
       --ids "$BUILD_ID" \
@@ -491,11 +429,9 @@ while true; do
     echo "Build status: $BUILD_STATUS"
     
     if [ "$BUILD_STATUS" = "SUCCEEDED" ]; then
-        echo ""
         echo "✅ Build succeeded!"
         break
     elif [ "$BUILD_STATUS" = "FAILED" ] || [ "$BUILD_STATUS" = "STOPPED" ]; then
-        echo ""
         echo "❌ Build failed or was stopped"
         break
     fi
@@ -509,24 +445,21 @@ done
 ## Step 15 – View Build Logs
 
 ```bash
-echo ""
-echo "Viewing build logs..."
-
-# Get log group and stream
+# Get CloudWatch Logs information from build
 LOG_INFO=$(aws codebuild batch-get-builds \
   --ids "$BUILD_ID" \
   --region "$REGION" \
   --query 'builds[0].logs.{group:groupName,stream:streamName}' \
   --output json)
 
+# Extract log group and stream names
 LOG_GROUP=$(echo "$LOG_INFO" | jq -r '.group')
 LOG_STREAM=$(echo "$LOG_INFO" | jq -r '.stream')
 
-echo "Log Group: $LOG_GROUP"
-echo "Log Stream: $LOG_STREAM"
-echo ""
+echo "LOG_GROUP=$LOG_GROUP"
+echo "LOG_STREAM=$LOG_STREAM"
 
-# Get last 20 log events
+# Retrieve last 20 log events from CloudWatch
 aws logs get-log-events \
   --log-group-name "$LOG_GROUP" \
   --log-stream-name "$LOG_STREAM" \
@@ -534,9 +467,6 @@ aws logs get-log-events \
   --limit 20 \
   --query 'events[*].message' \
   --output text
-
-echo ""
-echo "Full logs available in CloudWatch: /aws/codebuild/flask-joke-app-build"
 ```
 
 ---
@@ -544,18 +474,12 @@ echo "Full logs available in CloudWatch: /aws/codebuild/flask-joke-app-build"
 ## Step 16 – Verify Image in ECR
 
 ```bash
-echo ""
-echo "Verifying Docker image in ECR..."
-
-# List images in ECR
+# List Docker images in ECR repository with tags and metadata
 aws ecr describe-images \
   --repository-name "$ECR_REPO_NAME" \
   --region "$REGION" \
   --query 'imageDetails[*].{Tags:imageTags,Pushed:imagePushedAt,Size:imageSizeInBytes}' \
   --output table
-
-echo ""
-echo "✅ Docker image successfully built and pushed to ECR"
 ```
 
 ---
@@ -563,30 +487,23 @@ echo "✅ Docker image successfully built and pushed to ECR"
 ## Step 17 – Make Code Change and Trigger Build
 
 ```bash
-echo ""
-echo "================================================"
-echo "TESTING AUTOMATED BUILD ON CODE CHANGE"
-echo "================================================"
-echo ""
+# Navigate to repository directory
+REPO_DIR=$(git rev-parse --show-toplevel)
+cd "$REPO_DIR/codecommit-lab/$REPO_NAME"
 
-# Add new joke to app.py
-cd /tmp/codecommit-lab/"$REPO_NAME"
-
-# Update app.py with new joke
+# Append new joke to existing jokes list
 cat >> app.py <<'EOF'
 
 # New joke added during CI/CD demo
 jokes.append("Why do Python programmers prefer snake_case? Because camelCase is too humpy!")
 EOF
 
-# Commit and push
+# Commit and push code change
 git add app.py
 git commit -m "Add new Python joke"
 git push origin main
 
-echo ""
-echo "✅ Code change pushed to CodeCommit"
-echo "CodeBuild will automatically trigger a new build"
+echo "Note: CodeBuild webhook must be configured for automatic triggers"
 ```
 
 ---
@@ -594,26 +511,24 @@ echo "CodeBuild will automatically trigger a new build"
 ## Step 18 – Monitor Automatic Build
 
 ```bash
-echo ""
+# Wait for potential automatic build trigger
 echo "Waiting for automatic build to trigger (30 seconds)..."
 sleep 30
 
-# Get latest build
+# Get most recent build ID for this project
 LATEST_BUILD=$(aws codebuild list-builds-for-project \
   --project-name flask-joke-app-build \
   --region "$REGION" \
   --query 'ids[0]' \
   --output text)
 
-echo "Latest Build ID: $LATEST_BUILD"
+echo "LATEST_BUILD=$LATEST_BUILD"
 
-# Check if new build was triggered
+# Check if new build was automatically triggered
 if [ "$LATEST_BUILD" != "$BUILD_ID" ]; then
-    echo "✅ New build automatically triggered!"
-    echo "Build ID: $LATEST_BUILD"
+    echo "✅ New build automatically triggered: $LATEST_BUILD"
 else
-    echo "⚠️  Automatic trigger not configured (manual builds only)"
-    echo "To enable: Configure webhook in CodeBuild project settings"
+    echo "⚠️ Automatic trigger not configured (webhook required)"
 fi
 ```
 
@@ -622,32 +537,23 @@ fi
 ## Step 19 – Cleanup
 
 ```bash
-echo ""
-echo "Cleaning up resources..."
-
 # Delete CodeBuild project
 aws codebuild delete-project \
   --name flask-joke-app-build \
   --region "$REGION"
 
-echo "✅ CodeBuild project deleted"
-
-# Delete ECR repository
+# Delete ECR repository and all images
 aws ecr delete-repository \
   --repository-name "$ECR_REPO_NAME" \
   --region "$REGION" \
   --force
-
-echo "✅ ECR repository deleted"
 
 # Delete CodeCommit repository
 aws codecommit delete-repository \
   --repository-name "$REPO_NAME" \
   --region "$REGION"
 
-echo "✅ CodeCommit repository deleted"
-
-# Delete IAM role and policy
+# Delete IAM role policy and role
 aws iam delete-role-policy \
   --role-name CodeBuildServiceRole \
   --policy-name CodeBuildPermissions
@@ -655,9 +561,12 @@ aws iam delete-role-policy \
 aws iam delete-role \
   --role-name CodeBuildServiceRole
 
-echo "✅ IAM role deleted"
-echo ""
-echo "All resources cleaned up!"
+# Remove local workspace directory
+REPO_DIR=$(git rev-parse --show-toplevel)
+cd "$REPO_DIR"
+rm -rf codecommit-lab
+
+echo "✅ Cleanup complete"
 ```
 
 ---

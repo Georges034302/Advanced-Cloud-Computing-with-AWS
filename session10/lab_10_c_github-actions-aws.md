@@ -3,8 +3,6 @@
 ## Overview
 This lab demonstrates CI/CD using GitHub Actions to deploy serverless applications to AWS. You'll create a GitHub repository, configure GitHub Actions workflows to automatically deploy a Lambda function and static website to S3 on every git push, using OpenID Connect (OIDC) for secure authentication.
 
-**💰 Cost**: FREE TIER (Lambda 1M requests/month, S3 storage minimal, GitHub Actions free for public repos)
-
 ---
 
 ## Objectives
@@ -46,21 +44,21 @@ Deploy Lambda Function / S3 Website
 ## Step 1 – Set Variables
 
 ```bash
-# Set region
+# Set deployment region
 REGION="ap-southeast-2"
 export AWS_REGION="$REGION"
-echo "REGION=$REGION"
 
-# Set names
+# Set resource names for GitHub Actions deployment
 GITHUB_REPO_NAME="aws-serverless-cicd"  # You'll create this on GitHub
 LAMBDA_FUNCTION="github-actions-lambda"
-S3_BUCKET_NAME="github-actions-site-$(aws sts get-caller-identity --query Account --output text)"
 
+# Get AWS account ID and create unique S3 bucket name
+ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
+S3_BUCKET_NAME="github-actions-site-${ACCOUNT_ID}"
+
+echo "REGION=$REGION"
 echo "LAMBDA_FUNCTION=$LAMBDA_FUNCTION"
 echo "S3_BUCKET_NAME=$S3_BUCKET_NAME"
-
-# Get account ID
-ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
 echo "ACCOUNT_ID=$ACCOUNT_ID"
 ```
 
@@ -69,16 +67,11 @@ echo "ACCOUNT_ID=$ACCOUNT_ID"
 ## Step 2 – Create GitHub OIDC Provider in AWS
 
 ```bash
-echo ""
-echo "Creating GitHub OIDC provider in AWS IAM..."
-
-# Create OIDC provider for GitHub Actions
+# Create OIDC provider for GitHub Actions authentication (enables secure access without AWS keys)
 aws iam create-open-id-connect-provider \
   --url "https://token.actions.githubusercontent.com" \
   --client-id-list "sts.amazonaws.com" \
   --thumbprint-list "6938fd4d98bab03faadb97b34396831e3780aea1"
-
-echo "✅ GitHub OIDC provider created"
 ```
 
 ---
@@ -86,14 +79,11 @@ echo "✅ GitHub OIDC provider created"
 ## Step 3 – Create IAM Role for GitHub Actions
 
 ```bash
-echo ""
-echo "Creating IAM role for GitHub Actions..."
-
-# Note: Replace YOUR_GITHUB_USERNAME with your actual GitHub username
-read -p "Enter your GitHub username: " GITHUB_USERNAME
+# Prompt for GitHub username to scope IAM role trust policy
+read -p "Enter your GitHub username:" GITHUB_USERNAME
 echo "GITHUB_USERNAME=$GITHUB_USERNAME"
 
-# Create trust policy for GitHub Actions
+# Create trust policy allowing GitHub Actions from specific repository to assume role
 cat > github-trust-policy.json <<EOF
 {
   "Version": "2012-10-17",
@@ -117,14 +107,12 @@ cat > github-trust-policy.json <<EOF
 }
 EOF
 
-# Create role
+# Create IAM role for GitHub Actions
 aws iam create-role \
   --role-name GitHubActionsRole \
   --assume-role-policy-document file://github-trust-policy.json
 
-echo "✅ IAM role created: GitHubActionsRole"
-
-# Create permissions policy
+# Create permissions policy for Lambda, S3, IAM, and CloudWatch Logs
 cat > github-permissions.json <<EOF
 {
   "Version": "2012-10-17",
@@ -176,21 +164,18 @@ cat > github-permissions.json <<EOF
 }
 EOF
 
-# Attach permissions
+# Attach permissions policy to GitHub Actions role
 aws iam put-role-policy \
   --role-name GitHubActionsRole \
   --policy-name GitHubActionsPermissions \
   --policy-document file://github-permissions.json
 
-echo "✅ Permissions attached to role"
-
-# Get role ARN
+# Get role ARN for GitHub Secrets configuration
 ROLE_ARN=$(aws iam get-role \
   --role-name GitHubActionsRole \
   --query 'Role.Arn' \
   --output text)
 
-echo ""
 echo "Role ARN: $ROLE_ARN"
 echo "⚠️  Save this ARN - you'll need it for GitHub Secrets"
 ```
@@ -200,12 +185,9 @@ echo "⚠️  Save this ARN - you'll need it for GitHub Secrets"
 ## Step 4 – Create Lambda Execution Role
 
 ```bash
-echo ""
-echo "Creating Lambda execution role..."
-
-# Check if role exists
+# Check if Lambda execution role already exists
 if ! aws iam get-role --role-name GitHubActionsLambdaRole 2>/dev/null; then
-    # Create trust policy
+    # Create trust policy allowing Lambda service to assume role
     cat > lambda-trust-policy.json <<'EOF'
 {
   "Version": "2012-10-17",
@@ -221,29 +203,29 @@ if ! aws iam get-role --role-name GitHubActionsLambdaRole 2>/dev/null; then
 }
 EOF
 
-    # Create role
+    # Create IAM role for Lambda function execution
     aws iam create-role \
       --role-name GitHubActionsLambdaRole \
       --assume-role-policy-document file://lambda-trust-policy.json
 
-    # Attach managed policy
+    # Attach AWS managed policy for basic Lambda execution (CloudWatch Logs)
     aws iam attach-role-policy \
       --role-name GitHubActionsLambdaRole \
       --policy-arn arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
 
-    echo "✅ Lambda execution role created"
+    # Wait for IAM role to propagate globally
     sleep 10
 else
-    echo "✅ Lambda execution role already exists"
+    echo "Lambda execution role already exists"
 fi
 
-# Get Lambda role ARN
+# Get Lambda role ARN for use in GitHub Actions workflow
 LAMBDA_ROLE_ARN=$(aws iam get-role \
   --role-name GitHubActionsLambdaRole \
   --query 'Role.Arn' \
   --output text)
 
-echo "Lambda Role ARN: $LAMBDA_ROLE_ARN"
+echo "LAMBDA_ROLE_ARN=$LAMBDA_ROLE_ARN"
 ```
 
 ---
@@ -251,10 +233,7 @@ echo "Lambda Role ARN: $LAMBDA_ROLE_ARN"
 ## Step 5 – Create S3 Bucket for Static Website
 
 ```bash
-echo ""
-echo "Creating S3 bucket for static website..."
-
-# Create bucket
+# Create S3 bucket with region-specific configuration
 if [ "$REGION" = "us-east-1" ]; then
     aws s3api create-bucket \
       --bucket "$S3_BUCKET_NAME" \
@@ -266,18 +245,18 @@ else
       --create-bucket-configuration LocationConstraint="$REGION"
 fi
 
-# Configure for static website hosting
+# Configure bucket for static website hosting with index and error pages
 aws s3 website s3://"$S3_BUCKET_NAME"/ \
   --index-document index.html \
   --error-document error.html
 
-# Set public access block
+# Disable public access block to allow bucket policy for public reads
 aws s3api put-public-access-block \
   --bucket "$S3_BUCKET_NAME" \
   --public-access-block-configuration \
     "BlockPublicAcls=false,IgnorePublicAcls=false,BlockPublicPolicy=false,RestrictPublicBuckets=false"
 
-# Add bucket policy for public read
+# Create bucket policy allowing public read access to all objects
 cat > bucket-policy.json <<EOF
 {
   "Version": "2012-10-17",
@@ -293,12 +272,11 @@ cat > bucket-policy.json <<EOF
 }
 EOF
 
+# Apply bucket policy to enable public access
 aws s3api put-bucket-policy \
   --bucket "$S3_BUCKET_NAME" \
   --policy file://bucket-policy.json
 
-echo "✅ S3 bucket created and configured for static website"
-echo ""
 echo "Website URL: http://${S3_BUCKET_NAME}.s3-website-${REGION}.amazonaws.com"
 ```
 
@@ -307,13 +285,13 @@ echo "Website URL: http://${S3_BUCKET_NAME}.s3-website-${REGION}.amazonaws.com"
 ## Step 6 – Create Local Project Directory
 
 ```bash
-echo ""
-echo "Creating local project directory..."
+# Get repository root and create workspace for GitHub Actions lab
+REPO_DIR=$(git rev-parse --show-toplevel)
+WORKSPACE="$REPO_DIR/github-actions-lab"
+mkdir -p "$WORKSPACE"
+cd "$WORKSPACE"
 
-mkdir -p /tmp/github-actions-lab
-cd /tmp/github-actions-lab
-
-echo "✅ Project directory created: $(pwd)"
+echo "Project directory: $(pwd)"
 ```
 
 ---
@@ -321,9 +299,7 @@ echo "✅ Project directory created: $(pwd)"
 ## Step 7 – Create Lambda Function Code
 
 ```bash
-echo ""
-echo "Creating Lambda function code..."
-
+# Create Lambda function directory and handler code
 mkdir -p lambda
 cat > lambda/handler.py <<'EOF'
 import json
@@ -346,8 +322,6 @@ def lambda_handler(event, context):
         })
     }
 EOF
-
-echo "✅ Lambda function code created"
 ```
 
 ---
@@ -355,12 +329,10 @@ echo "✅ Lambda function code created"
 ## Step 8 – Create Static Website Files
 
 ```bash
-echo ""
-echo "Creating static website files..."
-
+# Create website directory and HTML files
 mkdir -p website
 
-# Create index.html
+# Create index.html with responsive design
 cat > website/index.html <<'EOF'
 <!DOCTYPE html>
 <html lang="en">
@@ -427,8 +399,6 @@ cat > website/error.html <<'EOF'
 </body>
 </html>
 EOF
-
-echo "✅ Website files created"
 ```
 
 ---
@@ -436,12 +406,10 @@ echo "✅ Website files created"
 ## Step 9 – Create GitHub Actions Workflow for Lambda
 
 ```bash
-echo ""
-echo "Creating GitHub Actions workflow for Lambda deployment..."
-
+# Create GitHub Actions workflows directory
 mkdir -p .github/workflows
 
-cat > .github/workflows/deploy-lambda.yml <<EOF
+# Create workflow for automated Lambda deployment on code changes
 name: Deploy Lambda Function
 
 on:
@@ -519,8 +487,6 @@ jobs:
             --output text)
           echo "Lambda Function URL: \$FUNCTION_URL"
 EOF
-
-echo "✅ Lambda deployment workflow created"
 ```
 
 ---
@@ -528,9 +494,7 @@ echo "✅ Lambda deployment workflow created"
 ## Step 10 – Create GitHub Actions Workflow for S3
 
 ```bash
-echo ""
-echo "Creating GitHub Actions workflow for S3 deployment..."
-
+# Create workflow for automated S3 website deployment on content changes
 cat > .github/workflows/deploy-s3.yml <<EOF
 name: Deploy Static Website to S3
 
@@ -569,8 +533,6 @@ jobs:
         run: |
           echo "Website URL: http://${S3_BUCKET_NAME}.s3-website-${REGION}.amazonaws.com"
 EOF
-
-echo "✅ S3 deployment workflow created"
 ```
 
 ---
@@ -578,9 +540,7 @@ echo "✅ S3 deployment workflow created"
 ## Step 11 – Create README with Setup Instructions
 
 ```bash
-echo ""
-echo "Creating README..."
-
+# Create README with deployment instructions and architecture overview
 cat > README.md <<EOF
 # AWS Serverless CI/CD with GitHub Actions
 
@@ -624,8 +584,6 @@ python lambda/handler.py
 cd website && python -m http.server 8000
 \`\`\`
 EOF
-
-echo "✅ README created"
 ```
 
 ---
@@ -633,68 +591,26 @@ echo "✅ README created"
 ## Step 12 – Initialize Git Repository
 
 ```bash
-echo ""
-echo "Initializing git repository..."
+# Navigate to workspace directory
+REPO_DIR=$(git rev-parse --show-toplevel)
+cd "$REPO_DIR/github-actions-lab"
 
-cd /tmp/github-actions-lab
-
+# Initialize Git repository and commit all files
 git init
 git add .
 git commit -m "Initial commit: GitHub Actions CI/CD setup"
-
-echo "✅ Git repository initialized"
 ```
 
 ---
 
-## Step 13 – Manual Instructions for GitHub Setup
+## Step 13 – Verify Lambda Deployment
 
 ```bash
-echo ""
-echo "================================================"
-echo "NEXT STEPS: CREATE GITHUB REPOSITORY"
-echo "================================================"
-echo ""
-echo "1. Go to GitHub: https://github.com/new"
-echo ""
-echo "2. Create new repository:"
-echo "   - Repository name: $GITHUB_REPO_NAME"
-echo "   - Visibility: Public or Private"
-echo "   - Do NOT initialize with README"
-echo ""
-echo "3. Add GitHub Secret:"
-echo "   - Go to: Settings → Secrets and variables → Actions"
-echo "   - Click 'New repository secret'"
-echo "   - Name: AWS_ROLE_ARN"
-echo "   - Value: $ROLE_ARN"
-echo ""
-echo "4. Push code to GitHub:"
-echo ""
-echo "   cd /tmp/github-actions-lab"
-echo "   git remote add origin https://github.com/$GITHUB_USERNAME/$GITHUB_REPO_NAME.git"
-echo "   git branch -M main"
-echo "   git push -u origin main"
-echo ""
-echo "5. Check GitHub Actions tab to see workflows running!"
-echo ""
-echo "================================================"
-echo ""
-read -p "Press Enter after you've pushed to GitHub..."
-```
-
----
-
-## Step 14 – Verify Lambda Deployment
-
-```bash
-echo ""
-echo "Verifying Lambda function deployment..."
-
-# Check if Lambda function exists
+# Check if Lambda function has been deployed by GitHub Actions
 if aws lambda get-function --function-name "$LAMBDA_FUNCTION" --region "$REGION" 2>/dev/null; then
-    echo "✅ Lambda function deployed"
+    echo "Lambda function deployed"
     
-    # Get function URL
+    # Get function URL if configured
     FUNCTION_URL=$(aws lambda get-function-url-config \
       --function-name "$LAMBDA_FUNCTION" \
       --region "$REGION" \
@@ -702,9 +618,7 @@ if aws lambda get-function --function-name "$LAMBDA_FUNCTION" --region "$REGION"
       --output text 2>/dev/null || echo "Not configured yet")
     
     if [ "$FUNCTION_URL" != "Not configured yet" ]; then
-        echo ""
         echo "Lambda Function URL: $FUNCTION_URL"
-        echo ""
         echo "Testing Lambda function..."
         curl -s "$FUNCTION_URL" | jq .
     else
@@ -718,21 +632,15 @@ fi
 
 ---
 
-## Step 15 – Verify S3 Website Deployment
+## Step 14 – Verify S3 Website Deployment
 
 ```bash
-echo ""
-echo "Verifying S3 website deployment..."
-
-# List objects in bucket
+# Check if website files have been uploaded by GitHub Actions
 OBJECT_COUNT=$(aws s3 ls s3://"$S3_BUCKET_NAME"/ --region "$REGION" 2>/dev/null | wc -l)
 
 if [ "$OBJECT_COUNT" -gt 0 ]; then
-    echo "✅ Website files deployed to S3"
-    
-    echo ""
+    echo "Website files deployed to S3"
     echo "Website URL: http://${S3_BUCKET_NAME}.s3-website-${REGION}.amazonaws.com"
-    echo ""
     echo "Testing website..."
     curl -s "http://${S3_BUCKET_NAME}.s3-website-${REGION}.amazonaws.com" | head -20
 else
@@ -743,18 +651,14 @@ fi
 
 ---
 
-## Step 16 – Test CI/CD with Code Change
+## Step 15 – Test CI/CD with Code Change
 
 ```bash
-echo ""
-echo "================================================"
-echo "TESTING CI/CD WITH CODE CHANGES"
-echo "================================================"
-echo ""
+# Navigate to workspace directory
+REPO_DIR=$(git rev-parse --show-toplevel)
+cd "$REPO_DIR/github-actions-lab"
 
-cd /tmp/github-actions-lab
-
-# Update Lambda function
+# Update Lambda function to version 2.0 with timestamp tracking
 cat > lambda/handler.py <<'EOF'
 import json
 from datetime import datetime
@@ -779,15 +683,13 @@ def lambda_handler(event, context):
     }
 EOF
 
-# Update website
+# Update website version and content
 sed -i 's/Version: 1.0/Version: 2.0/' website/index.html
 sed -i 's/This static website/This UPDATED static website/' website/index.html
 
-echo "✅ Code changes made"
-echo ""
 echo "Now commit and push changes:"
 echo ""
-echo "cd /tmp/github-actions-lab"
+echo "cd \$REPO_DIR/github-actions-lab"
 echo "git add ."
 echo "git commit -m 'Update to version 2.0'"
 echo "git push origin main"
@@ -797,18 +699,13 @@ echo "GitHub Actions will automatically deploy the changes!"
 
 ---
 
-## Step 17 – Cleanup
+## Step 16 – Cleanup
 
 ```bash
-echo ""
-echo "Cleaning up resources..."
-
 # Delete Lambda function
 aws lambda delete-function \
   --function-name "$LAMBDA_FUNCTION" \
   --region "$REGION" 2>/dev/null || true
-
-echo "✅ Lambda function deleted"
 
 # Empty and delete S3 bucket
 aws s3 rm s3://"$S3_BUCKET_NAME" --recursive --region "$REGION" 2>/dev/null || true
@@ -816,9 +713,7 @@ aws s3api delete-bucket \
   --bucket "$S3_BUCKET_NAME" \
   --region "$REGION" 2>/dev/null || true
 
-echo "✅ S3 bucket deleted"
-
-# Delete IAM roles and policies
+# Delete GitHub Actions IAM role and policy
 aws iam delete-role-policy \
   --role-name GitHubActionsRole \
   --policy-name GitHubActionsPermissions 2>/dev/null || true
@@ -826,6 +721,7 @@ aws iam delete-role-policy \
 aws iam delete-role \
   --role-name GitHubActionsRole 2>/dev/null || true
 
+# Delete Lambda execution role and policy
 aws iam detach-role-policy \
   --role-name GitHubActionsLambdaRole \
   --policy-arn arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole 2>/dev/null || true
@@ -833,18 +729,17 @@ aws iam detach-role-policy \
 aws iam delete-role \
   --role-name GitHubActionsLambdaRole 2>/dev/null || true
 
-echo "✅ IAM roles deleted"
-
 # Delete OIDC provider
 OIDC_ARN="arn:aws:iam::${ACCOUNT_ID}:oidc-provider/token.actions.githubusercontent.com"
 aws iam delete-open-id-connect-provider \
   --open-id-connect-provider-arn "$OIDC_ARN" 2>/dev/null || true
 
-echo "✅ OIDC provider deleted"
+# Remove local workspace directory
+REPO_DIR=$(git rev-parse --show-toplevel)
+cd "$REPO_DIR"
+rm -rf github-actions-lab
 
-echo ""
-echo "All AWS resources cleaned up!"
-echo ""
+echo "✅ Cleanup complete"
 echo "⚠️  Remember to delete the GitHub repository manually if desired"
 ```
 
