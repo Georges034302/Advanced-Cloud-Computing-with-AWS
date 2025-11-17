@@ -35,34 +35,21 @@ EC2 State Change → EventBridge Rule → SNS Topic → Email Notification
 ## Step 1 – Set Variables and Verify Prerequisites
 
 ```bash
-# Get AWS account ID
-ACCOUNT_ID=$(aws sts get-caller-identity \
-  --query Account \
-  --output text)
-echo "ACCOUNT_ID=$ACCOUNT_ID"
-
-# Set region
+# Get AWS account ID and set region
+ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
 REGION="ap-southeast-2"
-echo "REGION=$REGION"
 
 # Set resource names
 TOPIC_NAME="ec2-state-alerts"
-echo "TOPIC_NAME=$TOPIC_NAME"
-
 RULE_NAME="ec2-state-change-rule"
-echo "RULE_NAME=$RULE_NAME"
-
 INSTANCE_NAME="test-monitored-instance"
-echo "INSTANCE_NAME=$INSTANCE_NAME"
 
-# Set your email address (CHANGE THIS!)
+# IMPORTANT: Change this to your real email address!
 EMAIL_ADDRESS="your-email@example.com"
-echo "EMAIL_ADDRESS=$EMAIL_ADDRESS"
 
-echo ""
-echo "⚠️  IMPORTANT: Change EMAIL_ADDRESS to your real email!"
-echo ""
-echo "✅ Prerequisites verified"
+echo "ACCOUNT_ID=$ACCOUNT_ID"
+echo "REGION=$REGION"
+echo "EMAIL_ADDRESS=$EMAIL_ADDRESS"
 ```
 
 ---
@@ -70,17 +57,13 @@ echo "✅ Prerequisites verified"
 ## Step 2 – Create SNS Topic
 
 ```bash
-# Create SNS topic for EC2 alerts
-echo "Creating SNS topic..."
-
+# Create SNS topic for EC2 state change alerts
 TOPIC_ARN=$(aws sns create-topic \
   --name "$TOPIC_NAME" \
   --region "$REGION" \
   --query TopicArn \
   --output text)
 echo "TOPIC_ARN=$TOPIC_ARN"
-
-echo "✅ SNS topic created"
 ```
 
 ---
@@ -88,9 +71,7 @@ echo "✅ SNS topic created"
 ## Step 3 – Subscribe Email to SNS Topic
 
 ```bash
-# Subscribe email address to receive notifications
-echo "Subscribing email to SNS topic..."
-
+# Subscribe email address to SNS topic for notifications
 SUBSCRIPTION_ARN=$(aws sns subscribe \
   --topic-arn "$TOPIC_ARN" \
   --protocol email \
@@ -100,18 +81,9 @@ SUBSCRIPTION_ARN=$(aws sns subscribe \
   --output text)
 echo "SUBSCRIPTION_ARN=$SUBSCRIPTION_ARN"
 
-echo ""
-echo "✅ Email subscription created"
-echo ""
-echo "================================================"
-echo "⚠️  ACTION REQUIRED"
-echo "================================================"
-echo "Check your email inbox: $EMAIL_ADDRESS"
-echo "Subject: 'AWS Notification - Subscription Confirmation'"
-echo "Click the 'Confirm subscription' link in the email"
-echo ""
-echo "Press Enter after confirming your email subscription..."
-read
+# ACTION REQUIRED: Check email and confirm subscription
+echo "⚠️  Check $EMAIL_ADDRESS for confirmation email and click the link"
+read -p "Press Enter after confirming subscription..."
 ```
 
 ---
@@ -119,18 +91,12 @@ read
 ## Step 4 – Verify Email Subscription
 
 ```bash
-# Check subscription status
-echo "Verifying email subscription..."
-
+# Verify email subscription is confirmed (Status should show ARN, not PendingConfirmation)
 aws sns list-subscriptions-by-topic \
   --topic-arn "$TOPIC_ARN" \
   --region "$REGION" \
   --query 'Subscriptions[*].{Endpoint:Endpoint,Protocol:Protocol,Status:SubscriptionArn}' \
   --output table
-
-echo ""
-echo "If Status shows 'PendingConfirmation', check your email!"
-echo "If Status shows an ARN, you're subscribed! ✅"
 ```
 
 ---
@@ -138,22 +104,15 @@ echo "If Status shows an ARN, you're subscribed! ✅"
 ## Step 5 – Test SNS with Manual Message
 
 ```bash
-echo ""
-echo "Sending test email notification..."
-
-# Send test message to verify email works
+# Send test message to verify email notifications work
 aws sns publish \
   --topic-arn "$TOPIC_ARN" \
   --subject "Test: SNS Email Notification" \
   --message "This is a test message from your SNS topic. If you receive this, email notifications are working correctly!" \
   --region "$REGION"
 
-echo ""
-echo "✅ Test message sent"
-echo "Check your email for the test notification"
-echo ""
-echo "Press Enter to continue..."
-read
+echo "Test message sent - check your email"
+read -p "Press Enter to continue..."
 ```
 
 ---
@@ -161,9 +120,7 @@ read
 ## Step 6 – Create EventBridge Rule for EC2 State Changes
 
 ```bash
-# Create EventBridge rule to capture EC2 state changes
-echo "Creating EventBridge rule..."
-
+# Create EventBridge rule to monitor EC2 state changes (pending, running, stopping, stopped, shutting-down, terminated)
 aws events put-rule \
   --name "$RULE_NAME" \
   --description "Monitor EC2 instance state changes (running, stopped, terminated)" \
@@ -177,9 +134,7 @@ aws events put-rule \
   --state ENABLED \
   --region "$REGION"
 
-echo "✅ EventBridge rule created"
-
-# Get rule ARN
+# Get rule ARN for reference
 RULE_ARN=$(aws events describe-rule \
   --name "$RULE_NAME" \
   --query 'Arn' \
@@ -193,15 +148,11 @@ echo "RULE_ARN=$RULE_ARN"
 ## Step 7 – Add SNS Topic as EventBridge Target
 
 ```bash
-# Configure EventBridge to send events to SNS topic
-echo "Adding SNS as target for EventBridge rule..."
-
+# Configure EventBridge rule to publish events to SNS topic
 aws events put-targets \
   --rule "$RULE_NAME" \
   --targets "Id"="1","Arn"="$TOPIC_ARN" \
   --region "$REGION"
-
-echo "✅ SNS topic added as EventBridge target"
 ```
 
 ---
@@ -209,9 +160,7 @@ echo "✅ SNS topic added as EventBridge target"
 ## Step 8 – Grant EventBridge Permission to Publish to SNS
 
 ```bash
-# Allow EventBridge to publish messages to SNS topic
-echo "Granting EventBridge permission to publish to SNS..."
-
+# Grant EventBridge service permission to publish to SNS topic
 aws sns set-topic-attributes \
   --topic-arn "$TOPIC_ARN" \
   --attribute-name Policy \
@@ -229,8 +178,6 @@ aws sns set-topic-attributes \
     ]
   }' \
   --region "$REGION"
-
-echo "✅ Permission granted"
 ```
 
 ---
@@ -238,31 +185,30 @@ echo "✅ Permission granted"
 ## Step 9 – Get Default VPC and Subnet
 
 ```bash
-# Get default VPC for EC2 instance
-echo "Getting default VPC..."
-
+# Get default VPC for launching EC2 instance
 DEFAULT_VPC=$(aws ec2 describe-vpcs \
   --filters "Name=isDefault,Values=true" \
   --query 'Vpcs[0].VpcId' \
   --output text \
   --region "$REGION")
-echo "DEFAULT_VPC=$DEFAULT_VPC"
 
-# Get default subnet
+# Get default subnet from VPC
 DEFAULT_SUBNET=$(aws ec2 describe-subnets \
   --filters "Name=vpc-id,Values=$DEFAULT_VPC" \
   --query 'Subnets[0].SubnetId' \
   --output text \
   --region "$REGION")
-echo "DEFAULT_SUBNET=$DEFAULT_SUBNET"
 
-# Get latest Amazon Linux 2023 AMI
+# Get latest Amazon Linux 2023 AMI ID
 AMI_ID=$(aws ec2 describe-images \
   --owners amazon \
   --filters "Name=name,Values=al2023-ami-2023.*-x86_64" \
   --query 'sort_by(Images, &CreationDate)[-1].ImageId' \
   --output text \
   --region "$REGION")
+
+echo "DEFAULT_VPC=$DEFAULT_VPC"
+echo "DEFAULT_SUBNET=$DEFAULT_SUBNET"
 echo "AMI_ID=$AMI_ID"
 ```
 
@@ -271,15 +217,7 @@ echo "AMI_ID=$AMI_ID"
 ## Step 10 – Launch EC2 Instance (Trigger Alert)
 
 ```bash
-echo ""
-echo "================================================"
-echo "LAUNCHING EC2 INSTANCE"
-echo "================================================"
-echo ""
-echo "This will trigger EventBridge → SNS → Email notification!"
-echo ""
-
-# Launch t2.micro EC2 instance
+# Launch t2.micro EC2 instance (triggers EventBridge → SNS → Email)
 INSTANCE_ID=$(aws ec2 run-instances \
   --image-id "$AMI_ID" \
   --instance-type t2.micro \
@@ -290,15 +228,7 @@ INSTANCE_ID=$(aws ec2 run-instances \
   --output text)
 echo "INSTANCE_ID=$INSTANCE_ID"
 
-echo ""
-echo "✅ EC2 instance launched: $INSTANCE_ID"
-echo ""
-echo "EventBridge will capture state changes:"
-echo "  1. pending → running (2 email notifications)"
-echo ""
-echo "Check your email for EC2 state change notifications!"
-echo ""
-echo "Waiting 30 seconds for instance to start..."
+echo "Instance launching - check email for state change notifications (pending, running)"
 sleep 30
 ```
 
@@ -307,20 +237,12 @@ sleep 30
 ## Step 11 – Check Instance Status
 
 ```bash
-# Verify instance is running
-echo "Checking instance status..."
-
+# Verify instance is running (should have received 2 emails: pending, running)
 aws ec2 describe-instances \
   --instance-ids "$INSTANCE_ID" \
   --region "$REGION" \
   --query 'Reservations[0].Instances[0].{InstanceId:InstanceId,State:State.Name,Type:InstanceType,LaunchTime:LaunchTime}' \
   --output table
-
-echo ""
-echo "Instance should be 'running'"
-echo "You should have received email notifications for:"
-echo "  - Instance pending"
-echo "  - Instance running"
 ```
 
 ---
@@ -328,26 +250,12 @@ echo "  - Instance running"
 ## Step 12 – Stop Instance (Trigger Stop Alert)
 
 ```bash
-echo ""
-echo "================================================"
-echo "STOPPING EC2 INSTANCE"
-echo "================================================"
-echo ""
-
-# Stop EC2 instance
+# Stop EC2 instance (triggers email notifications for stopping, stopped)
 aws ec2 stop-instances \
   --instance-ids "$INSTANCE_ID" \
   --region "$REGION"
 
-echo "✅ Stop command sent"
-echo ""
-echo "EventBridge will capture:"
-echo "  - Instance stopping"
-echo "  - Instance stopped"
-echo ""
-echo "Check your email for stop notifications!"
-echo ""
-echo "Waiting 30 seconds for instance to stop..."
+echo "Instance stopping - check email for notifications"
 sleep 30
 ```
 
@@ -356,20 +264,12 @@ sleep 30
 ## Step 13 – Check Stopped Status
 
 ```bash
-# Verify instance is stopped
-echo "Checking instance status..."
-
+# Verify instance is stopped (should have received 2 more emails: stopping, stopped)
 aws ec2 describe-instances \
   --instance-ids "$INSTANCE_ID" \
   --region "$REGION" \
   --query 'Reservations[0].Instances[0].{InstanceId:InstanceId,State:State.Name}' \
   --output table
-
-echo ""
-echo "Instance should be 'stopped'"
-echo "You should have received email notifications for:"
-echo "  - Instance stopping"
-echo "  - Instance stopped"
 ```
 
 ---
@@ -377,26 +277,12 @@ echo "  - Instance stopped"
 ## Step 14 – Terminate Instance (Trigger Terminate Alert)
 
 ```bash
-echo ""
-echo "================================================"
-echo "TERMINATING EC2 INSTANCE"
-echo "================================================"
-echo ""
-
-# Terminate EC2 instance
+# Terminate EC2 instance (triggers email notifications for shutting-down, terminated)
 aws ec2 terminate-instances \
   --instance-ids "$INSTANCE_ID" \
   --region "$REGION"
 
-echo "✅ Terminate command sent"
-echo ""
-echo "EventBridge will capture:"
-echo "  - Instance shutting-down"
-echo "  - Instance terminated"
-echo ""
-echo "Check your email for termination notifications!"
-echo ""
-echo "Waiting 30 seconds for termination..."
+echo "Instance terminating - check email for final notifications"
 sleep 30
 ```
 
@@ -405,26 +291,8 @@ sleep 30
 ## Step 15 – Verify All Email Notifications
 
 ```bash
-echo ""
-echo "================================================"
-echo "EMAIL NOTIFICATIONS SUMMARY"
-echo "================================================"
-echo ""
-echo "You should have received 6 email notifications:"
-echo ""
-echo "1. ✉️  Test message (Step 5)"
-echo "2. ✉️  Instance pending"
-echo "3. ✉️  Instance running"
-echo "4. ✉️  Instance stopping"
-echo "5. ✉️  Instance stopped"
-echo "6. ✉️  Instance shutting-down"
-echo "7. ✉️  Instance terminated"
-echo ""
-echo "Each email contains JSON with instance details:"
-echo "  - Instance ID"
-echo "  - State change (old → new)"
-echo "  - Timestamp"
-echo "  - Region"
+# Summary: You should have received 7 email notifications
+echo "Expected emails: Test + pending + running + stopping + stopped + shutting-down + terminated"
 ```
 
 ---
@@ -432,18 +300,12 @@ echo "  - Region"
 ## Step 16 – View EventBridge Metrics
 
 ```bash
-echo ""
-echo "Checking EventBridge rule invocations..."
-
-# Get EventBridge rule details
+# View EventBridge rule details (rule was invoked ~6 times for EC2 state changes)
 aws events describe-rule \
   --name "$RULE_NAME" \
   --region "$REGION" \
   --query '{Name:Name,State:State,EventPattern:EventPattern}' \
   --output table
-
-echo ""
-echo "EventBridge rule has been invoked ~6 times (EC2 state changes)"
 ```
 
 ---
@@ -451,17 +313,13 @@ echo "EventBridge rule has been invoked ~6 times (EC2 state changes)"
 ## Step 17 – View SNS Topic Details
 
 ```bash
-echo ""
-echo "SNS Topic Details:"
-
+# View SNS topic details and subscriptions
 aws sns get-topic-attributes \
   --topic-arn "$TOPIC_ARN" \
   --region "$REGION" \
   --query 'Attributes.{TopicArn:TopicArn,DisplayName:DisplayName,SubscriptionsConfirmed:SubscriptionsConfirmed}' \
   --output table
 
-echo ""
-echo "Subscriptions:"
 aws sns list-subscriptions-by-topic \
   --topic-arn "$TOPIC_ARN" \
   --region "$REGION" \
@@ -474,11 +332,7 @@ aws sns list-subscriptions-by-topic \
 ## Step 18 – Cleanup Resources
 
 ```bash
-echo ""
-echo "Cleaning up resources..."
-
-# Verify instance is terminated (cleanup only if somehow still exists)
-echo "Checking if instance needs cleanup..."
+# Verify instance is terminated (terminate if still running)
 INSTANCE_STATE=$(aws ec2 describe-instances \
   --instance-ids "$INSTANCE_ID" \
   --region "$REGION" \
@@ -487,57 +341,38 @@ INSTANCE_STATE=$(aws ec2 describe-instances \
   2>/dev/null || echo "terminated")
 
 if [ "$INSTANCE_STATE" != "terminated" ]; then
-    echo "Terminating instance..."
-    aws ec2 terminate-instances \
-      --instance-ids "$INSTANCE_ID" \
-      --region "$REGION"
-    echo "Waiting for termination..."
-    aws ec2 wait instance-terminated \
-      --instance-ids "$INSTANCE_ID" \
-      --region "$REGION"
+    aws ec2 terminate-instances --instance-ids "$INSTANCE_ID" --region "$REGION"
+    aws ec2 wait instance-terminated --instance-ids "$INSTANCE_ID" --region "$REGION"
 fi
 
 # Remove EventBridge target
-echo "Removing EventBridge target..."
 aws events remove-targets \
   --rule "$RULE_NAME" \
   --ids "1" \
   --region "$REGION"
 
 # Delete EventBridge rule
-echo "Deleting EventBridge rule..."
 aws events delete-rule \
   --name "$RULE_NAME" \
   --region "$REGION"
 
-# Unsubscribe email
-echo "Unsubscribing email..."
+# Unsubscribe email from SNS topic
 aws sns list-subscriptions-by-topic \
   --topic-arn "$TOPIC_ARN" \
   --region "$REGION" \
   --query 'Subscriptions[*].SubscriptionArn' \
   --output text | while read SUB_ARN; do
     if [ "$SUB_ARN" != "PendingConfirmation" ] && [ -n "$SUB_ARN" ]; then
-        aws sns unsubscribe \
-          --subscription-arn "$SUB_ARN" \
-          --region "$REGION"
+        aws sns unsubscribe --subscription-arn "$SUB_ARN" --region "$REGION"
     fi
 done
 
 # Delete SNS topic
-echo "Deleting SNS topic..."
 aws sns delete-topic \
   --topic-arn "$TOPIC_ARN" \
   --region "$REGION"
 
-echo ""
-echo "✅ Cleanup completed successfully!"
-echo ""
-echo "All resources deleted:"
-echo "- EC2 instance terminated"
-echo "- EventBridge rule deleted"
-echo "- Email unsubscribed"
-echo "- SNS topic deleted"
+echo "Cleanup complete"
 ```
 
 ---
