@@ -3,8 +3,6 @@
 ## Overview
 This lab introduces Terraform, an alternative Infrastructure as Code tool to CloudFormation. You'll learn Terraform basics, deploy a VPC in ap-southeast-2, configure remote state storage in S3 with DynamoDB locking, and use core Terraform commands: init, plan, apply, and destroy.
 
-**💰 Cost**: FREE TIER (VPC free, S3/DynamoDB minimal)
-
 ---
 
 ## Objectives
@@ -49,22 +47,16 @@ Remote State Backend
 ## Step 1 – Install Terraform CLI
 
 ```bash
-echo ""
-echo "Installing Terraform CLI..."
-
-# Download and install Terraform
+# Download Terraform binary
 cd /tmp
 wget https://releases.hashicorp.com/terraform/1.6.6/terraform_1.6.6_linux_amd64.zip
 
-# Unzip and move to PATH
+# Extract and install to system PATH
 unzip -q terraform_1.6.6_linux_amd64.zip
 sudo mv terraform /usr/local/bin/
 
 # Verify installation
 terraform version
-
-echo ""
-echo "✅ Terraform installed"
 ```
 
 ---
@@ -72,25 +64,23 @@ echo "✅ Terraform installed"
 ## Step 2 – Set Variables and Create Project Directory
 
 ```bash
-# Set region
+# Set AWS region for Terraform deployment
 REGION="ap-southeast-2"
 export AWS_REGION="$REGION"
-echo "REGION=$REGION"
 
-# Set unique bucket name for state
+# Create unique names for remote state backend (S3 bucket + DynamoDB table)
 ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
 STATE_BUCKET="terraform-state-${ACCOUNT_ID}"
 LOCK_TABLE="terraform-state-lock"
 
-echo "STATE_BUCKET=$STATE_BUCKET"
-echo "LOCK_TABLE=$LOCK_TABLE"
-
-# Create project directory
+# Create Terraform project directory
 mkdir -p /tmp/terraform-vpc
 cd /tmp/terraform-vpc
 
-echo ""
-echo "✅ Project directory created: $(pwd)"
+echo "REGION: $REGION"
+echo "STATE_BUCKET: $STATE_BUCKET"
+echo "LOCK_TABLE: $LOCK_TABLE"
+echo "PROJECT_DIR: $(pwd)"
 ```
 
 ---
@@ -98,10 +88,7 @@ echo "✅ Project directory created: $(pwd)"
 ## Step 3 – Create Provider Configuration
 
 ```bash
-echo ""
-echo "Creating Terraform provider configuration..."
-
-# Create provider.tf (AWS provider configuration)
+# Create AWS provider configuration with default tags
 cat > provider.tf <<EOF
 # Terraform version and required providers
 terraform {
@@ -129,7 +116,7 @@ provider "aws" {
 }
 EOF
 
-echo "✅ Provider configuration created: provider.tf"
+echo "provider.tf"
 ```
 
 ---
@@ -137,10 +124,7 @@ echo "✅ Provider configuration created: provider.tf"
 ## Step 4 – Create Variables File
 
 ```bash
-echo ""
-echo "Creating variables file..."
-
-# Create variables.tf (input variables)
+# Define input variables for flexible configuration
 cat > variables.tf <<EOF
 # AWS Region
 variable "aws_region" {
@@ -171,7 +155,7 @@ variable "project_name" {
 }
 EOF
 
-echo "✅ Variables defined: variables.tf"
+echo "variables.tf"
 ```
 
 ---
@@ -179,10 +163,7 @@ echo "✅ Variables defined: variables.tf"
 ## Step 5 – Create VPC Resources
 
 ```bash
-echo ""
-echo "Creating VPC resources configuration..."
-
-# Create vpc.tf (network infrastructure)
+# Define VPC infrastructure (VPC, subnet, IGW, routing)
 cat > vpc.tf <<'EOF'
 # VPC
 resource "aws_vpc" "main" {
@@ -242,7 +223,7 @@ data "aws_availability_zones" "available" {
 }
 EOF
 
-echo "✅ VPC resources defined: vpc.tf"
+echo "vpc.tf"
 ```
 
 ---
@@ -250,10 +231,7 @@ echo "✅ VPC resources defined: vpc.tf"
 ## Step 6 – Create EC2 Instance Configuration
 
 ```bash
-echo ""
-echo "Creating EC2 instance configuration..."
-
-# Create ec2.tf (compute resources)
+# Define EC2 instance with security group and web server setup
 cat > ec2.tf <<'EOF'
 # Security Group for EC2
 resource "aws_security_group" "web" {
@@ -342,7 +320,7 @@ resource "aws_instance" "web" {
 }
 EOF
 
-echo "✅ EC2 instance defined: ec2.tf"
+echo "ec2.tf"
 ```
 
 ---
@@ -350,10 +328,7 @@ echo "✅ EC2 instance defined: ec2.tf"
 ## Step 7 – Create Outputs File
 
 ```bash
-echo ""
-echo "Creating outputs file..."
-
-# Create outputs.tf (export values)
+# Define outputs to export important values after deployment
 cat > outputs.tf <<'EOF'
 # VPC ID
 output "vpc_id" {
@@ -386,7 +361,7 @@ output "web_url" {
 }
 EOF
 
-echo "✅ Outputs defined: outputs.tf"
+echo "outputs.tf"
 ```
 
 ---
@@ -394,18 +369,8 @@ echo "✅ Outputs defined: outputs.tf"
 ## Step 8 – Initialize Terraform
 
 ```bash
-echo ""
-echo "================================================"
-echo "INITIALIZING TERRAFORM PROJECT"
-echo "================================================"
-echo ""
-
-# Initialize Terraform (downloads providers)
+# Initialize Terraform (downloads AWS provider and sets up working directory)
 terraform init
-
-echo ""
-echo "✅ Terraform initialized"
-echo "This downloaded AWS provider and set up working directory"
 ```
 
 ---
@@ -413,14 +378,8 @@ echo "This downloaded AWS provider and set up working directory"
 ## Step 9 – Validate Configuration
 
 ```bash
-echo ""
-echo "Validating Terraform configuration..."
-
-# Validate syntax and configuration
+# Validate Terraform syntax and configuration
 terraform validate
-
-echo ""
-echo "✅ Configuration is valid"
 ```
 
 ---
@@ -428,14 +387,8 @@ echo "✅ Configuration is valid"
 ## Step 10 – Format Configuration Files
 
 ```bash
-echo ""
-echo "Formatting Terraform files..."
-
-# Format all .tf files (consistent style)
+# Format all .tf files for consistent style
 terraform fmt
-
-echo ""
-echo "✅ Files formatted"
 ```
 
 ---
@@ -443,18 +396,8 @@ echo "✅ Files formatted"
 ## Step 11 – Preview Changes (Terraform Plan)
 
 ```bash
-echo ""
-echo "================================================"
-echo "CREATING EXECUTION PLAN"
-echo "================================================"
-echo ""
-
-# Generate execution plan (preview changes)
+# Generate execution plan (preview what will be created/modified/destroyed)
 terraform plan
-
-echo ""
-echo "✅ Plan shows all resources to be created"
-echo "Review the plan carefully before applying"
 ```
 
 ---
@@ -462,17 +405,8 @@ echo "Review the plan carefully before applying"
 ## Step 12 – Apply Configuration (Deploy Infrastructure)
 
 ```bash
-echo ""
-echo "================================================"
-echo "APPLYING TERRAFORM CONFIGURATION"
-echo "================================================"
-echo ""
-
-# Apply configuration (deploy resources)
+# Deploy all resources defined in Terraform configuration
 terraform apply -auto-approve
-
-echo ""
-echo "✅ Infrastructure deployed!"
 ```
 
 ---
@@ -480,17 +414,13 @@ echo "✅ Infrastructure deployed!"
 ## Step 13 – View Outputs
 
 ```bash
-echo ""
-echo "Terraform outputs:"
-
-# Display all outputs
+# Display all Terraform outputs
 terraform output
 
-echo ""
-
-# Get specific output
+# Extract web application URL
 WEB_URL=$(terraform output -raw web_url)
-echo "Web Application: $WEB_URL"
+
+echo "WEB_URL: $WEB_URL"
 ```
 
 ---
@@ -498,17 +428,16 @@ echo "Web Application: $WEB_URL"
 ## Step 14 – Test Web Application
 
 ```bash
-echo ""
-echo "Testing web application (waiting 2 minutes for initialization)..."
+# Wait for UserData script to install and start httpd
 sleep 120
 
-# Test HTTP endpoint
+# Test web application
 curl -s "$WEB_URL"
 
-echo ""
-echo ""
-echo "✅ Application working!"
-echo "Open in browser: $WEB_URL"
+# Open in browser
+"$BROWSER" "$WEB_URL"
+
+echo "WEB_URL: $WEB_URL"
 ```
 
 ---
@@ -516,15 +445,10 @@ echo "Open in browser: $WEB_URL"
 ## Step 15 – View Terraform State
 
 ```bash
-echo ""
-echo "Viewing Terraform state..."
-
-# List resources in state
+# List all resources tracked in Terraform state
 terraform state list
 
-echo ""
-echo "State file location: terraform.tfstate (local)"
-echo "Contains all resource IDs and metadata"
+echo "State file: terraform.tfstate (local)"
 ```
 
 ---
@@ -532,15 +456,7 @@ echo "Contains all resource IDs and metadata"
 ## Step 16 – Configure Remote State Backend (S3 + DynamoDB)
 
 ```bash
-echo ""
-echo "================================================"
-echo "CONFIGURING REMOTE STATE BACKEND"
-echo "================================================"
-echo ""
-
-# Create S3 bucket for state
-echo "Creating S3 bucket for remote state..."
-
+# Create S3 bucket for remote state storage
 if [ "$REGION" = "us-east-1" ]; then
     aws s3api create-bucket \
       --bucket "$STATE_BUCKET" \
@@ -552,17 +468,13 @@ else
       --create-bucket-configuration LocationConstraint="$REGION"
 fi
 
-# Enable versioning (protect against accidental deletion)
+# Enable versioning for state recovery
 aws s3api put-bucket-versioning \
   --bucket "$STATE_BUCKET" \
   --versioning-configuration Status=Enabled \
   --region "$REGION"
 
-echo "✅ S3 bucket created: $STATE_BUCKET"
-
-# Create DynamoDB table for state locking
-echo "Creating DynamoDB table for state locking..."
-
+# Create DynamoDB table for state locking (prevents concurrent applies)
 aws dynamodb create-table \
   --table-name "$LOCK_TABLE" \
   --attribute-definitions AttributeName=LockID,AttributeType=S \
@@ -575,7 +487,8 @@ aws dynamodb wait table-exists \
   --table-name "$LOCK_TABLE" \
   --region "$REGION"
 
-echo "✅ DynamoDB table created: $LOCK_TABLE"
+echo "STATE_BUCKET: $STATE_BUCKET"
+echo "LOCK_TABLE: $LOCK_TABLE"
 ```
 
 ---
@@ -583,10 +496,7 @@ echo "✅ DynamoDB table created: $LOCK_TABLE"
 ## Step 17 – Update Backend Configuration
 
 ```bash
-echo ""
-echo "Updating Terraform backend configuration..."
-
-# Add backend configuration to provider.tf
+# Create backend configuration for S3 remote state with DynamoDB locking
 cat > backend.tf <<EOF
 # Remote state backend configuration
 terraform {
@@ -600,17 +510,10 @@ terraform {
 }
 EOF
 
-echo "✅ Backend configuration created: backend.tf"
-
-# Reinitialize with backend
-echo ""
-echo "Migrating state to S3..."
-
+# Migrate local state to S3 backend
 terraform init -migrate-state -force-copy
 
-echo ""
-echo "✅ State migrated to S3"
-echo "State now stored remotely with locking enabled"
+echo "backend.tf"
 ```
 
 ---
@@ -618,24 +521,15 @@ echo "State now stored remotely with locking enabled"
 ## Step 18 – Verify Remote State
 
 ```bash
-echo ""
-echo "Verifying remote state..."
-
-# Check S3 bucket
+# Verify state file exists in S3
 aws s3 ls s3://"$STATE_BUCKET"/vpc/ --region "$REGION"
 
-echo ""
-echo "✅ State file in S3: vpc/terraform.tfstate"
-
-# Check DynamoDB table
+# Check DynamoDB table status (provides state locking)
 aws dynamodb describe-table \
   --table-name "$LOCK_TABLE" \
   --region "$REGION" \
   --query 'Table.{Name:TableName,Status:TableStatus,ItemCount:ItemCount}' \
   --output table
-
-echo ""
-echo "DynamoDB table provides state locking (prevents concurrent applies)"
 ```
 
 ---
@@ -654,25 +548,16 @@ VPC_ID=$(terraform output -raw vpc_id)
 echo "VPC_ID=$VPC_ID"
 
 # Create new resource definition (example)
-cat > import-demo.tf <<'EOF'
-# Example: Import existing VPC (demonstration only)
-# resource "aws_vpc" "imported" {
-#   cidr_block = "10.0.0.0/16"
-#   
-#   tags = {
-#     Name = "imported-vpc"
-#   }
-# }
-EOF
+## Step 19 – Import Existing Resource (Demonstration)
 
-echo ""
-echo "✅ Import example created"
-echo ""
-echo "To import existing resources:"
-echo "terraform import aws_vpc.imported $VPC_ID"
-echo ""
-echo "This associates existing AWS resource with Terraform state"
-echo "(We'll skip actual import to keep lab simple)"
+```bash
+# Example: If you had an existing AWS resource not created by Terraform,
+# you could import it into state using terraform import
+
+# Example syntax (not executing):
+# terraform import aws_instance.example i-1234567890abcdef0
+
+# For this lab, we created everything with Terraform, so no import needed
 ```
 
 ---
@@ -680,32 +565,23 @@ echo "(We'll skip actual import to keep lab simple)"
 ## Step 20 – Cleanup
 
 ```bash
-echo ""
-echo "Cleaning up all resources..."
-
 # Destroy infrastructure
 terraform destroy -auto-approve
 
-echo "✅ Infrastructure destroyed"
-
 # Delete S3 state bucket
-echo "Deleting S3 state bucket..."
-
 aws s3 rm s3://"$STATE_BUCKET" --recursive --region "$REGION"
 aws s3api delete-bucket --bucket "$STATE_BUCKET" --region "$REGION"
 
-echo "✅ S3 bucket deleted"
-
 # Delete DynamoDB table
-echo "Deleting DynamoDB table..."
-
 aws dynamodb delete-table \
   --table-name "$LOCK_TABLE" \
   --region "$REGION"
 
-echo "✅ DynamoDB table deleted"
-echo ""
-echo "All resources cleaned up!"
+# Remove project directory
+cd /tmp
+rm -rf "$PROJECT_DIR"
+
+echo "Cleanup completed"
 ```
 
 ---
