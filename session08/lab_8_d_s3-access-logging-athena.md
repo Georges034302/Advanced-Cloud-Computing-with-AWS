@@ -30,10 +30,16 @@ This lab demonstrates S3 server access logging for tracking all requests made to
 ## Step 1 – Set Environment Variables
 
 ```bash
-# Configure environment variables
+# Set AWS region
 REGION="ap-southeast-2"
+
+# Get AWS account ID
 ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
+
+# Generate unique suffix for bucket names
 SUFFIX=$(date +%s)
+
+# Define bucket names and Athena resources
 SOURCE_BUCKET="my-website-${SUFFIX}"
 LOGS_BUCKET="s3-access-logs-${SUFFIX}"
 ATHENA_DATABASE="s3_access_logs_db"
@@ -73,20 +79,7 @@ echo "Logs bucket: $LOGS_BUCKET"
 
 ---
 
-## Step 4 – Configure Logging Bucket Permissions
-
-```bash
-# Grant S3 Log Delivery group write and read-acp permissions
-aws s3api put-bucket-acl \
-  --bucket "$LOGS_BUCKET" \
-  --grant-write 'URI="http://acs.amazonaws.com/groups/s3/LogDelivery"' \
-  --grant-read-acp 'URI="http://acs.amazonaws.com/groups/s3/LogDelivery"' \
-  --region "$REGION"
-```
-
----
-
-## Step 5 – Enable S3 Access Logging
+## Step 4 – Enable S3 Access Logging
 
 ```bash
 # Create logging configuration pointing to logs bucket
@@ -110,7 +103,7 @@ echo "Logging enabled: $SOURCE_BUCKET → $LOGS_BUCKET/access-logs/"
 
 ---
 
-## Step 6 – Upload Sample Files to Source Bucket
+## Step 5 – Upload Sample Files to Source Bucket
 
 ```bash
 # Create sample HTML file
@@ -136,36 +129,39 @@ aws s3 cp image.jpg s3://"$SOURCE_BUCKET"/images/image.jpg --region "$REGION"
 
 ---
 
-## Step 7 – Generate Access Logs
+## Step 6 – Generate Access Logs
 
 ```bash
-# List bucket contents (generates ListBucket request)
+# List bucket contents to generate ListBucket API call
 aws s3 ls s3://"$SOURCE_BUCKET" --region "$REGION"
 
-# Download files (generates GetObject requests)
+# Download files to generate GetObject API calls
 aws s3 cp s3://"$SOURCE_BUCKET"/index.html /tmp/index.html --region "$REGION"
 aws s3 cp s3://"$SOURCE_BUCKET"/data/data.txt /tmp/data.txt --region "$REGION"
 aws s3 cp s3://"$SOURCE_BUCKET"/images/image.jpg /tmp/image.jpg --region "$REGION"
 
-# Try to access non-existent file (generates 404 error)
+# Attempt to access non-existent file (generates 404 NotFound error)
 aws s3 cp s3://"$SOURCE_BUCKET"/notfound.txt /tmp/notfound.txt --region "$REGION" 2>/dev/null || echo "404 error generated"
 
-# Upload more files
+# Create additional test files
 echo "Additional content" > file1.txt
 echo "More data" > file2.txt
+
+# Upload files to generate PutObject API calls
 aws s3 cp file1.txt s3://"$SOURCE_BUCKET"/file1.txt --region "$REGION"
 aws s3 cp file2.txt s3://"$SOURCE_BUCKET"/file2.txt --region "$REGION"
 
-# Delete a file (generates DELETE request)
+# Delete file to generate DeleteObject API call
 aws s3 rm s3://"$SOURCE_BUCKET"/file2.txt --region "$REGION"
 
+# Wait for S3 to deliver access logs to logging bucket
 echo "Waiting 2min for logs to be delivered to logging bucket..."
 sleep 120
 ```
 
 ---
 
-## Step 8 – Verify Logs Delivered
+## Step 7 – Verify Logs Delivered
 
 ```bash
 # Check if access logs have been delivered
@@ -183,7 +179,7 @@ fi
 
 ---
 
-## Step 9 – Create Athena Query Results Bucket
+## Step 8 – Create Athena Query Results Bucket
 
 ```bash
 # Create bucket for Athena query results
@@ -197,15 +193,9 @@ echo "Athena results bucket: $ATHENA_RESULTS"
 
 ---
 
-## Step 10 – Create Athena Database
+## Step 9 – Create Athena Database
 
 ```bash
-echo ""
-echo "================================================"
-echo "CREATING ATHENA DATABASE AND TABLE"
-echo "================================================"
-echo ""
-
 # Create Athena database
 echo "Creating Athena database..."
 
@@ -231,7 +221,7 @@ echo "✅ Athena database created"
 
 ---
 
-## Step 11 – Create Athena Table for S3 Access Logs
+## Step 10 – Create Athena Table for S3 Access Logs
 
 ```bash
 echo ""
@@ -299,20 +289,30 @@ echo "✅ Athena table created"
 
 ---
 
-## Step 12 – Query All Access Logs
+## Step 11 – Query All Access Logs
 
 ```bash
-# Query 1: Recent access log entries
+# Execute Athena query: retrieve recent access log entries
 QUERY_ID=$(aws athena start-query-execution \
-  --query-string "SELECT requestdatetime, remoteip, operation, key, httpstatus FROM ${ATHENA_DATABASE}.${ATHENA_TABLE} ORDER BY requestdatetime DESC LIMIT 20" \
+  --query-string "SELECT \
+    requestdatetime, \
+    remoteip, \
+    operation, \
+    key, \
+    httpstatus \
+  FROM ${ATHENA_DATABASE}.${ATHENA_TABLE} \
+  ORDER BY requestdatetime DESC \
+  LIMIT 20" \
   --result-configuration "OutputLocation=s3://${ATHENA_RESULTS}/" \
   --query-execution-context "Database=${ATHENA_DATABASE}" \
   --region "$REGION" \
   --query 'QueryExecutionId' \
   --output text)
 
+# Wait for query execution to complete
 sleep 5
 
+# Retrieve and display query results
 aws athena get-query-results \
   --query-execution-id "$QUERY_ID" \
   --region "$REGION" \
@@ -322,20 +322,28 @@ aws athena get-query-results \
 
 ---
 
-## Step 13 – Query Top Source IPs
+## Step 12 – Query Top Source IPs
 
 ```bash
-# Query 2: Top source IP addresses (most active)
+# Execute Athena query: identify top source IP addresses by request count
 QUERY_ID=$(aws athena start-query-execution \
-  --query-string "SELECT remoteip, COUNT(*) as request_count FROM ${ATHENA_DATABASE}.${ATHENA_TABLE} GROUP BY remoteip ORDER BY request_count DESC LIMIT 10" \
+  --query-string "SELECT \
+    remoteip, \
+    COUNT(*) as request_count \
+  FROM ${ATHENA_DATABASE}.${ATHENA_TABLE} \
+  GROUP BY remoteip \
+  ORDER BY request_count DESC \
+  LIMIT 10" \
   --result-configuration "OutputLocation=s3://${ATHENA_RESULTS}/" \
   --query-execution-context "Database=${ATHENA_DATABASE}" \
   --region "$REGION" \
   --query 'QueryExecutionId' \
   --output text)
 
+# Wait for query execution to complete
 sleep 5
 
+# Retrieve and display query results
 aws athena get-query-results \
   --query-execution-id "$QUERY_ID" \
   --region "$REGION" \
@@ -345,20 +353,29 @@ aws athena get-query-results \
 
 ---
 
-## Step 14 – Query by HTTP Status Codes
+## Step 13 – Query by HTTP Status Codes
 
 ```bash
-# Query 3: Requests by HTTP status code (200=Success, 404=NotFound, 403=Forbidden)
+# Execute Athena query: analyze requests by HTTP status code distribution
 QUERY_ID=$(aws athena start-query-execution \
-  --query-string "SELECT httpstatus, COUNT(*) as count FROM ${ATHENA_DATABASE}.${ATHENA_TABLE} GROUP BY httpstatus ORDER BY count DESC" \
+  --query-string "SELECT \
+    httpstatus, \
+    COUNT(*) as count \
+  FROM ${ATHENA_DATABASE}.${ATHENA_TABLE} \
+  GROUP BY httpstatus \
+  ORDER BY count DESC" \
   --result-configuration "OutputLocation=s3://${ATHENA_RESULTS}/" \
   --query-execution-context "Database=${ATHENA_DATABASE}" \
   --region "$REGION" \
   --query 'QueryExecutionId' \
   --output text)
+```
 
+```bash
+# Wait for query execution to complete
 sleep 5
 
+# Retrieve and display query results
 aws athena get-query-results \
   --query-execution-id "$QUERY_ID" \
   --region "$REGION" \
@@ -368,20 +385,31 @@ aws athena get-query-results \
 
 ---
 
-## Step 15 – Query Top Accessed Objects
+## Step 14 – Query Top Accessed Objects
 
 ```bash
-# Query 4: Most accessed objects
+# Execute Athena query: find most frequently accessed S3 objects
 QUERY_ID=$(aws athena start-query-execution \
-  --query-string "SELECT key, COUNT(*) as access_count FROM ${ATHENA_DATABASE}.${ATHENA_TABLE} WHERE key IS NOT NULL GROUP BY key ORDER BY access_count DESC LIMIT 10" \
+  --query-string "SELECT \
+    key, \
+    COUNT(*) as access_count \
+  FROM ${ATHENA_DATABASE}.${ATHENA_TABLE} \
+  WHERE key IS NOT NULL \
+  GROUP BY key \
+  ORDER BY access_count DESC \
+  LIMIT 10" \
   --result-configuration "OutputLocation=s3://${ATHENA_RESULTS}/" \
   --query-execution-context "Database=${ATHENA_DATABASE}" \
   --region "$REGION" \
   --query 'QueryExecutionId' \
   --output text)
+```
 
+```bash
+# Wait for query execution to complete
 sleep 5
 
+# Retrieve and display query results
 aws athena get-query-results \
   --query-execution-id "$QUERY_ID" \
   --region "$REGION" \
@@ -391,20 +419,34 @@ aws athena get-query-results \
 
 ---
 
-## Step 16 – Query Failed Requests (Errors)
+## Step 15 – Query Failed Requests (Errors)
 
 ```bash
-# Query 5: Failed requests (4xx and 5xx errors)
+# Execute Athena query: identify failed requests (4xx client errors, 5xx server errors)
 QUERY_ID=$(aws athena start-query-execution \
-  --query-string "SELECT requestdatetime, remoteip, operation, key, httpstatus, errorcode FROM ${ATHENA_DATABASE}.${ATHENA_TABLE} WHERE httpstatus LIKE '4%' OR httpstatus LIKE '5%' ORDER BY requestdatetime DESC LIMIT 20" \
+  --query-string "SELECT \
+    requestdatetime, \
+    remoteip, \
+    operation, \
+    key, \
+    httpstatus, \
+    errorcode \
+  FROM ${ATHENA_DATABASE}.${ATHENA_TABLE} \
+  WHERE httpstatus LIKE '4%' OR httpstatus LIKE '5%' \
+  ORDER BY requestdatetime DESC \
+  LIMIT 20" \
   --result-configuration "OutputLocation=s3://${ATHENA_RESULTS}/" \
   --query-execution-context "Database=${ATHENA_DATABASE}" \
   --region "$REGION" \
   --query 'QueryExecutionId' \
   --output text)
+```
 
+```bash
+# Wait for query execution to complete
 sleep 5
 
+# Retrieve and display query results
 aws athena get-query-results \
   --query-execution-id "$QUERY_ID" \
   --region "$REGION" \
@@ -414,20 +456,32 @@ aws athena get-query-results \
 
 ---
 
-## Step 17 – Query Bandwidth Usage
+## Step 16 – Query Bandwidth Usage
 
 ```bash
-# Query 6: Total bandwidth by object
+# Execute Athena query: calculate total bandwidth usage by object
 QUERY_ID=$(aws athena start-query-execution \
-  --query-string "SELECT key, SUM(bytessent) as total_bytes, COUNT(*) as requests FROM ${ATHENA_DATABASE}.${ATHENA_TABLE} WHERE key IS NOT NULL GROUP BY key ORDER BY total_bytes DESC LIMIT 10" \
+  --query-string "SELECT \
+    key, \
+    SUM(bytessent) as total_bytes, \
+    COUNT(*) as requests \
+  FROM ${ATHENA_DATABASE}.${ATHENA_TABLE} \
+  WHERE key IS NOT NULL \
+  GROUP BY key \
+  ORDER BY total_bytes DESC \
+  LIMIT 10" \
   --result-configuration "OutputLocation=s3://${ATHENA_RESULTS}/" \
   --query-execution-context "Database=${ATHENA_DATABASE}" \
   --region "$REGION" \
   --query 'QueryExecutionId' \
   --output text)
+```
 
+```bash
+# Wait for query execution to complete
 sleep 5
 
+# Retrieve and display query results
 aws athena get-query-results \
   --query-execution-id "$QUERY_ID" \
   --region "$REGION" \
@@ -437,7 +491,7 @@ aws athena get-query-results \
 
 ---
 
-## Step 18 – View Athena Console
+## Step 17 – View Athena Console
 
 ```bash
 # Query S3 access logs in Athena Console
@@ -447,7 +501,7 @@ echo "Database: ${ATHENA_DATABASE} | Table: ${ATHENA_TABLE}"
 
 ---
 
-## Step 19 – Cleanup Resources
+## Step 18 – Cleanup Resources
 
 ```bash
 # Delete Athena table
@@ -487,20 +541,7 @@ echo "Cleanup complete: S3 buckets, Athena database/table deleted"
 
 ---
 
----
-
-## Step 19 – Cleanup Resources
-
-```bash
-echo ""
-echo "Cleaning up resources..."
-
-# Delete Athena table
-echo "Deleting Athena table..."
-aws athena start-query-execution \
-  --query-string "DROP TABLE IF EXISTS ${ATHENA_DATABASE}.${ATHENA_TABLE}" \
-  --result-configuration "OutputLocation=s3://${ATHENA_RESULTS}/" \
-  --query-execution-context "Database=${ATHENA_DATABASE}" \
+## Summary
   --region "$REGION" > /dev/null
 
 sleep 2
