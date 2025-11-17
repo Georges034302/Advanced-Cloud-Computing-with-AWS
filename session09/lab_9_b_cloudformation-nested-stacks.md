@@ -442,7 +442,10 @@ sleep 120
 # Test web application
 curl -s "$WEB_URL"
 
-echo "Browser: $WEB_URL"
+# Open in browser
+"$BROWSER" "$WEB_URL"
+
+echo "WEB_URL: $WEB_URL"
 ```
 
 ---
