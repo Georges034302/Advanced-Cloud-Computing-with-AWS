@@ -129,6 +129,10 @@ Resources:
       RouteTableId: !Ref PublicRouteTable
 
 Outputs:
+  StackName:
+    Description: Stack Name for cross-stack references
+    Value: !Ref AWS::StackName
+
   VPCId:
     Description: VPC ID
     Value: !Ref VPC
@@ -286,7 +290,7 @@ Resources:
     Properties:
       TemplateURL: ${COMPUTE_URL}
       Parameters:
-        NetworkStackName: !GetAtt NetworkStack.Outputs.VPCId
+        NetworkStackName: !GetAtt NetworkStack.Outputs.StackName
       Tags:
         - Key: Name
           Value: Compute-Child-Stack
@@ -510,7 +514,7 @@ Resources:
     Properties:
       TemplateURL: ${COMPUTE_URL}
       Parameters:
-        NetworkStackName: !GetAtt NetworkStack.Outputs.VPCId
+        NetworkStackName: !GetAtt NetworkStack.Outputs.StackName
       Tags:
         - Key: Name
           Value: Compute-Child-Stack
