@@ -619,6 +619,9 @@ aws s3api put-bucket-notification-configuration \
 # Delete all S3 objects
 aws s3 rm "s3://${BUCKET_NAME}/" --recursive
 
+# or use s3 api to delete objects
+aws s3api delete-objects --bucket "$BUCKET_NAME" --delete "$(aws s3api list-object-versions --bucket "$BUCKET_NAME" --query '{Objects: DeleteMarkers[].{Key:Key,VersionId:VersionId}}' --output json)"
+
 # Delete S3 bucket
 aws s3api delete-bucket --bucket "$BUCKET_NAME" --region "$REGION"
 
@@ -672,39 +675,6 @@ In this lab, you have:
 5. Lambda stores records in DynamoDB
 6. Lambda logs execution to CloudWatch
 ```
-
-**Lambda Event Structure:**
-```json
-{
-  "Records": [
-    {
-      "s3": {
-        "bucket": {"name": "bucket-name"},
-        "object": {"key": "students.csv"}
-      }
-    }
-  ]
-}
-```
-
-**CSV Format:**
-```csv
-ID,NAME,MARK,GRADE
-S001,Alice Johnson,95,A
-S002,Bob Smith,87,B
-```
-
-**DynamoDB Item:**
-```json
-{
-  "StudentID": "S001",
-  "Name": "Alice Johnson",
-  "Mark": 95,
-  "Grade": "A",
-  "ProcessedAt": "2025-11-13T10:30:00.000Z"
-}
-```
-
 ---
 
 ## Best Practices
@@ -732,16 +702,6 @@ S002,Bob Smith,87,B
 - Set S3 lifecycle policies to delete old files
 - Use DynamoDB on-demand pricing for variable workloads
 - Monitor Lambda duration to optimize memory allocation
-
----
-
-## Free Tier Notes
-- **Lambda**: 1M requests/month + 400,000 GB-seconds compute
-- **S3**: 5 GB storage + 20,000 GET + 2,000 PUT requests
-- **DynamoDB**: 25 GB storage + 25 read/write capacity units
-- **CloudWatch Logs**: 5 GB ingestion + 5 GB storage
-
-This lab uses minimal resources, staying well within free tier limits.
 
 ---
 
