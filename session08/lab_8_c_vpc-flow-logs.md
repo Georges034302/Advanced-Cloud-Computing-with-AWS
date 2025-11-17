@@ -3,7 +3,6 @@
 ## Overview
 This lab demonstrates VPC Flow Logs for monitoring network traffic in your VPC. Flow Logs capture information about IP traffic going to and from network interfaces, enabling security analysis, troubleshooting connectivity issues, and detecting suspicious activity. You'll enable Flow Logs, send logs to CloudWatch, analyze traffic patterns with Logs Insights, and create alarms for security threats.
 
-**💰 Cost**: FREE (Flow Logs free, 5GB CloudWatch Logs storage free)
 
 ---
 
@@ -26,58 +25,19 @@ This lab demonstrates VPC Flow Logs for monitoring network traffic in your VPC. 
 
 ---
 
-## Architecture
-
-```
-VPC Network Traffic → Flow Logs → CloudWatch Logs
-                                        ↓
-                                  Logs Insights (queries)
-                                        ↓
-                                  Metric Filter → Alarm → SNS Email
-```
-
----
-
-## Step 1 – Set Variables and Verify Prerequisites
+## Step 1 – Set Environment Variables
 
 ```bash
-# Get AWS account ID
-ACCOUNT_ID=$(aws sts get-caller-identity \
-  --query Account \
-  --output text)
-echo "ACCOUNT_ID=$ACCOUNT_ID"
-
-# Set region
+# Configure environment variables
 REGION="ap-southeast-2"
-echo "REGION=$REGION"
-
-# Set resource names with unique suffix
-SUFFIX=$(date +%s)
-echo "SUFFIX=$SUFFIX"
-
-VPC_NAME="flowlogs-vpc-${SUFFIX}"
-echo "VPC_NAME=$VPC_NAME"
-
+ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
 LOG_GROUP_NAME="/aws/vpc/flowlogs"
-echo "LOG_GROUP_NAME=$LOG_GROUP_NAME"
-
 ROLE_NAME="VPCFlowLogsToCloudWatchRole"
-echo "ROLE_NAME=$ROLE_NAME"
-
 TOPIC_NAME="vpc-security-alerts"
-echo "TOPIC_NAME=$TOPIC_NAME"
-
 ALARM_NAME="Suspicious-Network-Activity"
-echo "ALARM_NAME=$ALARM_NAME"
+VPC_NAME="flowlogs-vpc"
 
-# Set your email for security alerts (CHANGE THIS!)
-EMAIL_ADDRESS="your-email@example.com"
-echo "EMAIL_ADDRESS=$EMAIL_ADDRESS"
-
-echo ""
-echo "⚠️  IMPORTANT: Change EMAIL_ADDRESS to your real email!"
-echo ""
-echo "✅ Prerequisites verified"
+echo "Region: $REGION | Account: $ACCOUNT_ID | VPC: $VPC_NAME"
 ```
 
 ---
@@ -86,16 +46,13 @@ echo "✅ Prerequisites verified"
 
 ```bash
 # Create SNS topic for Flow Logs alarms
-echo "Creating SNS topic for security alerts..."
-
 TOPIC_ARN=$(aws sns create-topic \
   --name "$TOPIC_NAME" \
   --region "$REGION" \
   --query TopicArn \
   --output text)
-echo "TOPIC_ARN=$TOPIC_ARN"
 
-echo "✅ SNS topic created"
+echo "Topic ARN: $TOPIC_ARN"
 ```
 
 ---
@@ -104,7 +61,7 @@ echo "✅ SNS topic created"
 
 ```bash
 # Subscribe email to receive security notifications
-echo "Subscribing email to SNS topic..."
+read -p "Enter your email address: " EMAIL_ADDRESS
 
 aws sns subscribe \
   --topic-arn "$TOPIC_ARN" \
@@ -112,18 +69,7 @@ aws sns subscribe \
   --notification-endpoint "$EMAIL_ADDRESS" \
   --region "$REGION"
 
-echo ""
-echo "✅ Email subscription created"
-echo ""
-echo "================================================"
-echo "⚠️  ACTION REQUIRED"
-echo "================================================"
-echo "Check your email inbox: $EMAIL_ADDRESS"
-echo "Subject: 'AWS Notification - Subscription Confirmation'"
-echo "Click the 'Confirm subscription' link"
-echo ""
-echo "Press Enter after confirming..."
-read
+read -p "Confirm subscription in email, then press Enter..."
 ```
 
 ---
@@ -131,18 +77,15 @@ read
 ## Step 4 – Create VPC
 
 ```bash
-echo ""
-echo "Creating VPC..."
-
+# Create VPC with 10.0.0.0/16 CIDR block
 VPC_ID=$(aws ec2 create-vpc \
   --cidr-block 10.0.0.0/16 \
   --tag-specifications "ResourceType=vpc,Tags=[{Key=Name,Value=$VPC_NAME}]" \
   --region "$REGION" \
   --query 'Vpc.VpcId' \
   --output text)
-echo "VPC_ID=$VPC_ID"
 
-echo "✅ VPC created"
+echo "VPC ID: $VPC_ID"
 ```
 
 ---
@@ -150,9 +93,7 @@ echo "✅ VPC created"
 ## Step 5 – Create Subnet and Internet Gateway
 
 ```bash
-# Create public subnet
-echo "Creating subnet..."
-
+# Create public subnet in AZ-a
 SUBNET_ID=$(aws ec2 create-subnet \
   --vpc-id "$VPC_ID" \
   --cidr-block 10.0.1.0/24 \
@@ -161,25 +102,22 @@ SUBNET_ID=$(aws ec2 create-subnet \
   --region "$REGION" \
   --query 'Subnet.SubnetId' \
   --output text)
-echo "SUBNET_ID=$SUBNET_ID"
 
-# Create Internet Gateway
-echo "Creating Internet Gateway..."
+echo "Subnet ID: $SUBNET_ID"
 
+# Create and attach Internet Gateway
 IGW_ID=$(aws ec2 create-internet-gateway \
   --tag-specifications "ResourceType=internet-gateway,Tags=[{Key=Name,Value=flowlogs-igw}]" \
   --region "$REGION" \
   --query 'InternetGateway.InternetGatewayId' \
   --output text)
-echo "IGW_ID=$IGW_ID"
 
-# Attach Internet Gateway to VPC
 aws ec2 attach-internet-gateway \
   --vpc-id "$VPC_ID" \
   --internet-gateway-id "$IGW_ID" \
   --region "$REGION"
 
-echo "✅ Subnet and Internet Gateway created"
+echo "IGW ID: $IGW_ID"
 ```
 
 ---
@@ -187,14 +125,12 @@ echo "✅ Subnet and Internet Gateway created"
 ## Step 6 – Create CloudWatch Logs Group
 
 ```bash
-echo ""
-echo "Creating CloudWatch Logs group..."
-
+# Create CloudWatch Logs group for VPC Flow Logs
 aws logs create-log-group \
   --log-group-name "$LOG_GROUP_NAME" \
   --region "$REGION"
 
-echo "✅ CloudWatch Logs group created: $LOG_GROUP_NAME"
+echo "Log group: $LOG_GROUP_NAME"
 ```
 
 ---
@@ -202,9 +138,7 @@ echo "✅ CloudWatch Logs group created: $LOG_GROUP_NAME"
 ## Step 7 – Create IAM Role for VPC Flow Logs
 
 ```bash
-echo "Creating IAM role for VPC Flow Logs..."
-
-# Create trust policy for VPC Flow Logs
+# Create trust policy allowing VPC Flow Logs to assume role
 cat > trust-policy.json <<'EOF'
 {
   "Version": "2012-10-17",
@@ -229,9 +163,8 @@ ROLE_ARN=$(aws iam get-role \
   --role-name "$ROLE_NAME" \
   --query 'Role.Arn' \
   --output text)
-echo "ROLE_ARN=$ROLE_ARN"
 
-echo "✅ IAM role created"
+echo "Role ARN: $ROLE_ARN"
 ```
 
 ---
@@ -239,7 +172,7 @@ echo "✅ IAM role created"
 ## Step 8 – Attach Policy to IAM Role
 
 ```bash
-# Create inline policy for CloudWatch Logs access
+# Create policy allowing VPC Flow Logs to write to CloudWatch Logs
 cat > logs-policy.json <<EOF
 {
   "Version": "2012-10-17",
@@ -264,8 +197,6 @@ aws iam put-role-policy \
   --role-name "$ROLE_NAME" \
   --policy-name "VPCFlowLogsPolicy" \
   --policy-document file://logs-policy.json
-
-echo "✅ IAM policy attached to role"
 ```
 
 ---
@@ -273,17 +204,10 @@ echo "✅ IAM policy attached to role"
 ## Step 9 – Enable VPC Flow Logs
 
 ```bash
-echo ""
-echo "================================================"
-echo "ENABLING VPC FLOW LOGS"
-echo "================================================"
-echo ""
-
-# Wait a few seconds for IAM role to propagate
-echo "Waiting for IAM role to propagate..."
+# Wait for IAM role to propagate
 sleep 10
 
-# Enable VPC Flow Logs
+# Enable VPC Flow Logs (ALL traffic to CloudWatch Logs)
 FLOW_LOG_ID=$(aws ec2 create-flow-logs \
   --resource-type VPC \
   --resource-ids "$VPC_ID" \
@@ -294,15 +218,8 @@ FLOW_LOG_ID=$(aws ec2 create-flow-logs \
   --region "$REGION" \
   --query 'FlowLogIds[0]' \
   --output text)
-echo "FLOW_LOG_ID=$FLOW_LOG_ID"
 
-echo ""
-echo "✅ VPC Flow Logs enabled"
-echo ""
-echo "Flow Logs configuration:"
-echo "  - Traffic Type: ALL (accepted and rejected)"
-echo "  - Destination: CloudWatch Logs"
-echo "  - Log Format: Default (14 fields)"
+echo "Flow Log ID: $FLOW_LOG_ID (ALL traffic → CloudWatch Logs)"
 ```
 
 ---
@@ -310,9 +227,6 @@ echo "  - Log Format: Default (14 fields)"
 ## Step 10 – Launch EC2 Instance to Generate Traffic
 
 ```bash
-echo ""
-echo "Launching EC2 instance to generate network traffic..."
-
 # Get latest Amazon Linux 2023 AMI
 AMI_ID=$(aws ec2 describe-images \
   --owners amazon \
@@ -320,9 +234,8 @@ AMI_ID=$(aws ec2 describe-images \
   --query 'sort_by(Images, &CreationDate)[-1].ImageId' \
   --output text \
   --region "$REGION")
-echo "AMI_ID=$AMI_ID"
 
-# Create security group
+# Create security group allowing SSH
 SG_ID=$(aws ec2 create-security-group \
   --group-name "flowlogs-sg" \
   --description "Security group for Flow Logs lab" \
@@ -330,9 +243,7 @@ SG_ID=$(aws ec2 create-security-group \
   --region "$REGION" \
   --query 'GroupId' \
   --output text)
-echo "SG_ID=$SG_ID"
 
-# Allow SSH (this will be REJECTED since we don't have a key)
 aws ec2 authorize-security-group-ingress \
   --group-id "$SG_ID" \
   --protocol tcp \
@@ -340,7 +251,7 @@ aws ec2 authorize-security-group-ingress \
   --cidr 0.0.0.0/0 \
   --region "$REGION"
 
-# Launch instance (without key pair to generate rejected traffic)
+# Launch instance without key pair (to generate rejected SSH traffic)
 INSTANCE_ID=$(aws ec2 run-instances \
   --image-id "$AMI_ID" \
   --instance-type t2.micro \
@@ -350,16 +261,13 @@ INSTANCE_ID=$(aws ec2 run-instances \
   --region "$REGION" \
   --query 'Instances[0].InstanceId' \
   --output text)
-echo "INSTANCE_ID=$INSTANCE_ID"
 
-echo "✅ EC2 instance launched"
-echo ""
-echo "Waiting for instance to be running..."
+echo "Instance ID: $INSTANCE_ID"
+
+# Wait for instance to be running
 aws ec2 wait instance-running \
   --instance-ids "$INSTANCE_ID" \
   --region "$REGION"
-
-echo "✅ Instance is running"
 ```
 
 ---
@@ -367,40 +275,31 @@ echo "✅ Instance is running"
 ## Step 11 – Generate Network Traffic
 
 ```bash
-echo ""
-echo "Generating network traffic..."
-
 # Get instance public IP
 PUBLIC_IP=$(aws ec2 describe-instances \
   --instance-ids "$INSTANCE_ID" \
   --query 'Reservations[0].Instances[0].PublicIpAddress' \
   --output text \
   --region "$REGION")
+
 echo "Instance Public IP: $PUBLIC_IP"
 
-# Generate accepted traffic (internal AWS API calls)
-echo ""
-echo "Generating accepted traffic (AWS API calls)..."
+# Generate accepted traffic (AWS API calls)
 aws ec2 describe-instances --region "$REGION" > /dev/null
 aws s3 ls > /dev/null 2>&1
 
-# Simulate rejected traffic (SSH attempts without key)
-echo "Simulating rejected traffic (SSH connection attempts)..."
+# Simulate rejected traffic (SSH connection attempts without key)
 for i in {1..5}; do
     timeout 2 nc -zv "$PUBLIC_IP" 22 2>/dev/null || true
     sleep 1
 done
 
-# More rejected traffic (closed ports)
-echo "Simulating port scan (rejected traffic)..."
+# Simulate port scan (rejected traffic on closed ports)
 for port in 80 443 3306 5432 8080; do
     timeout 1 nc -zv "$PUBLIC_IP" "$port" 2>/dev/null || true
 done
 
-echo ""
-echo "✅ Network traffic generated"
-echo ""
-echo "Waiting 3 minutes for Flow Logs to be delivered..."
+echo "Waiting 3min for Flow Logs to be delivered to CloudWatch Logs..."
 sleep 180
 ```
 
@@ -409,20 +308,11 @@ sleep 180
 ## Step 12 – Query All Flow Logs
 
 ```bash
-echo ""
-echo "================================================"
-echo "QUERYING VPC FLOW LOGS"
-echo "================================================"
-echo ""
-
 # Calculate time range (last 10 minutes)
 START_TIME=$(($(date +%s) - 600))
 END_TIME=$(date +%s)
 
-# Query 1: All Flow Logs
-echo "Query 1: Recent Flow Log records"
-echo ""
-
+# Query 1: Recent Flow Log records
 aws logs start-query \
   --log-group-name "$LOG_GROUP_NAME" \
   --start-time "$START_TIME" \
@@ -435,18 +325,14 @@ aws logs start-query \
 QUERY_ID=$(cat query-result.json | grep -o '"queryId": "[^"]*' | grep -o '[^"]*$')
 echo "Query ID: $QUERY_ID"
 
-# Wait for query to complete
-echo "Waiting for query to complete..."
+# Wait for query to complete and get results
 sleep 5
 
-# Get query results
 aws logs get-query-results \
   --query-id "$QUERY_ID" \
   --region "$REGION" \
   --query 'results[*]' \
   --output table
-
-echo ""
 ```
 
 ---
@@ -454,9 +340,7 @@ echo ""
 ## Step 13 – Query Rejected Traffic Only
 
 ```bash
-echo "Query 2: Rejected connections (blocked by security groups)"
-echo ""
-
+# Query 2: Rejected connections (blocked by security groups)
 aws logs start-query \
   --log-group-name "$LOG_GROUP_NAME" \
   --start-time "$START_TIME" \
@@ -476,12 +360,6 @@ aws logs get-query-results \
   --region "$REGION" \
   --query 'results[*]' \
   --output table
-
-echo ""
-echo "Rejected traffic indicates:"
-echo "  - Security group blocking connections"
-echo "  - Network ACL denying traffic"
-echo "  - Port scans or unauthorized access attempts"
 ```
 
 ---
@@ -489,10 +367,7 @@ echo "  - Port scans or unauthorized access attempts"
 ## Step 14 – Query Top Talkers
 
 ```bash
-echo ""
-echo "Query 3: Top source IP addresses (most active)"
-echo ""
-
+# Query 3: Top source IP addresses (most active)
 aws logs start-query \
   --log-group-name "$LOG_GROUP_NAME" \
   --start-time "$START_TIME" \
@@ -512,8 +387,6 @@ aws logs get-query-results \
   --region "$REGION" \
   --query 'results[*]' \
   --output table
-
-echo ""
 ```
 
 ---
@@ -521,9 +394,7 @@ echo ""
 ## Step 15 – Query by Protocol
 
 ```bash
-echo "Query 4: Traffic breakdown by protocol"
-echo ""
-
+# Query 4: Traffic breakdown by protocol (6=TCP, 17=UDP, 1=ICMP)
 aws logs start-query \
   --log-group-name "$LOG_GROUP_NAME" \
   --start-time "$START_TIME" \
@@ -541,14 +412,6 @@ aws logs get-query-results \
   --region "$REGION" \
   --query 'results[*]' \
   --output table
-
-echo ""
-echo "Protocol numbers:"
-echo "  - 6 = TCP"
-echo "  - 17 = UDP"
-echo "  - 1 = ICMP"
-echo ""
-echo "✅ Flow Logs queries completed"
 ```
 
 ---
@@ -556,13 +419,9 @@ echo "✅ Flow Logs queries completed"
 ## Step 16 – Create Metric Filter for Rejected Traffic
 
 ```bash
-echo ""
-echo "Creating metric filter for rejected connections..."
-
-# Create metric filter pattern (REJECT action)
+# Create metric filter to track rejected connections
 FILTER_PATTERN='[version, account, eni, source, destination, srcport, destport, protocol, packets, bytes, windowstart, windowend, action="REJECT", flowlogstatus]'
 
-# Create metric filter
 aws logs put-metric-filter \
   --log-group-name "$LOG_GROUP_NAME" \
   --filter-name "RejectedConnections" \
@@ -570,8 +429,6 @@ aws logs put-metric-filter \
   --metric-transformations \
     metricName=RejectedConnectionCount,metricNamespace=VPC/FlowLogs,metricValue=1,defaultValue=0 \
   --region "$REGION"
-
-echo "✅ Metric filter created for rejected connections"
 ```
 
 ---
@@ -579,8 +436,7 @@ echo "✅ Metric filter created for rejected connections"
 ## Step 17 – Create CloudWatch Alarm for High Rejected Traffic
 
 ```bash
-echo "Creating CloudWatch alarm for suspicious activity..."
-
+# Create alarm to trigger on high rejected traffic (>10 in 5min = port scan)
 aws cloudwatch put-metric-alarm \
   --alarm-name "$ALARM_NAME" \
   --alarm-description "Alert when rejected connections exceed threshold (possible port scan)" \
@@ -595,12 +451,7 @@ aws cloudwatch put-metric-alarm \
   --treat-missing-data notBreaching \
   --region "$REGION"
 
-echo "✅ CloudWatch alarm created"
-echo ""
-echo "Alarm will trigger when:"
-echo "  - More than 10 rejected connections in 5 minutes"
-echo "  - Indicates port scanning or unauthorized access attempts"
-echo "  - Email notification sent via SNS"
+echo "Alarm will trigger on >10 rejected connections in 5min → SNS email"
 ```
 
 ---
@@ -608,19 +459,8 @@ echo "  - Email notification sent via SNS"
 ## Step 18 – View Flow Logs Console
 
 ```bash
-echo ""
-echo "================================================"
-echo "FLOW LOGS CONSOLE ACCESS"
-echo "================================================"
-echo ""
-echo "View VPC Flow Logs in AWS Console:"
+# View VPC Flow Logs in AWS Console
 echo "https://${REGION}.console.aws.amazon.com/vpc/home?region=${REGION}#FlowLogs:"
-echo ""
-echo "View CloudWatch Logs:"
-echo "https://${REGION}.console.aws.amazon.com/cloudwatch/home?region=${REGION}#logsV2:log-groups/log-group/${LOG_GROUP_NAME//\//%2F}"
-echo ""
-echo "View CloudWatch Alarms:"
-echo "https://${REGION}.console.aws.amazon.com/cloudwatch/home?region=${REGION}#alarmsV2:"
 ```
 
 ---
@@ -628,89 +468,70 @@ echo "https://${REGION}.console.aws.amazon.com/cloudwatch/home?region=${REGION}#
 ## Step 19 – Cleanup Resources
 
 ```bash
-echo ""
-echo "Cleaning up resources..."
-
 # Terminate EC2 instance
-echo "Terminating EC2 instance..."
 aws ec2 terminate-instances \
   --instance-ids "$INSTANCE_ID" \
   --region "$REGION"
 
-echo "Waiting for instance to terminate..."
 aws ec2 wait instance-terminated \
   --instance-ids "$INSTANCE_ID" \
   --region "$REGION"
 
-# Delete Flow Logs
-echo "Deleting VPC Flow Logs..."
+# Delete VPC Flow Logs
 aws ec2 delete-flow-logs \
   --flow-log-ids "$FLOW_LOG_ID" \
   --region "$REGION"
 
 # Delete CloudWatch alarm
-echo "Deleting CloudWatch alarm..."
 aws cloudwatch delete-alarms \
   --alarm-names "$ALARM_NAME" \
   --region "$REGION"
 
 # Delete metric filter
-echo "Deleting metric filter..."
 aws logs delete-metric-filter \
   --log-group-name "$LOG_GROUP_NAME" \
   --filter-name "RejectedConnections" \
   --region "$REGION"
 
 # Delete CloudWatch Logs group
-echo "Deleting CloudWatch Logs group..."
 aws logs delete-log-group \
   --log-group-name "$LOG_GROUP_NAME" \
   --region "$REGION"
 
 # Delete security group
-echo "Deleting security group..."
 aws ec2 delete-security-group \
   --group-id "$SG_ID" \
   --region "$REGION"
 
-# Detach Internet Gateway
-echo "Detaching Internet Gateway..."
+# Detach and delete Internet Gateway
 aws ec2 detach-internet-gateway \
   --vpc-id "$VPC_ID" \
   --internet-gateway-id "$IGW_ID" \
   --region "$REGION"
 
-# Delete Internet Gateway
-echo "Deleting Internet Gateway..."
 aws ec2 delete-internet-gateway \
   --internet-gateway-id "$IGW_ID" \
   --region "$REGION"
 
 # Delete subnet
-echo "Deleting subnet..."
 aws ec2 delete-subnet \
   --subnet-id "$SUBNET_ID" \
   --region "$REGION"
 
 # Delete VPC
-echo "Deleting VPC..."
 aws ec2 delete-vpc \
   --vpc-id "$VPC_ID" \
   --region "$REGION"
 
-# Delete IAM role policy
-echo "Deleting IAM role policy..."
+# Delete IAM role policy and role
 aws iam delete-role-policy \
   --role-name "$ROLE_NAME" \
   --policy-name "VPCFlowLogsPolicy"
 
-# Delete IAM role
-echo "Deleting IAM role..."
 aws iam delete-role \
   --role-name "$ROLE_NAME"
 
 # Unsubscribe email from SNS
-echo "Unsubscribing email from SNS..."
 SUBSCRIPTION_ARN=$(aws sns list-subscriptions-by-topic \
   --topic-arn "$TOPIC_ARN" \
   --region "$REGION" \
@@ -724,25 +545,14 @@ if [ "$SUBSCRIPTION_ARN" != "PendingConfirmation" ] && [ -n "$SUBSCRIPTION_ARN" 
 fi
 
 # Delete SNS topic
-echo "Deleting SNS topic..."
 aws sns delete-topic \
   --topic-arn "$TOPIC_ARN" \
   --region "$REGION"
 
-# Delete local files
+# Delete local policy files
 rm -f trust-policy.json logs-policy.json query-result*.json
 
-echo ""
-echo "✅ Cleanup completed successfully!"
-echo ""
-echo "All resources deleted:"
-echo "- VPC Flow Logs"
-echo "- EC2 instance"
-echo "- VPC, subnet, Internet Gateway, security group"
-echo "- CloudWatch Logs group"
-echo "- CloudWatch alarm and metric filter"
-echo "- IAM role and policy"
-echo "- SNS topic and subscription"
+echo "Cleanup complete: VPC, Flow Logs, EC2, CloudWatch, IAM, SNS deleted"
 ```
 
 ---
@@ -839,23 +649,6 @@ filter dstAddr = "10.0.1.5"
 - Use sampling (1 in 10 packets) for high-traffic VPCs
 - Aggregate logs in S3 with Athena for historical analysis
 - Use VPC Flow Logs Insights in Console (faster than Logs Insights)
-
-**Cost Optimization:**
-- Flow Logs: FREE for publishing
-- CloudWatch Logs: $0.50/GB ingested, $0.03/GB stored
-- S3 storage: $0.023/GB/month (70% cheaper than CloudWatch)
-- Use S3 lifecycle to move old logs to Glacier ($0.004/GB)
-- Enable Flow Logs only on critical VPCs/subnets
-
----
-
-## Free Tier Notes
-- **VPC Flow Logs**: FREE (publishing to CloudWatch or S3)
-- **CloudWatch Logs**: 5GB ingestion, 5GB storage free
-- **S3**: 5GB storage free for 12 months
-- **SNS**: 1,000 email notifications/month free
-
-This lab uses minimal resources, staying well within free tier limits.
 
 ---
 
