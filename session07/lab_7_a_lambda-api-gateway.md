@@ -37,8 +37,6 @@ API_NAME="joke-api"
 echo "ACCOUNT_ID=$ACCOUNT_ID"
 echo "REGION=$REGION"
 
-# Verify Python 3 is installed
-python3 --version
 ```
 
 ---
