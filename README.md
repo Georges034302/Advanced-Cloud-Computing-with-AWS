@@ -167,19 +167,19 @@ This comprehensive lab series provides hands-on experience with Amazon Web Servi
 </details>
 
 <details>
-  <summary>Lab Session 10: CI/CD Pipelines – CodeCommit, CodeBuild, CodePipeline, and CodeDeploy</summary>
+  <summary>Lab Session 10: CI/CD Pipelines – CodeBuild, CodePipeline, GitHub Actions, and CodeDeploy</summary>
 
-  Build complete CI/CD pipelines using AWS native DevOps tools and integrate with GitHub Actions. Automate building, testing, and deploying applications with multi-stage pipelines, blue/green deployments, and automated rollbacks.
+  Build complete CI/CD pipelines using AWS native DevOps tools and GitHub Actions. Learn different deployment approaches: code-based vs container deployments, AWS-native vs third-party CI/CD, and zero-downtime deployment strategies.
 
   **Labs for this session:**
-  - [lab_10_a_codecommit-codebuild-docker.md](session10/lab_10_a_codecommit-codebuild-docker.md):  
-    *Create Git repository in CodeCommit, push Flask app code, build Docker image with CodeBuild using buildspec.yml, and push to ECR. Complete CI workflow with automated builds triggered by code commits. 
+  - [lab_10_a_codebuild-apprunner.md](session10/lab_10_a_codebuild-apprunner.md):  
+    *Build CI/CD pipeline with GitHub → CodeBuild → App Runner. Package Flask application as zip using buildspec.yml, upload to S3, deploy to App Runner in code mode. AWS-native CI/CD with modern PaaS deployment. 
   - [lab_10_b_codepipeline-multi-stage.md](session10/lab_10_b_codepipeline-multi-stage.md):  
-    *Build end-to-end CI/CD pipeline with CodePipeline (Source → Build → Deploy stages). Automatically detect CodeCommit changes, build with CodeBuild, deploy to Elastic Beanstalk. Visualize pipeline execution, handle failures, and implement manual approval gates. 
-  - [lab_10_c_github-actions-aws.md](session10/lab_10_c_github-actions-aws.md):  
-    *Deploy to AWS using GitHub Actions workflow. Configure OIDC authentication (no long-term credentials), build Docker image, push to ECR, and deploy to ECS. GitHub-native CI/CD alternative to AWS CodePipeline. 
+    *Build multi-stage CI/CD pipeline with GitHub → CodePipeline → CodeBuild → ECS Fargate. Orchestrate source, build (Docker), and deploy stages. Container-based deployment with AWS orchestration. 
+  - [lab_10_c_github-actions-apprunner.md](session10/lab_10_c_github-actions-apprunner.md):  
+    *Deploy containers with GitHub Actions → ECR → App Runner. Build Docker image with GitHub Actions, push to ECR, deploy to App Runner in image mode. Third-party CI/CD with container deployment. 
   - [lab_10_d_codedeploy-bluegreen.md](session10/lab_10_d_codedeploy-bluegreen.md):  
-    *Implement blue/green deployment with CodeDeploy and Auto Scaling Groups. Deploy new application version to "green" environment, test with health checks, automatically shift traffic from "blue" to "green", and rollback on failure. Zero-downtime deployments. 
+    *Implement blue/green deployment with CodeDeploy and Auto Scaling Groups. Deploy new version to "green" environment, shift traffic automatically, and rollback on failure. Zero-downtime VM deployment strategy. 
 
 </details>
 
