@@ -1,5 +1,5 @@
 # Lab 10.B: CodePipeline - Multi-Stage CI/CD Pipeline
-<img width="1536" height="1024" alt="IMG10B" src="https://github.com/user-attachments/assets/e6261be5-1889-4309-905d-b1196a126b59" />
+<img width="1536" height="849" alt="IMG" src="https://github.com/user-attachments/assets/c1f01b86-8164-4ffa-8b63-cdd8ea69ef4e" />
 
 ## Overview
 This lab builds a complete CI/CD pipeline using AWS CodePipeline to orchestrate source, build, and deploy stages. You'll automatically deploy a Flask Docker application from GitHub → CodeBuild (build Docker image) → ECS Fargate (deploy container) with automated deployment on every git push.
