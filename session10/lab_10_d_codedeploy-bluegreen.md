@@ -1,5 +1,6 @@
 # Lab 10.D: Blue/Green Deployment with CodeDeploy
-<img width="1536" height="1024" alt="IMG" src="https://github.com/user-attachments/assets/e0483085-63e5-4471-93a1-bd6bdf8eb05d" />
+
+<img width="1024" height="1024" alt="IMG" src="https://github.com/user-attachments/assets/dfa72bb1-fbdd-4be4-bd9f-e60bfc601570" />
 
 ## Overview
 This lab demonstrates zero-downtime deployments using AWS CodeDeploy with blue/green deployment strategy. You'll deploy a Flask application to EC2 instances, perform automated blue/green deployments with traffic shifting, and implement automatic rollback on deployment failures.
