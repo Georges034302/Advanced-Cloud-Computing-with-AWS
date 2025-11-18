@@ -9,6 +9,7 @@ jokes = [
     "How do you comfort a JavaScript bug? You console it!",
     "Why do Java developers wear glasses? Because they don't C#!",
     "What's a programmer's favorite hangout place? Foo Bar!"
+    "Why do Python programmers prefer snake_case? Because camelCase is too humpy!",
 ]
 
 @app.route('/')
