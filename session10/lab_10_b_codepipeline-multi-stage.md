@@ -28,23 +28,21 @@ This lab builds a complete CI/CD pipeline using AWS CodePipeline to orchestrate 
 ## Step 1 – Set Variables
 
 ```bash
-# Set deployment region
 REGION="ap-southeast-2"
 export AWS_REGION="$REGION"
 
-# Set GitHub repository information
-GITHUB_OWNER="Georges034302"
-GITHUB_REPO="Advanced-Cloud-Computing-with-AWS"
+# Dynamically get GitHub repository info from git remote
+GITHUB_URL=$(git remote get-url origin)
+GITHUB_OWNER=$(echo "$GITHUB_URL" | sed -E 's|.*github\.com[:/]([^/]+)/.*|\1|')
+GITHUB_REPO=$(echo "$GITHUB_URL" | sed -E 's|.*github\.com[:/][^/]+/([^.]+)(\.git)?$|\1|')
 GITHUB_BRANCH="main"
-APP_FOLDER="pipeline-flask-app"
 
-# Set AWS resource names
+APP_FOLDER="pipeline-flask-app"
 ECR_REPO="pipeline-flask-app"
 CLUSTER_NAME="pipeline-demo-cluster"
 SERVICE_NAME="flask-service"
 PIPELINE_NAME="flask-cicd-pipeline"
 
-# Get AWS account ID for resource ARNs
 ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
 ARTIFACT_BUCKET="pipeline-artifacts-${ACCOUNT_ID}"
 
@@ -52,9 +50,6 @@ echo "REGION=$REGION"
 echo "GITHUB_OWNER=$GITHUB_OWNER"
 echo "GITHUB_REPO=$GITHUB_REPO"
 echo "APP_FOLDER=$APP_FOLDER"
-echo "ECR_REPO=$ECR_REPO"
-echo "CLUSTER_NAME=$CLUSTER_NAME"
-echo "PIPELINE_NAME=$PIPELINE_NAME"
 echo "ACCOUNT_ID=$ACCOUNT_ID"
 echo "ARTIFACT_BUCKET=$ARTIFACT_BUCKET"
 ```
@@ -64,16 +59,13 @@ echo "ARTIFACT_BUCKET=$ARTIFACT_BUCKET"
 ## Step 2 – Verify GitHub Repository
 
 ```bash
-# Verify you're in the GitHub repository
 REPO_DIR=$(git rev-parse --show-toplevel)
 cd "$REPO_DIR"
 
-echo "Repository: $(pwd)"
-echo "Remote: $(git remote get-url origin)"
-
-# Ensure you're on main branch and up to date
 git checkout main
 git pull origin main
+
+echo "Repository: $(pwd)"
 ```
 
 ---
@@ -81,19 +73,14 @@ git pull origin main
 ## Step 3 – Create S3 Bucket for Pipeline Artifacts
 
 ```bash
-# Create S3 bucket for CodePipeline artifacts
 if [ "$REGION" = "us-east-1" ]; then
-    aws s3api create-bucket \
-      --bucket "$ARTIFACT_BUCKET" \
-      --region "$REGION"
+    aws s3api create-bucket --bucket "$ARTIFACT_BUCKET" --region "$REGION"
 else
-    aws s3api create-bucket \
-      --bucket "$ARTIFACT_BUCKET" \
-      --region "$REGION" \
+    aws s3api create-bucket --bucket "$ARTIFACT_BUCKET" --region "$REGION" \
       --create-bucket-configuration LocationConstraint="$REGION"
 fi
 
-echo "ARTIFACT_BUCKET=$ARTIFACT_BUCKET"
+echo "Created bucket: $ARTIFACT_BUCKET"
 ```
 
 ---
@@ -101,60 +88,10 @@ echo "ARTIFACT_BUCKET=$ARTIFACT_BUCKET"
 ## Step 4 – Create Application Directory and Files
 
 ```bash
-# Create workspace directory for Flask application
-REPO_DIR=$(git rev-parse --show-toplevel)
 WORKSPACE="$REPO_DIR/$APP_FOLDER"
 mkdir -p "$WORKSPACE"
 cd "$WORKSPACE"
 
-# Create Flask application with version-aware endpoints
-cat > app.py <<'EOF'
-from flask import Flask, jsonify
-import os
-
-app = Flask(__name__)
-
-VERSION = os.getenv('APP_VERSION', '1.0')
-
-@app.route('/')
-def home():
-    return jsonify({
-        "app": "Flask CI/CD Demo",
-        "version": VERSION,
-        "message": "Deployed via CodePipeline!",
-        "endpoints": ["/", "/health", "/version"]
-    })
-
-@app.route('/health')
-def health():
-    return jsonify({"status": "healthy"}), 200
-
-@app.route('/version')
-def version():
-    return jsonify({"version": VERSION})
-
-if __name__ == '__main__':
-    app.run(host='0.0.0.0', port=5000)
-EOF
-
-# Create requirements.txt
-cat > requirements.txt <<'EOF'
-Flask==3.0.0
-gunicorn==21.2.0
-EOF
-
-# Create Dockerfile
-cat > Dockerfile <<'EOF'
-FROM python:3.11-slim
-WORKDIR /app
-COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
-COPY app.py .
-EXPOSE 5000
-ENV APP_VERSION=1.0
-CMD ["gunicorn", "-b", "0.0.0.0:5000", "app:app"]
-EOF
-# Create Flask application with version-aware endpoints
 cat > app.py <<'EOF'
 from flask import Flask, jsonify
 import os
@@ -208,7 +145,6 @@ EOF
 ## Step 5 – Create BuildSpec and TaskDef Template
 
 ```bash
-# Create buildspec.yml defining CodeBuild phases for Docker image build and push
 cat > buildspec.yml <<EOF
 version: 0.2
 
@@ -279,13 +215,8 @@ EOF
 ## Step 6 – Commit and Push to GitHub
 
 ```bash
-# Stage application folder for commit
 git add "$APP_FOLDER/"
-
-# Commit application and CI/CD configuration files
 git commit -m "Add Flask app for CodePipeline demo"
-
-# Push to GitHub main branch
 git push origin main
 ```
 
@@ -294,7 +225,6 @@ git push origin main
 ## Step 7 – Create ECR Repository
 
 ```bash
-# Create ECR repository with automatic image scanning on push
 aws ecr create-repository \
   --repository-name "$ECR_REPO" \
   --region "$REGION" \
@@ -306,10 +236,7 @@ aws ecr create-repository \
 ## Step 8 – Create ECS Cluster
 
 ```bash
-# Create ECS cluster for Fargate container deployments
-aws ecs create-cluster \
-  --cluster-name "$CLUSTER_NAME" \
-  --region "$REGION"
+aws ecs create-cluster --cluster-name "$CLUSTER_NAME" --region "$REGION"
 ```
 
 ---
@@ -317,10 +244,7 @@ aws ecs create-cluster \
 ## Step 9 – Create CloudWatch Log Group
 
 ```bash
-# Create CloudWatch log group for ECS task container logs
-aws logs create-log-group \
-  --log-group-name "/ecs/flask-task" \
-  --region "$REGION"
+aws logs create-log-group --log-group-name "/ecs/flask-task" --region "$REGION"
 ```
 
 ---
@@ -328,37 +252,30 @@ aws logs create-log-group \
 ## Step 10 – Create ECS Task Execution Role
 
 ```bash
-# Check if ECS task execution role already exists
 if aws iam get-role --role-name ecsTaskExecutionRole 2>/dev/null; then
     echo "ecsTaskExecutionRole already exists"
 else
-    # Create trust policy allowing ECS tasks service to assume role
     cat > ecs-trust-policy.json <<'EOF'
 {
   "Version": "2012-10-17",
   "Statement": [
     {
       "Effect": "Allow",
-      "Principal": {
-        "Service": "ecs-tasks.amazonaws.com"
-      },
+      "Principal": {"Service": "ecs-tasks.amazonaws.com"},
       "Action": "sts:AssumeRole"
     }
   ]
 }
 EOF
 
-    # Create IAM role for ECS task execution
     aws iam create-role \
       --role-name ecsTaskExecutionRole \
       --assume-role-policy-document file://ecs-trust-policy.json
 
-    # Attach AWS managed policy for ECS task execution (ECR, CloudWatch Logs)
     aws iam attach-role-policy \
       --role-name ecsTaskExecutionRole \
       --policy-arn arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy
 
-    # Wait for IAM role to propagate globally
     sleep 10
 fi
 ```
@@ -368,11 +285,8 @@ fi
 ## Step 11 – Register ECS Task Definition
 
 ```bash
-# Navigate to application directory
-REPO_DIR=$(git rev-parse --show-toplevel)
 cd "$REPO_DIR/$APP_FOLDER"
 
-# Register ECS task definition from JSON configuration
 aws ecs register-task-definition \
   --cli-input-json file://taskdef.json \
   --region "$REGION"
@@ -383,7 +297,6 @@ aws ecs register-task-definition \
 ## Step 12 – Create Security Group for ECS
 
 ```bash
-# Get default VPC ID for security group creation
 VPC_ID=$(aws ec2 describe-vpcs \
   --filters "Name=isDefault,Values=true" \
   --region "$REGION" \
@@ -392,7 +305,6 @@ VPC_ID=$(aws ec2 describe-vpcs \
 
 echo "VPC_ID=$VPC_ID"
 
-# Create security group for ECS tasks
 SG_ID=$(aws ec2 create-security-group \
   --group-name flask-ecs-sg \
   --description "Security group for Flask ECS tasks" \
@@ -403,7 +315,6 @@ SG_ID=$(aws ec2 create-security-group \
 
 echo "SG_ID=$SG_ID"
 
-# Allow inbound HTTP traffic on Flask port 5000 from anywhere
 aws ec2 authorize-security-group-ingress \
   --group-id "$SG_ID" \
   --protocol tcp \
@@ -417,7 +328,6 @@ aws ec2 authorize-security-group-ingress \
 ## Step 13 – Create ECS Service
 
 ```bash
-# Get first two subnets from default VPC
 SUBNETS=$(aws ec2 describe-subnets \
   --filters "Name=vpc-id,Values=$VPC_ID" \
   --region "$REGION" \
@@ -426,7 +336,6 @@ SUBNETS=$(aws ec2 describe-subnets \
 
 echo "SUBNETS=$SUBNETS"
 
-# Create ECS service with Fargate launch type and public IP assignment
 aws ecs create-service \
   --cluster "$CLUSTER_NAME" \
   --service-name "$SERVICE_NAME" \
@@ -442,9 +351,7 @@ aws ecs create-service \
 ## Step 14 – Create CodeBuild Project
 
 ```bash
-# Check if CodeBuild service role exists, create if not
 if ! aws iam get-role --role-name CodeBuildServiceRole 2>/dev/null; then
-    # Create trust policy allowing CodeBuild service to assume role
     cat > codebuild-trust.json <<'EOF'
 {
   "Version": "2012-10-17",
@@ -456,41 +363,31 @@ if ! aws iam get-role --role-name CodeBuildServiceRole 2>/dev/null; then
 }
 EOF
 
-    # Create IAM role for CodeBuild
     aws iam create-role \
       --role-name CodeBuildServiceRole \
       --assume-role-policy-document file://codebuild-trust.json
 
-    # Create permissions policy for CloudWatch Logs, ECR, and S3
     cat > codebuild-policy.json <<EOF
 {
   "Version": "2012-10-17",
   "Statement": [
     {
       "Effect": "Allow",
-      "Action": ["logs:*", "ecr:*"],
-      "Resource": "*"
-    },
-    {
-      "Effect": "Allow",
-      "Action": ["s3:*"],
+      "Action": ["logs:*", "ecr:*", "s3:*"],
       "Resource": "*"
     }
   ]
 }
 EOF
 
-    # Attach permissions policy to CodeBuild role
     aws iam put-role-policy \
       --role-name CodeBuildServiceRole \
       --policy-name CodeBuildPolicy \
       --policy-document file://codebuild-policy.json
 
-    # Wait for IAM role to propagate globally
     sleep 10
 fi
 
-# Create CodeBuild project configuration for pipeline integration
 cat > codebuild-config.json <<EOF
 {
   "name": "flask-pipeline-build",
@@ -498,9 +395,7 @@ cat > codebuild-config.json <<EOF
     "type": "CODEPIPELINE",
     "buildspec": "$APP_FOLDER/buildspec.yml"
   },
-  "artifacts": {
-    "type": "CODEPIPELINE"
-  },
+  "artifacts": {"type": "CODEPIPELINE"},
   "environment": {
     "type": "LINUX_CONTAINER",
     "image": "aws/codebuild/standard:7.0",
@@ -511,7 +406,6 @@ cat > codebuild-config.json <<EOF
 }
 EOF
 
-# Create CodeBuild project from JSON configuration
 aws codebuild create-project \
   --cli-input-json file://codebuild-config.json \
   --region "$REGION"
@@ -522,7 +416,6 @@ aws codebuild create-project \
 ## Step 15 – Create CodePipeline Service Role
 
 ```bash
-# Create trust policy allowing CodePipeline service to assume role
 cat > pipeline-trust.json <<'EOF'
 {
   "Version": "2012-10-17",
@@ -534,37 +427,26 @@ cat > pipeline-trust.json <<'EOF'
 }
 EOF
 
-# Create IAM role for CodePipeline
 aws iam create-role \
   --role-name CodePipelineServiceRole \
   --assume-role-policy-document file://pipeline-trust.json
 
-# Create permissions policy for CodeBuild, ECS, IAM, and S3
 cat > pipeline-policy.json <<EOF
 {
   "Version": "2012-10-17",
-  "Statement": [
-    {
-      "Effect": "Allow",
-      "Action": [
-        "codebuild:*",
-        "ecs:*",
-        "iam:PassRole",
-        "s3:*"
-      ],
-      "Resource": "*"
-    }
-  ]
+  "Statement": [{
+    "Effect": "Allow",
+    "Action": ["codebuild:*", "ecs:*", "iam:PassRole", "s3:*", "codestar-connections:UseConnection"],
+    "Resource": "*"
+  }]
 }
 EOF
 
-# Attach permissions policy to CodePipeline role
 aws iam put-role-policy \
   --role-name CodePipelineServiceRole \
   --policy-name CodePipelinePolicy \
   --policy-document file://pipeline-policy.json
 
-# Wait for IAM role to propagate globally
 sleep 10
 ```
 
@@ -572,17 +454,14 @@ sleep 10
 
 ## Step 16 – Connect GitHub to AWS (One-Time Setup)
 
+**Manual Step (AWS Console):**
+1. Go to AWS Console → CodePipeline → Settings → Connections
+2. Click "Create connection" → Select "GitHub"
+3. Name it "github-connection" and authorize AWS
+4. Copy the Connection ARN
+
 ```bash
-echo "IMPORTANT: GitHub OAuth Connection Required"
-echo "1. Go to AWS Console → CodePipeline → Settings → Connections"
-echo "2. Click 'Create connection'"
-echo "3. Select 'GitHub' as provider"
-echo "4. Name it 'github-connection' and click 'Connect to GitHub'"
-echo "5. Authorize AWS Connector for GitHub"
-echo "6. Install the app on your account/repo"
-echo "7. Copy the Connection ARN"
-echo ""
-read -p "Enter your GitHub Connection ARN: " GITHUB_CONNECTION_ARN
+read -p "Enter GitHub Connection ARN: " GITHUB_CONNECTION_ARN
 echo "GITHUB_CONNECTION_ARN=$GITHUB_CONNECTION_ARN"
 ```
 
@@ -676,17 +555,15 @@ echo "Pipeline will automatically trigger on GitHub push"
 ## Step 18 – Monitor Pipeline Execution
 
 ```bash
-# Wait for pipeline to initialize
 sleep 10
 
-# Get current state of all pipeline stages
 aws codepipeline get-pipeline-state \
   --name "$PIPELINE_NAME" \
   --region "$REGION" \
   --query 'stageStates[*].{Stage:stageName,Status:latestExecution.status}' \
   --output table
 
-echo "Pipeline is running! Full execution takes 5-7 minutes"
+echo "Pipeline is running! (5-7 minutes)"
 ```
 
 ---
@@ -694,7 +571,6 @@ echo "Pipeline is running! Full execution takes 5-7 minutes"
 ## Step 19 – Wait for Deployment
 
 ```bash
-# Wait for ECS service to reach stable state (all tasks running)
 aws ecs wait services-stable \
   --cluster "$CLUSTER_NAME" \
   --services "$SERVICE_NAME" \
@@ -706,7 +582,6 @@ aws ecs wait services-stable \
 ## Step 20 – Get Application URL
 
 ```bash
-# Get ARN of running task in ECS service
 TASK_ARN=$(aws ecs list-tasks \
   --cluster "$CLUSTER_NAME" \
   --service-name "$SERVICE_NAME" \
@@ -714,7 +589,6 @@ TASK_ARN=$(aws ecs list-tasks \
   --query 'taskArns[0]' \
   --output text)
 
-# Get network interface ID from task details
 ENI_ID=$(aws ecs describe-tasks \
   --cluster "$CLUSTER_NAME" \
   --tasks "$TASK_ARN" \
@@ -722,7 +596,6 @@ ENI_ID=$(aws ecs describe-tasks \
   --query 'tasks[0].attachments[0].details[?name==`networkInterfaceId`].value' \
   --output text)
 
-# Get public IP address from network interface
 PUBLIC_IP=$(aws ec2 describe-network-interfaces \
   --network-interface-ids "$ENI_ID" \
   --region "$REGION" \
@@ -730,7 +603,7 @@ PUBLIC_IP=$(aws ec2 describe-network-interfaces \
   --output text)
 
 echo "Application URL: http://${PUBLIC_IP}:5000"
-echo "Testing application..."
+
 sleep 10
 curl -s "http://${PUBLIC_IP}:5000" | jq .
 ```
@@ -740,23 +613,16 @@ curl -s "http://${PUBLIC_IP}:5000" | jq .
 ## Step 21 – Test Pipeline with Code Change
 
 ```bash
-# Navigate to application directory
-REPO_DIR=$(git rev-parse --show-toplevel)
 cd "$REPO_DIR/$APP_FOLDER"
 
-# Update application version in Flask app
 sed -i "s/VERSION = os.getenv('APP_VERSION', '1.0')/VERSION = os.getenv('APP_VERSION', '2.0')/" app.py
-
-# Update version in Dockerfile environment variable
 sed -i 's/ENV APP_VERSION=1.0/ENV APP_VERSION=2.0/' Dockerfile
 
-# Stage, commit, and push code changes
 git add .
 git commit -m "Update to version 2.0"
 git push origin main
 
 echo "Pipeline will automatically trigger on GitHub push"
-echo "Monitor pipeline: https://console.aws.amazon.com/codesuite/codepipeline/pipelines/${PIPELINE_NAME}/view"
 ```
 
 ---
@@ -764,215 +630,133 @@ echo "Monitor pipeline: https://console.aws.amazon.com/codesuite/codepipeline/pi
 ## Step 22 – Cleanup
 
 ```bash
-# Delete CodePipeline
-aws codepipeline delete-pipeline \
-  --name "$PIPELINE_NAME" \
-  --region "$REGION"
+aws codepipeline delete-pipeline --name "$PIPELINE_NAME" --region "$REGION"
 
-# Scale ECS service to zero tasks
-aws ecs update-service \
-  --cluster "$CLUSTER_NAME" \
-  --service "$SERVICE_NAME" \
-  --desired-count 0 \
-  --region "$REGION"
+aws ecs update-service --cluster "$CLUSTER_NAME" --service "$SERVICE_NAME" --desired-count 0 --region "$REGION"
+aws ecs delete-service --cluster "$CLUSTER_NAME" --service "$SERVICE_NAME" --region "$REGION" --force
+aws ecs delete-cluster --cluster "$CLUSTER_NAME" --region "$REGION"
 
-# Delete ECS service
-aws ecs delete-service \
-  --cluster "$CLUSTER_NAME" \
-  --service "$SERVICE_NAME" \
-  --region "$REGION" \
-  --force
-
-# Delete ECS cluster
-aws ecs delete-cluster \
-  --cluster "$CLUSTER_NAME" \
-  --region "$REGION"
-
-# Deregister task definition (get all revisions)
-for REV in $(aws ecs list-task-definitions \
-  --family-prefix flask-task \
-  --region "$REGION" \
-  --query 'taskDefinitionArns[]' \
-  --output text); do
-    aws ecs deregister-task-definition \
-      --task-definition "$REV" \
-      --region "$REGION"
+for REV in $(aws ecs list-task-definitions --family-prefix flask-task --region "$REGION" --query 'taskDefinitionArns[]' --output text); do
+    aws ecs deregister-task-definition --task-definition "$REV" --region "$REGION"
 done
 
-# Delete CodeBuild project
-aws codebuild delete-project \
-  --name flask-pipeline-build \
-  --region "$REGION"
+aws codebuild delete-project --name flask-pipeline-build --region "$REGION"
+aws ecr delete-repository --repository-name "$ECR_REPO" --region "$REGION" --force
 
-# Delete ECR repository and all images
-aws ecr delete-repository \
-  --repository-name "$ECR_REPO" \
-  --region "$REGION" \
-  --force
-
-# Empty and delete S3 artifacts bucket
 aws s3 rm s3://"$ARTIFACT_BUCKET" --recursive
 aws s3api delete-bucket --bucket "$ARTIFACT_BUCKET" --region "$REGION"
 
-# Delete security group
-aws ec2 delete-security-group \
-  --group-id "$SG_ID" \
-  --region "$REGION"
+aws ec2 delete-security-group --group-id "$SG_ID" --region "$REGION"
+aws logs delete-log-group --log-group-name "/ecs/flask-task" --region "$REGION"
 
-# Delete CloudWatch log group
-aws logs delete-log-group \
-  --log-group-name "/ecs/flask-task" \
-  --region "$REGION"
-
-# Delete CodePipeline IAM role and policy
-aws iam delete-role-policy \
-  --role-name CodePipelineServiceRole \
-  --policy-name CodePipelinePolicy
-
+aws iam delete-role-policy --role-name CodePipelineServiceRole --policy-name CodePipelinePolicy
 aws iam delete-role --role-name CodePipelineServiceRole
 
-# Delete CodeBuild IAM role and policy
-aws iam delete-role-policy \
-  --role-name CodeBuildServiceRole \
-  --policy-name CodeBuildPolicy
-
+aws iam delete-role-policy --role-name CodeBuildServiceRole --policy-name CodeBuildPolicy
 aws iam delete-role --role-name CodeBuildServiceRole
 
-# Remove local workspace directory
-REPO_DIR=$(git rev-parse --show-toplevel)
 cd "$REPO_DIR"
 rm -rf "$APP_FOLDER"
 
-# Remove from git (optional)
 git rm -r "$APP_FOLDER"
 git commit -m "Cleanup: Remove pipeline Flask app"
 git push origin main
 
 echo "✅ Cleanup complete"
-echo "Note: GitHub connection in AWS can be reused for future pipelines"
 ```
 
 ---
 
 ## Summary
 
-In this lab, you have:
-- Connected GitHub repository to AWS CodePipeline
-- Created multi-stage CodePipeline (Source → Build → Deploy)
-- Configured GitHub as source stage with automatic triggers
-- Built Docker images with CodeBuild from GitHub repository
-- Deployed containers to ECS Fargate automatically
-- Monitored pipeline execution stages
-- Tested automated deployment on GitHub push
-- Verified application running on ECS
+**What You Built:**
+- Multi-stage CodePipeline with GitHub integration
+- Automated container build and deployment workflow
+- ECS Fargate service running Dockerized Flask application
 
-**Key Takeaways:**
-- **CodePipeline**: Orchestrates CI/CD workflow across multiple AWS services
-- **GitHub Integration**: Uses CodeStar Connections for secure GitHub access
-- **Three-Stage Pipeline**: Source (GitHub) → Build (CodeBuild) → Deploy (ECS)
-- **Automated Triggers**: Pipeline runs automatically on GitHub push
-- **Artifact Management**: S3 stores artifacts between pipeline stages
-- **Container Deployment**: ECS Fargate provides serverless container hosting
+**Architecture:**
+```
+GitHub → CodePipeline → CodeBuild (Docker) → ECR → ECS Fargate
+```
 
-**Pipeline Flow:**
-```
-GitHub Push → CodePipeline Trigger → CodeBuild (Docker) → ECS Deploy → Live App
-```
+**Key Components:**
+- **CodeStar Connection**: Secure GitHub integration (OAuth)
+- **CodePipeline**: Three-stage orchestration (Source → Build → Deploy)
+- **CodeBuild**: Docker image builder with privileged mode
+- **ECR**: Private container registry
+- **ECS Fargate**: Serverless container execution
+- **S3**: Artifact storage between stages
+
+**What You Learned:**
+- Configure GitHub source integration with CodeStar
+- Build multi-stage CI/CD pipelines
+- Automate Docker image builds and deployments
+- Deploy containers to ECS with zero infrastructure management
+- Monitor and test automated pipelines
 
 ---
 
 ## Best Practices
 
-**GitHub Integration:**
-- Use CodeStar Connections (not webhooks or OAuth tokens)
-- Enable branch protection rules in GitHub
-- Use pull requests for code review before merge
-- Configure status checks to block merges on failed builds
+**Pipeline Security:**
+- Use CodeStar Connections for GitHub (secure OAuth flow)
+- Apply least-privilege IAM policies to service roles
+- Encrypt artifacts in S3 with KMS
+- Enable ECR image vulnerability scanning
+- Restrict pipeline execution to protected branches
 
-**Pipeline Design:**
-- Keep stages small and focused on single responsibility
-- Add manual approval stage for production deployments
-- Use separate pipelines per environment (dev, staging, prod)
-- Enable SNS notifications for pipeline failures
-- Implement parallel actions where possible
-
-**Security:**
-- Use IAM roles with least-privilege permissions
-- Encrypt artifacts in S3 at rest
-- Enable ECR image scanning for vulnerabilities
-- Restrict pipeline execution to specific branches
-- Use AWS Secrets Manager for sensitive configuration
-
-**Deployment:**
-- Test thoroughly in staging before production
-- Use ECS blue/green deployments for zero downtime
-- Implement automatic rollback on deployment failures
-- Monitor application health metrics post-deployment
-- Keep task definition versions for quick rollback
+**Production Deployment:**
+- Add manual approval stage before production
+- Use separate pipelines per environment (dev/staging/prod)
+- Implement ECS blue/green deployments for zero downtime
+- Configure automatic rollback on health check failures
+- Monitor application metrics post-deployment
 
 **Cost Optimization:**
-- Use CodeBuild on-demand (not reserved instances)
 - Clean up old ECR images with lifecycle policies
-- Use ECS Fargate Spot for non-production workloads
-- Set S3 lifecycle policies for artifact retention
+- Set S3 artifact retention policies (30-90 days)
+- Use Fargate Spot for non-production workloads
+- Right-size task CPU/memory based on actual usage
 
 ---
 
 ## Production Enhancements
 
-1. **Multi-Environment Pipeline**
-   ```json
-   // Add staging and production stages
-   {
-     "name": "Deploy-Staging",
-     "actions": [...]
-   },
-   {
-     "name": "Approval",
-     "actions": [{
-       "actionTypeId": {"category": "Approval"}
-     }]
-   },
-   {
-     "name": "Deploy-Production",
-     "actions": [...]
-   }
-   ```
+**1. Multi-Environment Pipeline**
+```json
+{
+  "name": "Approval",
+  "actions": [{
+    "name": "ManualApproval",
+    "actionTypeId": {"category": "Approval", "owner": "AWS", "provider": "Manual", "version": "1"}
+  }]
+}
+```
 
-2. **Blue/Green Deployment**
-   ```bash
-   # Use ECS deployment controller
-   aws ecs create-service \
-     --deployment-controller type=CODE_DEPLOY \
-     --deployment-configuration deploymentCircuitBreaker={enable=true}
-   ```
+**2. Automated Testing**
+```yaml
+# Add to buildspec.yml
+phases:
+  post_build:
+    commands:
+      - pytest tests/
+      - docker run $IMAGE_URI pytest
+```
 
-3. **Automated Testing**
-   ```yaml
-   # Add test phase in buildspec.yml
-   phases:
-     post_build:
-       commands:
-         - pytest tests/
-         - docker run $IMAGE_URI pytest
-   ```
+**3. ECR Image Scanning**
+```bash
+aws ecr put-image-scanning-configuration \
+  --repository-name $ECR_REPO \
+  --image-scanning-configuration scanOnPush=true
+```
 
-4. **Pipeline Notifications**
-   ```bash
-   # Create SNS topic for pipeline events
-   aws codestar-notifications create-notification-rule \
-     --name pipeline-notifications \
-     --resource arn:aws:codepipeline:... \
-     --targets targetType=SNS,targetAddress=arn:aws:sns:...
-   ```
-
-5. **Container Security Scanning**
-   ```bash
-   # Enable ECR image scanning
-   aws ecr put-image-scanning-configuration \
-     --repository-name $ECR_REPO \
-     --image-scanning-configuration scanOnPush=true
-   ```
+**4. Pipeline Notifications**
+```bash
+aws codestar-notifications create-notification-rule \
+  --name pipeline-notifications \
+  --resource "arn:aws:codepipeline:$REGION:$ACCOUNT_ID:$PIPELINE_NAME" \
+  --targets targetType=SNS,targetAddress="arn:aws:sns:$REGION:$ACCOUNT_ID:pipeline-alerts"
+```
 
 ---
 
@@ -980,53 +764,38 @@ GitHub Push → CodePipeline Trigger → CodeBuild (Docker) → ECS Deploy → L
 
 **GitHub connection fails:**
 - Verify CodeStar Connection status is "Available"
-- Check GitHub App installation permissions
-- Ensure repository access is granted to AWS Connector
+- Check GitHub App permissions and repository access
+- Ensure AWS Connector app is installed in GitHub
 
 **Pipeline fails at Source stage:**
-- Verify GitHub connection ARN is correct
-- Check repository and branch names are exact
-- Ensure DetectChanges is set to "true"
+- Verify connection ARN and repository names are correct
+- Check branch name matches exactly
+- Ensure DetectChanges is set to true
 
 **CodeBuild fails:**
-- Check buildspec.yml path matches APP_FOLDER
-- Verify IAM role has ECR permissions
-- Review CloudWatch Logs for detailed errors
-- Ensure privilegedMode is true for Docker builds
+- Review CloudWatch Logs: `/aws/codebuild/flask-pipeline-build`
+- Verify buildspec.yml is in correct directory
+- Ensure IAM role has ECR permissions
+- Check privilegedMode is enabled for Docker builds
 
 **ECS deployment fails:**
-- Verify task definition is registered
-- Check security group allows traffic on port 5000
-- Ensure subnets have internet gateway (for Fargate)
-- Review ECS service events for error messages
+- Verify security group allows port 5000
+- Check subnets have internet gateway for Fargate
+- Ensure assignPublicIp is ENABLED
+- Review ECS service events in console
 
 **Application not accessible:**
-- Verify task is in RUNNING state
+- Verify task is RUNNING in ECS
 - Check security group ingress rules
-- Ensure public IP is assigned (assignPublicIp=ENABLED)
-- Test from within VPC if public access blocked
-
-**Pipeline doesn't trigger on push:**
-- Verify GitHub connection DetectChanges is "true"
-- Check CodePipeline service role has necessary permissions
-- Ensure push is to the configured branch
-- Review CloudTrail for connection events
+- Ensure public IP is assigned
+- Test connectivity: `curl http://<public-ip>:5000`
 
 ---
 
 ## Additional Resources
 
 - [AWS CodePipeline Documentation](https://docs.aws.amazon.com/codepipeline/)
-- [GitHub Connections](https://docs.aws.amazon.com/codepipeline/latest/userguide/connections-github.html)
+- [GitHub Connections for CodePipeline](https://docs.aws.amazon.com/codepipeline/latest/userguide/connections-github.html)
 - [AWS CodeBuild Documentation](https://docs.aws.amazon.com/codebuild/)
-- [Amazon ECS Documentation](https://docs.aws.amazon.com/ecs/)
-- [ECS Fargate Best Practices](https://docs.aws.amazon.com/AmazonECS/latest/bestpracticesguide/)
+- [Amazon ECS on Fargate](https://docs.aws.amazon.com/AmazonECS/latest/developerguide/AWS_Fargate.html)
 - [Docker Multi-Stage Builds](https://docs.docker.com/develop/develop-images/multistage-build/)
-
----
-
-## Additional Resources
-
-- [AWS CodePipeline Documentation](https://docs.aws.amazon.com/codepipeline/)
-- [Pipeline Structure Reference](https://docs.aws.amazon.com/codepipeline/latest/userguide/reference-pipeline-structure.html)
-- [ECS Deployment with CodePipeline](https://docs.aws.amazon.com/AmazonECS/latest/developerguide/ecs-cd-pipeline.html)
