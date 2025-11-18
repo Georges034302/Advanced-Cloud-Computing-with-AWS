@@ -1,5 +1,6 @@
 # Lab 10.C: GitHub Actions → ECR → App Runner
-<img width="1536" height="1024" alt="IMG" src="https://github.com/user-attachments/assets/0923f59f-51b9-40b7-bc7f-82c31b4a5879" />
+<img width="1536" height="822" alt="IMG" src="https://github.com/user-attachments/assets/a0b5702f-8725-4082-9c2a-b6ddd91e741d" />
+
 
 ## Overview
 This lab demonstrates third-party CI/CD using GitHub Actions to build Docker images and deploy to AWS App Runner. GitHub Actions builds and pushes containers to ECR, then App Runner automatically deploys the updated images using OpenID Connect (OIDC) for secure authentication without AWS access keys.
