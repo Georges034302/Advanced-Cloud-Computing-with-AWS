@@ -1,0 +1,15 @@
+version: 0.2
+
+phases:
+  build:
+    commands:
+      - zip -r flask-app.zip app.py requirements.txt
+
+  post_build:
+    commands:
+      - aws s3 cp flask-app.zip s3://$ARTIFACT_BUCKET/flask-app-latest.zip
+      - echo "Artifact uploaded to S3"
+
+artifacts:
+  files:
+    - flask-app.zip
