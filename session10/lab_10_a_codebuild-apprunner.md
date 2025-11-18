@@ -1,18 +1,18 @@
-# Lab 10.A: GitHub + CodeBuild + App Runner CI/CD
+# Lab 10.A: CodeBuild + App Runner - Code-Based Deployment
 <img width="1536" height="1024" alt="IMG10A" src="https://github.com/user-attachments/assets/7ca3374a-6590-4e8c-aa47-e9300501dee9" />
 
 ## Overview
-This lab demonstrates AWS CodeBuild integration with GitHub for CI/CD. You'll use your existing GitHub repository, configure CodeBuild to automatically build and package a Flask application, and deploy it to AWS App Runner as a zip artifact.
+This lab demonstrates AWS-native CI/CD using CodeBuild and App Runner with code-based deployment. You'll connect GitHub to AWS CodeBuild, package a Flask application as a zip file, and deploy it to App Runner using source code (not containers). This showcases AWS's fully managed build and deployment pipeline.
 
 ---
 
 ## Objectives
 - Connect GitHub repository to AWS CodeBuild
 - Create Flask application with buildspec.yml
-- Configure CodeBuild project for zip packaging
-- Create App Runner service for code-based deployment
-- Automate build and deployment on git push
-- Test deployed application and CI/CD workflow
+- Configure CodeBuild for zip packaging (code-based)
+- Deploy to App Runner using source code (not Docker)
+- Understand AWS-native CI/CD pipeline
+- Test automated builds and deployments
 
 ---
 
@@ -566,22 +566,24 @@ In this lab, you:
 - Connected GitHub repository to AWS CodeBuild
 - Created Flask application with buildspec.yml
 - Configured CodeBuild for zip packaging
-- Deployed application to AWS App Runner
+- Deployed to App Runner using **code-based** deployment (not containers)
 - Tested deployed application endpoints
 - Made code changes and triggered new builds
 - Cleaned up all AWS resources
 
 **Key Takeaways:**
-- **GitHub Integration**: CodeBuild connects directly to GitHub repositories
-- **CodeBuild**: Managed build service for packaging applications
-- **AWS App Runner**: Modern PaaS for deploying code without managing infrastructure
+- **AWS-Native CI/CD**: CodeBuild is AWS's managed build service
+- **Code-Based Deployment**: App Runner deploys from source code (zip files)
+- **No Docker Required**: Simple deployment without containers
 - **buildspec.yml**: Defines build steps for packaging
-- **Automated CI/CD**: Code changes trigger builds
+- **Fully Managed**: AWS handles infrastructure, scaling, and deployments
 
 **CI/CD Workflow:**
 ```
 GitHub → CodeBuild (build zip) → S3 → App Runner (deploy code)
 ```
+
+**Note**: Lab 10.C demonstrates the same App Runner target but using GitHub Actions + Docker containers instead of CodeBuild + source code.
 
 ---
 
