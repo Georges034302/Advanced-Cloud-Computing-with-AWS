@@ -1,5 +1,6 @@
 # Lab 10.A: CodeBuild + App Runner - Code-Based Deployment
-<img width="1536" height="1024" alt="IMG10A" src="https://github.com/user-attachments/assets/7ca3374a-6590-4e8c-aa47-e9300501dee9" />
+
+<img width="1200" height="634" alt="IMG" src="https://github.com/user-attachments/assets/9f2d9df8-99e8-45b2-a1a3-00d75ae6cd9d" />
 
 ## Overview
 This lab demonstrates AWS-native CI/CD using CodeBuild and App Runner with code-based deployment. You'll connect GitHub to AWS CodeBuild, package a Flask application as a zip file, and deploy it to App Runner using source code (not containers). This showcases AWS's fully managed build and deployment pipeline.
