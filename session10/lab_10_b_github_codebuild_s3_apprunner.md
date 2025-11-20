@@ -1,6 +1,6 @@
 # Lab 10.B: GitHub → CodeBuild → ECR → App Runner (Multi-API Pipeline)
 
-<img width="1200" height="634" alt="IMG" src="https://github.com/user-attachments/assets/9f2d9df8-99e8-45b2-a1a3-00d75ae6cd9d" />
+<img width="1536" height="834" alt="IMG" src="https://github.com/user-attachments/assets/ff010b78-bfff-4c52-b984-d7296a5664d1" />
 
 ## Overview
 This lab demonstrates building a complete CI/CD pipeline for multiple microservices using AWS CodeBuild and App Runner. You'll create two Flask APIs (Student and Report), containerize them, and deploy to App Runner from ECR images. This showcases AWS-native containerized deployment with automated testing.
