@@ -262,6 +262,15 @@ curl -s "https://$SERVICE_URL/joke" | jq .
 
 echo -e "\nTesting health endpoint:"
 curl -s "https://$SERVICE_URL/health" | jq .
+
+# Open in browser to test interactively
+echo -e "\n📱 Open in browser:"
+echo "https://$SERVICE_URL/"
+echo "https://$SERVICE_URL/joke"
+echo "https://$SERVICE_URL/health"
+
+# Optionally open in default browser
+"$BROWSER" "https://$SERVICE_URL/" 2>/dev/null || echo "Tip: Copy URL above to test in browser"
 ```
 
 ---
