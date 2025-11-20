@@ -1,0 +1,52 @@
+version: 0.2
+
+env:
+  variables:
+    AWS_DEFAULT_REGION: ap-southeast-2
+    ECR_STUDENT_REPO: student-api-repo
+    ECR_REPORT_REPO: report-api-repo
+
+phases:
+  install:
+    runtime-versions:
+      python: 3.11
+    commands:
+      # Install Python dependencies
+      - pip install --no-cache-dir -r requirements.txt
+
+  pre_build:
+    commands:
+      # Get AWS account ID
+      - ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
+      
+      # Build ECR image URIs
+      - STUDENT_URI=${ACCOUNT_ID}.dkr.ecr.${AWS_DEFAULT_REGION}.amazonaws.com/${ECR_STUDENT_REPO}
+      - REPORT_URI=${ACCOUNT_ID}.dkr.ecr.${AWS_DEFAULT_REGION}.amazonaws.com/${ECR_REPORT_REPO}
+      
+      # Login to ECR
+      - aws ecr get-login-password --region $AWS_DEFAULT_REGION | docker login --username AWS --password-stdin ${ACCOUNT_ID}.dkr.ecr.${AWS_DEFAULT_REGION}.amazonaws.com
+
+  build:
+    commands:
+      # Run tests for both APIs
+      - pytest -v
+      
+      # Build Docker image for Student API
+      - docker build -t ${STUDENT_URI}:latest -f Dockerfile.student .
+      
+      # Build Docker image for Report API
+      - docker build -t ${REPORT_URI}:latest -f Dockerfile.report .
+
+  post_build:
+    commands:
+      # Push images to ECR
+      - docker push ${STUDENT_URI}:latest
+      - docker push ${REPORT_URI}:latest
+      
+      # Create image definitions artifact
+      - printf '[{"name":"student-api","imageUri":"%s"},{"name":"report-api","imageUri":"%s"}]' ${STUDENT_URI}:latest ${REPORT_URI}:latest > imagedefinitions.json
+
+artifacts:
+  files:
+    - imagedefinitions.json
+  discard-paths: yes
