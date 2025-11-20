@@ -1,4 +1,5 @@
 # Lab 10.F: CodePipeline → EKS with Helm - Kubernetes CI/CD
+<img width="1525" height="623" alt="IMG" src="https://github.com/user-attachments/assets/1adbfc14-1520-4eb9-8973-e143898b1b14" />
 
 ## Overview
 This lab demonstrates building a complete CI/CD pipeline for Kubernetes deployments using AWS CodePipeline, CodeBuild, and Helm charts. You'll create a Flask API, package it with Helm, and deploy to Amazon EKS with automated rolling updates. This showcases production-grade Kubernetes CI/CD workflows.
