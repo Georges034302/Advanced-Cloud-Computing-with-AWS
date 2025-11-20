@@ -1,20 +1,20 @@
-# Lab 10.G: Terraform CI/CD with CodePipeline - Infrastructure Automation
+# Lab 10.G: Terraform CI/CD with GitHub Actions - Infrastructure Automation
 <img width="1486" height="662" alt="IMG10H" src="https://github.com/user-attachments/assets/f93ba940-654b-43bb-8980-86a9b55034ca" />
 
 
 ## Overview
-This lab demonstrates building a CI/CD pipeline for Terraform infrastructure deployments using CodePipeline and CodeBuild. You'll create Terraform configurations for VPC infrastructure, automate terraform plan/apply with CodeBuild, implement remote state in S3, and enable GitOps workflows. This showcases production-grade infrastructure automation with multi-cloud IaC tools.
+This lab demonstrates building a CI/CD pipeline for Terraform infrastructure deployments using GitHub Actions. You'll create Terraform configurations for VPC infrastructure, automate terraform plan/apply with GitHub Actions, implement remote state in S3, and enable GitOps workflows. This showcases production-grade infrastructure automation with multi-cloud IaC tools.
 
 ---
 
 ## Objectives
 - Create Terraform configuration for VPC infrastructure
-- Configure CodePipeline for Terraform deployments
-- Automate terraform init/plan/apply in CodeBuild
+- Configure GitHub Actions for Terraform deployments
+- Automate terraform init/plan/apply in GitHub Actions
 - Implement S3 backend for remote state management
 - Configure DynamoDB for state locking
 - Enable GitOps workflow (Git push → Auto deploy)
-- Compare Terraform vs CloudFormation/SAM CI/CD
+- Use Terraform for IaC
 
 ---
 
@@ -22,7 +22,7 @@ This lab demonstrates building a CI/CD pipeline for Terraform infrastructure dep
 - AWS CLI configured (`aws configure`)
 - Git installed (`git --version`)
 - GitHub account with repository access
-- IAM permissions for CodePipeline, CodeBuild, VPC, EC2, S3, DynamoDB, IAM
+- IAM permissions for VPC, EC2, S3, DynamoDB, IAM
 - Region: ap-southeast-2
 
 ---
@@ -30,12 +30,12 @@ This lab demonstrates building a CI/CD pipeline for Terraform infrastructure dep
 ## Architecture
 
 ```
-GitHub → CodePipeline → CodeBuild:
-                          → terraform init (S3 backend)
-                          → terraform plan
-                          → terraform apply
-                          ↓
-                        VPC + Subnets + EC2
+GitHub Push → GitHub Actions:
+                → terraform init (S3 backend)
+                → terraform plan
+                → terraform apply
+                ↓
+              VPC + Subnets + EC2
                         
 Remote State:
   ├── S3 Bucket (terraform.tfstate)
@@ -44,8 +44,8 @@ Remote State:
 
 **Pipeline Flow:**
 1. GitHub hosts Terraform configuration (.tf files)
-2. CodePipeline detects changes and triggers CodeBuild
-3. CodeBuild installs Terraform CLI
+2. Push to main triggers GitHub Actions workflow
+3. GitHub Actions installs Terraform CLI
 4. Runs terraform init (connects to S3 backend)
 5. Executes terraform plan (preview changes)
 6. Applies terraform apply (provisions infrastructure)
@@ -69,16 +69,11 @@ GITHUB_REPO=$(echo "$GITHUB_URL" | sed -E 's|.*github\.com[:/][^/]+/([^.]+)(\.gi
 APP_FOLDER="terraform-vpc-app"
 PROJECT_NAME="terraform-vpc-cicd"
 
-# Pipeline configuration
-PIPELINE_NAME="terraform-vpc-pipeline"
-CODEBUILD_PROJECT="terraform-vpc-deploy"
-
 # Get AWS account ID
 ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
 
-# S3 buckets
+# S3 bucket for Terraform state
 TF_STATE_BUCKET="terraform-state-${ACCOUNT_ID}"
-ARTIFACT_BUCKET="codepipeline-artifacts-terraform-${ACCOUNT_ID}"
 
 # DynamoDB table for state locking
 TF_LOCK_TABLE="terraform-state-lock"
@@ -443,66 +438,84 @@ echo "Created outputs.tf"
 
 ---
 
-## Step 9 – Create BuildSpec for CodeBuild
-
-Create `buildspec.yml`:
+## Step 9 – Create GitHub Actions Workflow
 
 ```bash
-cat > buildspec.yml << 'EOF'
-version: 0.2
+# Create GitHub Actions directory
+mkdir -p .github/workflows
 
-phases:
-  install:
-    commands:
-      # Install Terraform CLI
-      - echo "Installing Terraform..."
-      - wget -q https://releases.hashicorp.com/terraform/1.6.6/terraform_1.6.6_linux_amd64.zip
-      - unzip -q terraform_1.6.6_linux_amd64.zip
-      - mv terraform /usr/local/bin/
-      - terraform --version
+# Create Terraform deployment workflow
+cat > .github/workflows/deploy-terraform.yml <<'EOF'
+name: Deploy Terraform Infrastructure
 
-  pre_build:
-    commands:
-      # Initialize Terraform with S3 backend
-      - echo "Initializing Terraform..."
-      - cd terraform-vpc-app
-      - |
-        terraform init \
-          -backend-config="bucket=${TF_STATE_BUCKET}" \
-          -backend-config="dynamodb_table=${TF_LOCK_TABLE}"
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - 'terraform-vpc-app/**'
+      - '.github/workflows/deploy-terraform.yml'
 
-  build:
-    commands:
-      # Validate Terraform configuration
-      - echo "Validating Terraform configuration..."
-      - terraform validate
+jobs:
+  terraform:
+    runs-on: ubuntu-latest
+    
+    env:
+      TF_STATE_BUCKET: ${{ secrets.TF_STATE_BUCKET }}
+      TF_LOCK_TABLE: terraform-state-lock
+      AWS_REGION: ap-southeast-2
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
       
-      # Format check
-      - echo "Checking Terraform formatting..."
-      - terraform fmt -check || true
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ap-southeast-2
       
-      # Plan infrastructure changes
-      - echo "Planning Terraform changes..."
-      - terraform plan -out=tfplan
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: 1.6.6
       
-      # Apply infrastructure changes
-      - echo "Applying Terraform changes..."
-      - terraform apply -auto-approve tfplan
-
-  post_build:
-    commands:
-      # Show outputs
-      - echo "Terraform deployment completed!"
-      - terraform output -json > terraform-outputs.json
-      - cat terraform-outputs.json
-
-artifacts:
-  files:
-    - terraform-vpc-app/terraform-outputs.json
-  name: TerraformOutputs
+      - name: Terraform Init
+        run: |
+          cd terraform-vpc-app
+          terraform init \
+            -backend-config="bucket=${TF_STATE_BUCKET}" \
+            -backend-config="dynamodb_table=${TF_LOCK_TABLE}"
+      
+      - name: Terraform Validate
+        run: |
+          cd terraform-vpc-app
+          terraform validate
+      
+      - name: Terraform Format Check
+        run: |
+          cd terraform-vpc-app
+          terraform fmt -check || true
+      
+      - name: Terraform Plan
+        run: |
+          cd terraform-vpc-app
+          terraform plan -out=tfplan
+      
+      - name: Terraform Apply
+        run: |
+          cd terraform-vpc-app
+          terraform apply -auto-approve tfplan
+      
+      - name: Terraform Outputs
+        run: |
+          cd terraform-vpc-app
+          echo "🚀 Terraform deployment completed!"
+          terraform output -json
 EOF
 
-echo "Created buildspec.yml"
+echo "✅ GitHub Actions workflow created"
 ```
 
 ---
@@ -515,7 +528,7 @@ Create `README.md`:
 cat > README.md << 'EOF'
 # Terraform VPC CI/CD
 
-This application demonstrates automated Terraform deployments using CodePipeline and CodeBuild.
+This application demonstrates automated Terraform deployments using GitHub Actions.
 
 ## Infrastructure
 
@@ -537,7 +550,7 @@ This application demonstrates automated Terraform deployments using CodePipeline
 
 ## CI/CD Pipeline
 
-GitHub → CodePipeline → CodeBuild → Terraform Apply → AWS Resources
+GitHub Push → GitHub Actions → Terraform Apply → AWS Resources
 
 ## Remote State
 
@@ -550,27 +563,126 @@ echo "Created README.md"
 
 ---
 
-## Step 11 – Commit and Push to GitHub
+## Step 11 – Create AWS Credentials for GitHub Actions
+
+```bash
+# Create IAM user for GitHub Actions
+aws iam create-user --user-name github-actions-terraform-deploy
+
+# Create access policy for Terraform deployments
+cat > github-actions-terraform-policy.json <<EOF
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Effect": "Allow",
+      "Action": [
+        "ec2:*",
+        "vpc:*"
+      ],
+      "Resource": "*"
+    },
+    {
+      "Effect": "Allow",
+      "Action": [
+        "s3:GetObject",
+        "s3:PutObject",
+        "s3:ListBucket"
+      ],
+      "Resource": [
+        "arn:aws:s3:::${TF_STATE_BUCKET}",
+        "arn:aws:s3:::${TF_STATE_BUCKET}/*"
+      ]
+    },
+    {
+      "Effect": "Allow",
+      "Action": [
+        "dynamodb:DescribeTable",
+        "dynamodb:GetItem",
+        "dynamodb:PutItem",
+        "dynamodb:DeleteItem"
+      ],
+      "Resource": "arn:aws:dynamodb:${REGION}:${ACCOUNT_ID}:table/${TF_LOCK_TABLE}"
+    },
+    {
+      "Effect": "Allow",
+      "Action": "sts:GetCallerIdentity",
+      "Resource": "*"
+    }
+  ]
+}
+EOF
+
+# Attach policy to user
+aws iam put-user-policy \
+  --user-name github-actions-terraform-deploy \
+  --policy-name TerraformDeployPolicy \
+  --policy-document file://github-actions-terraform-policy.json
+
+# Create access keys
+ACCESS_KEYS=$(aws iam create-access-key \
+  --user-name github-actions-terraform-deploy \
+  --output json)
+
+AWS_ACCESS_KEY_ID=$(echo "$ACCESS_KEYS" | jq -r '.AccessKey.AccessKeyId')
+AWS_SECRET_ACCESS_KEY=$(echo "$ACCESS_KEYS" | jq -r '.AccessKey.SecretAccessKey')
+
+echo "✅ IAM user created with access keys"
+echo ""
+echo "⚠️  SAVE THESE CREDENTIALS - They will not be shown again:"
+echo "AWS_ACCESS_KEY_ID=$AWS_ACCESS_KEY_ID"
+echo "AWS_SECRET_ACCESS_KEY=$AWS_SECRET_ACCESS_KEY"
+echo "TF_STATE_BUCKET=$TF_STATE_BUCKET"
+```
+
+---
+
+## Step 12 – Configure GitHub Secrets
+
+```bash
+echo "Configure GitHub repository secrets:"
+echo ""
+echo "1. Go to: https://github.com/${GITHUB_OWNER}/${GITHUB_REPO}/settings/secrets/actions"
+echo "2. Click 'New repository secret'"
+echo "3. Add these three secrets:"
+echo ""
+echo "   Name: AWS_ACCESS_KEY_ID"
+echo "   Value: $AWS_ACCESS_KEY_ID"
+echo ""
+echo "   Name: AWS_SECRET_ACCESS_KEY"
+echo "   Value: $AWS_SECRET_ACCESS_KEY"
+echo ""
+echo "   Name: TF_STATE_BUCKET"
+echo "   Value: $TF_STATE_BUCKET"
+echo ""
+echo "Press Enter when secrets are configured..."
+read
+```
+
+---
+
+## Step 13 – Commit and Push to GitHub
 
 ```bash
 # Navigate to repository root
 cd "$REPO_DIR"
 
 # Add all files
-git add "$APP_FOLDER/"
+git add "$APP_FOLDER/" .github/
 
 # Commit changes
-git commit -m "Add Terraform VPC CI/CD application"
+git commit -m "Add Terraform VPC with GitHub Actions CI/CD"
 
-# Push to GitHub
+# Push to GitHub (triggers workflow)
 git push origin main
 
-echo "Pushed application code to GitHub"
+echo "✅ Code pushed - GitHub Actions workflow will start automatically"
+echo "📊 Monitor workflow: https://github.com/${GITHUB_OWNER}/${GITHUB_REPO}/actions"
 ```
 
 ---
 
-## Step 12 – Create S3 Buckets
+## Step 14 – Create S3 Bucket for Terraform State
 
 ```bash
 # Create S3 bucket for Terraform state
@@ -595,18 +707,12 @@ aws s3api put-bucket-encryption \
     }]
   }'
 
-# Create S3 bucket for CodePipeline artifacts
-aws s3api create-bucket \
-  --bucket "$ARTIFACT_BUCKET" \
-  --region "$REGION" \
-  --create-bucket-configuration LocationConstraint="$REGION"
-
-echo "Created S3 buckets: $TF_STATE_BUCKET, $ARTIFACT_BUCKET"
+echo "Created S3 bucket: $TF_STATE_BUCKET"
 ```
 
 ---
 
-## Step 13 – Create DynamoDB Table for State Locking
+## Step 15 – Create DynamoDB Table for State Locking
 
 ```bash
 # Create DynamoDB table for Terraform state locking
@@ -627,213 +733,73 @@ echo "Created DynamoDB table: $TF_LOCK_TABLE"
 
 ---
 
-## Step 14 – Create IAM Role for CodeBuild
+## Step 16 – Monitor GitHub Actions Workflow
 
 ```bash
-# Create trust policy for CodeBuild
-cat > codebuild-trust-policy.json << EOF
-{
-  "Version": "2012-10-17",
-  "Statement": [
-    {
-      "Effect": "Allow",
-      "Principal": {
-        "Service": "codebuild.amazonaws.com"
-      },
-      "Action": "sts:AssumeRole"
-    }
-  ]
-}
-EOF
-
-# Create IAM role
-aws iam create-role \
-  --role-name CodeBuildTerraformRole \
-  --assume-role-policy-document file://codebuild-trust-policy.json
-
-# Create permissions policy for Terraform operations
-cat > codebuild-terraform-policy.json << EOF
-{
-  "Version": "2012-10-17",
-  "Statement": [
-    {
-      "Effect": "Allow",
-      "Action": [
-        "logs:CreateLogGroup",
-        "logs:CreateLogStream",
-        "logs:PutLogEvents"
-      ],
-      "Resource": "arn:aws:logs:${REGION}:${ACCOUNT_ID}:log-group:/aws/codebuild/*"
-    },
-    {
-      "Effect": "Allow",
-      "Action": [
-        "s3:GetObject",
-        "s3:PutObject",
-        "s3:ListBucket"
-      ],
-      "Resource": [
-        "arn:aws:s3:::${ARTIFACT_BUCKET}/*",
-        "arn:aws:s3:::${ARTIFACT_BUCKET}",
-        "arn:aws:s3:::${TF_STATE_BUCKET}/*",
-        "arn:aws:s3:::${TF_STATE_BUCKET}"
-      ]
-    },
-    {
-      "Effect": "Allow",
-      "Action": [
-        "dynamodb:GetItem",
-        "dynamodb:PutItem",
-        "dynamodb:DeleteItem"
-      ],
-      "Resource": "arn:aws:dynamodb:${REGION}:${ACCOUNT_ID}:table/${TF_LOCK_TABLE}"
-    },
-    {
-      "Effect": "Allow",
-      "Action": [
-        "ec2:*",
-        "vpc:*"
-      ],
-      "Resource": "*"
-    }
-  ]
-}
-EOF
-
-# Attach policy to role
-aws iam put-role-policy \
-  --role-name CodeBuildTerraformRole \
-  --policy-name CodeBuildTerraformPolicy \
-  --policy-document file://codebuild-terraform-policy.json
-
-echo "Created IAM role: CodeBuildTerraformRole"
+# Open workflow in browser
+echo "📊 Monitor deployment:"
+echo "https://github.com/${GITHUB_OWNER}/${GITHUB_REPO}/actions"
+echo ""
+echo "Or use GitHub CLI:"
+gh run list --limit 5
+gh run watch
 ```
 
 ---
 
-## Step 15 – Create CodeBuild Project
+## Step 17 – Verify Terraform Deployment
 
 ```bash
-# Create CodeBuild project configuration
-cat > codebuild-project.json << EOF
-{
-  "name": "$CODEBUILD_PROJECT",
-  "source": {
-    "type": "CODEPIPELINE",
-    "buildspec": "terraform-vpc-app/buildspec.yml"
-  },
-  "artifacts": {
-    "type": "CODEPIPELINE"
-  },
-  "environment": {
-    "type": "LINUX_CONTAINER",
-    "image": "aws/codebuild/standard:7.0",
-    "computeType": "BUILD_GENERAL1_SMALL",
-    "environmentVariables": [
-      {
-        "name": "TF_STATE_BUCKET",
-        "value": "$TF_STATE_BUCKET",
-        "type": "PLAINTEXT"
-      },
-      {
-        "name": "TF_LOCK_TABLE",
-        "value": "$TF_LOCK_TABLE",
-        "type": "PLAINTEXT"
-      },
-      {
-        "name": "AWS_DEFAULT_REGION",
-        "value": "$REGION",
-        "type": "PLAINTEXT"
-      }
-    ]
-  },
-  "serviceRole": "arn:aws:iam::${ACCOUNT_ID}:role/CodeBuildTerraformRole"
-}
-EOF
+# Wait for GitHub Actions workflow to complete (2-3 minutes)
+echo "Waiting for deployment to complete..."
+sleep 120
 
-# Create CodeBuild project
-aws codebuild create-project \
-  --cli-input-json file://codebuild-project.json \
-  --region "$REGION"
+# Check VPC creation
+VPC_ID=$(aws ec2 describe-vpcs \
+  --filters "Name=tag:Name,Values=terraform-vpc-cicd-vpc" \
+  --query 'Vpcs[0].VpcId' \
+  --output text \
+  --region "$REGION")
 
-echo "Created CodeBuild project: $CODEBUILD_PROJECT"
+echo "VPC_ID=$VPC_ID"
+
+# Check EC2 instance
+INSTANCE_ID=$(aws ec2 describe-instances \
+  --filters "Name=tag:Name,Values=terraform-vpc-cicd-web-server" \
+            "Name=instance-state-name,Values=running" \
+  --query 'Reservations[0].Instances[0].InstanceId' \
+  --output text \
+  --region "$REGION")
+
+INSTANCE_IP=$(aws ec2 describe-instances \
+  --instance-ids "$INSTANCE_ID" \
+  --query 'Reservations[0].Instances[0].PublicIpAddress' \
+  --output text \
+  --region "$REGION")
+
+echo "INSTANCE_ID=$INSTANCE_ID"
+echo "INSTANCE_IP=$INSTANCE_IP"
 ```
 
 ---
 
-## Step 16 – Create IAM Role for CodePipeline
+## Step 18 – View Terraform Outputs
 
 ```bash
-# Create trust policy for CodePipeline
-cat > codepipeline-trust-policy.json << EOF
-{
-  "Version": "2012-10-17",
-  "Statement": [
-    {
-      "Effect": "Allow",
-      "Principal": {
-        "Service": "codepipeline.amazonaws.com"
-      },
-      "Action": "sts:AssumeRole"
-    }
-  ]
-}
-EOF
+# Get Terraform state from S3
+aws s3 cp "s3://${TF_STATE_BUCKET}/terraform-vpc/terraform.tfstate" terraform.tfstate
 
-# Create IAM role
-aws iam create-role \
-  --role-name CodePipelineTerraformRole \
-  --assume-role-policy-document file://codepipeline-trust-policy.json
+# Extract outputs using jq
+cat terraform.tfstate | jq '.outputs'
 
-# Attach managed policy
-aws iam attach-role-policy \
-  --role-name CodePipelineTerraformRole \
-  --policy-arn arn:aws:iam::aws:policy/AWSCodePipeline_FullAccess
-
-# Create additional permissions policy
-cat > codepipeline-terraform-policy.json << EOF
-{
-  "Version": "2012-10-17",
-  "Statement": [
-    {
-      "Effect": "Allow",
-      "Action": [
-        "s3:GetObject",
-        "s3:PutObject"
-      ],
-      "Resource": "arn:aws:s3:::${ARTIFACT_BUCKET}/*"
-    },
-    {
-      "Effect": "Allow",
-      "Action": [
-        "codebuild:BatchGetBuilds",
-        "codebuild:StartBuild"
-      ],
-      "Resource": "arn:aws:codebuild:${REGION}:${ACCOUNT_ID}:project/${CODEBUILD_PROJECT}"
-    },
-    {
-      "Effect": "Allow",
-      "Action": [
-        "codestar-connections:UseConnection"
-      ],
-      "Resource": "*"
-    }
-  ]
-}
-EOF
-
-# Attach policy to role
-aws iam put-role-policy \
-  --role-name CodePipelineTerraformRole \
-  --policy-name CodePipelineTerraformPolicy \
-  --policy-document file://codepipeline-terraform-policy.json
-
-echo "Created IAM role: CodePipelineTerraformRole"
+# Or view directly from workflow logs
+echo "View outputs in GitHub Actions:"
+echo "https://github.com/${GITHUB_OWNER}/${GITHUB_REPO}/actions"
 ```
 
 ---
 
-## Step 17 – Create CodeStar Connection
+## Step 19 – Test Web Server
 
 ```bash
 # Create CodeStar connection to GitHub
@@ -996,11 +962,15 @@ aws codebuild batch-get-builds \
 ## Step 21 – Test Web Server
 
 ```bash
+# Wait for GitHub Actions to complete (5-8 minutes)
+echo "Waiting for deployment..."
+sleep 60
+
 # Get VPC ID from Terraform state in S3
 aws s3 cp "s3://${TF_STATE_BUCKET}/terraform-vpc/terraform.tfstate" - 2>/dev/null | \
   grep -A 5 '"web_server_public_ip"' || echo "State file not yet available"
 
-# Alternatively, get from EC2 tags
+# Get instance IP from EC2 tags
 WEB_IP=$(aws ec2 describe-instances \
   --filters "Name=tag:Project,Values=TerraformVPCCICD" \
             "Name=instance-state-name,Values=running" \
@@ -1013,7 +983,7 @@ echo "Web Server IP: $WEB_IP"
 echo "Web Server URL: http://$WEB_IP"
 echo ""
 echo "Testing web server..."
-curl -s "http://$WEB_IP" || echo "Server not yet ready (wait 2-3 minutes for initialization)"
+curl -s "http://$WEB_IP" || echo "Server not yet ready (wait 2-3 minutes)"
 ```
 
 **Expected Output:**
@@ -1025,13 +995,13 @@ curl -s "http://$WEB_IP" || echo "Server not yet ready (wait 2-3 minutes for ini
 
 ---
 
-## Step 22 – Test GitOps Workflow (Trigger Pipeline)
+## Step 20 – Test GitOps Workflow
 
 ```bash
 # Navigate to application directory
 cd "$REPO_DIR/$APP_FOLDER"
 
-# Modify Terraform configuration (change instance user_data)
+# Modify Terraform configuration
 cat >> main.tf << 'EOF'
 
 # Updated: $(date)
@@ -1043,19 +1013,19 @@ git commit -m "Update Terraform configuration - test GitOps workflow"
 git push origin main
 
 echo ""
-echo "Pushed changes to GitHub - pipeline will automatically trigger"
-echo "Monitor pipeline: https://${REGION}.console.aws.amazon.com/codesuite/codepipeline/pipelines/${PIPELINE_NAME}/view"
+echo "✅ Pushed changes to GitHub - GitHub Actions will automatically trigger"
+echo "📊 Monitor: https://github.com/${GITHUB_OWNER}/${GITHUB_REPO}/actions"
 ```
 
 **Observe:**
-- CodePipeline automatically detects GitHub changes
-- Triggers new execution
-- CodeBuild runs terraform plan/apply
+- GitHub Actions automatically detects push to main
+- Triggers new workflow
+- Terraform runs plan/apply
 - Infrastructure updated automatically
 
 ---
 
-## Step 23 – View Terraform State
+## Step 21 – View Terraform State
 
 ```bash
 # Download and view Terraform state from S3
@@ -1077,16 +1047,16 @@ jq '.outputs' terraform-state.json
 
 ---
 
-## Step 24 – Compare Terraform vs SAM/CloudFormation CI/CD
+## Step 22 – Compare Terraform vs SAM/CloudFormation CI/CD
 
-| Feature | Terraform (Lab 10.H) | SAM (Lab 10.G) | CloudFormation (Session 9) |
+| Feature | Terraform (Lab 10.G) | SAM (Lab 10.F) | CloudFormation (Session 9) |
 |---------|---------------------|----------------|----------------------------|
 | **Language** | HCL (HashiCorp) | YAML/JSON | YAML/JSON |
 | **State Management** | S3 + DynamoDB | CloudFormation | CloudFormation |
 | **Multi-Cloud** | ✅ Yes (AWS, Azure, GCP) | ❌ AWS only | ❌ AWS only |
 | **Serverless Focus** | ❌ Generic IaC | ✅ Serverless-first | ❌ Generic IaC |
 | **Learning Curve** | Medium | Low | Medium |
-| **CI/CD Integration** | CodeBuild (custom) | SAM CLI (native) | CloudFormation CLI |
+| **CI/CD Integration** | GitHub Actions | GitHub Actions | CloudFormation CLI |
 | **Plan Preview** | terraform plan | sam validate | change sets |
 | **State Locking** | DynamoDB | N/A (CloudFormation) | N/A |
 | **Modularity** | Modules | Nested apps | Nested stacks |
@@ -1101,50 +1071,10 @@ jq '.outputs' terraform-state.json
 
 ## Cleanup
 
-### Option 1: Destroy via Pipeline (GitOps Approach)
+### Destroy Infrastructure with Terraform
 
 ```bash
-# Modify buildspec.yml to run terraform destroy
-cd "$REPO_DIR/$APP_FOLDER"
-
-cat > buildspec-destroy.yml << 'EOF'
-version: 0.2
-
-phases:
-  install:
-    commands:
-      - echo "Installing Terraform..."
-      - wget -q https://releases.hashicorp.com/terraform/1.6.6/terraform_1.6.6_linux_amd64.zip
-      - unzip -q terraform_1.6.6_linux_amd64.zip
-      - mv terraform /usr/local/bin/
-      - terraform --version
-
-  pre_build:
-    commands:
-      - echo "Initializing Terraform..."
-      - cd terraform-vpc-app
-      - |
-        terraform init \
-          -backend-config="bucket=${TF_STATE_BUCKET}" \
-          -backend-config="dynamodb_table=${TF_LOCK_TABLE}"
-
-  build:
-    commands:
-      - echo "Destroying Terraform infrastructure..."
-      - terraform destroy -auto-approve
-EOF
-
-# Update CodeBuild to use destroy buildspec (manual console change required)
-echo "To destroy infrastructure via pipeline:"
-echo "1. Update CodeBuild project buildspec to: terraform-vpc-app/buildspec-destroy.yml"
-echo "2. Push change to trigger pipeline"
-echo "3. Revert to buildspec.yml afterward"
-```
-
-### Option 2: Destroy Manually
-
-```bash
-cd "$REPO_DIR/$APP_FOLDER"
+cd "$REPO_DIR/terraform-vpc-app"
 
 # Navigate to repository root
 REPO_DIR=$(git rev-parse --show-toplevel)
@@ -1153,12 +1083,9 @@ REPO_DIR=$(git rev-parse --show-toplevel)
 REGION="ap-southeast-2"
 ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
 TF_STATE_BUCKET="terraform-state-${ACCOUNT_ID}"
-ARTIFACT_BUCKET="codepipeline-artifacts-terraform-${ACCOUNT_ID}"
 TF_LOCK_TABLE="terraform-state-lock"
-PIPELINE_NAME="terraform-vpc-pipeline"
-CODEBUILD_PROJECT="terraform-vpc-deploy"
 
-# Install Terraform locally
+# Install Terraform locally (if not already installed)
 wget -q https://releases.hashicorp.com/terraform/1.6.6/terraform_1.6.6_linux_amd64.zip
 unzip -q terraform_1.6.6_linux_amd64.zip
 sudo mv terraform /usr/local/bin/
@@ -1173,39 +1100,24 @@ terraform init \
 # Destroy infrastructure
 terraform destroy -auto-approve
 
-# Delete CodePipeline
-aws codepipeline delete-pipeline \
-  --name "$PIPELINE_NAME" \
-  --region "$REGION"
+# Delete IAM user and access keys
+aws iam list-access-keys \
+  --user-name github-actions-terraform-deploy \
+  --query 'AccessKeyMetadata[*].AccessKeyId' \
+  --output text | while read key; do
+    aws iam delete-access-key \
+      --user-name github-actions-terraform-deploy \
+      --access-key-id "$key"
+done
 
-# Delete CodeBuild project
-aws codebuild delete-project \
-  --name "$CODEBUILD_PROJECT" \
-  --region "$REGION"
+aws iam delete-user-policy \
+  --user-name github-actions-terraform-deploy \
+  --policy-name TerraformDeployPolicy
 
-# Delete IAM roles
-aws iam delete-role-policy \
-  --role-name CodeBuildTerraformRole \
-  --policy-name CodeBuildTerraformPolicy
+aws iam delete-user \
+  --user-name github-actions-terraform-deploy
 
-aws iam delete-role \
-  --role-name CodeBuildTerraformRole
-
-aws iam delete-role-policy \
-  --role-name CodePipelineTerraformRole \
-  --policy-name CodePipelineTerraformPolicy
-
-aws iam detach-role-policy \
-  --role-name CodePipelineTerraformRole \
-  --policy-arn arn:aws:iam::aws:policy/AWSCodePipeline_FullAccess
-
-aws iam delete-role \
-  --role-name CodePipelineTerraformRole
-
-# Delete S3 buckets (empty first)
-aws s3 rm "s3://${ARTIFACT_BUCKET}" --recursive
-aws s3 rb "s3://${ARTIFACT_BUCKET}"
-
+# Delete S3 bucket
 aws s3 rm "s3://${TF_STATE_BUCKET}" --recursive
 aws s3 rb "s3://${TF_STATE_BUCKET}"
 
@@ -1214,7 +1126,19 @@ aws dynamodb delete-table \
   --table-name "$TF_LOCK_TABLE" \
   --region "$REGION"
 
-echo "Cleanup complete!"
+# Remove application directory and workflow
+cd "$REPO_DIR"
+rm -rf "$APP_FOLDER" .github/workflows/deploy-terraform.yml
+git add -A
+git commit -m "Cleanup: Remove Terraform VPC application"
+git push origin main
+
+echo ""
+echo "⚠️  Manually remove GitHub secrets:"
+echo "https://github.com/${GITHUB_OWNER}/${GITHUB_REPO}/settings/secrets/actions"
+
+echo ""
+echo "✅ Cleanup complete!"
 ```
 
 ---
@@ -1237,57 +1161,47 @@ aws dynamodb delete-item \
   --region "$REGION"
 ```
 
-### Issue: CodeBuild fails with permission errors
+### Issue: GitHub Actions workflow fails
 
 **Solution:**
 ```bash
-# Verify IAM role has EC2/VPC permissions
-aws iam get-role-policy \
-  --role-name CodeBuildTerraformRole \
-  --policy-name CodeBuildTerraformPolicy
+# Verify GitHub Secrets are configured
+echo "https://github.com/${GITHUB_OWNER}/${GITHUB_REPO}/settings/secrets/actions"
 
-# Add missing permissions if needed
+# Verify IAM permissions
+aws iam get-user-policy \
+  --user-name github-actions-terraform-deploy \
+  --policy-name TerraformDeployPolicy
 ```
 
-### Issue: Pipeline not triggering on GitHub push
+### Issue: S3 backend initialization fails
 
 **Solution:**
 ```bash
-# Verify CodeStar connection status
-aws codestar-connections get-connection \
-  --connection-arn "$CONNECTION_ARN" \
-  --region "$REGION"
+# Verify S3 bucket exists
+aws s3 ls "s3://${TF_STATE_BUCKET}"
 
-# Status should be "AVAILABLE" (not "PENDING")
-# Re-authorize in console if needed
+# Verify DynamoDB table exists
+aws dynamodb describe-table \
+  --table-name "$TF_LOCK_TABLE" \
+  --region "$REGION"
 ```
 
 ---
 
 ## Key Takeaways
 
-✅ **Terraform CI/CD**: Automated infrastructure deployment with GitOps workflow  
+✅ **Terraform CI/CD**: Automated infrastructure deployment with GitHub Actions  
 ✅ **Remote State**: S3 backend with DynamoDB locking for team collaboration  
 ✅ **Multi-Cloud IaC**: Terraform works across AWS, Azure, GCP (unlike CloudFormation)  
-✅ **CodeBuild Integration**: Custom buildspec for terraform init/plan/apply  
+✅ **GitHub Actions**: Native CI/CD without CodePipeline or CodeBuild  
 ✅ **State Management**: Explicit state file management vs CloudFormation's automatic state  
-✅ **Plan Preview**: terraform plan shows changes before applying (like CloudFormation change sets)  
+✅ **Plan Preview**: terraform plan shows changes before applying  
 ✅ **HCL Language**: More readable than JSON/YAML for complex configurations  
-✅ **GitOps Workflow**: Git push → Pipeline trigger → Automatic deployment
+✅ **GitOps Workflow**: Git push → GitHub Actions → Automatic deployment
 
-**Comparison to Session 9 Labs:**
-- Session 9.D: Manual Terraform commands (local state)
-- Lab 10.H: Automated Terraform with CodePipeline (remote state, CI/CD)
-
----
-
-## Next Steps
-- Explore Terraform modules for reusable components
-- Implement terraform workspaces for multi-environment deployments (dev/staging/prod)
-- Add manual approval stage in CodePipeline before terraform apply
-- Integrate Terraform with Atlantis for pull request automation
-- Use Terraform Cloud for enhanced collaboration and governance
+**Comparison:**
+- Session 9.D: Manual Terraform (local state)
+- Lab 10.G: Automated Terraform with GitHub Actions (remote state, CI/CD)
 
 ---
-
-**📘 Session 10 Complete:** You've now mastered 8 different CI/CD approaches covering code, containers, serverless, Kubernetes, VMs, and infrastructure automation!

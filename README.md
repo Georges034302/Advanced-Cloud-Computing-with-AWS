@@ -184,8 +184,8 @@ This comprehensive lab series provides hands-on experience with Amazon Web Servi
     *Deploy to Kubernetes with local Docker → ECR → Helm → EKS. Create Helm charts for Flask app, build Docker images locally, push to ECR, deploy to EKS with helm upgrade. Kubernetes deployment with rolling updates and LoadBalancer service. 
   - [lab_10_f_lambda_sam_github_actions.md](session10/lab_10_f_lambda_sam_github_actions.md):  
     *Build serverless pipeline with GitHub Actions → SAM → Lambda + API Gateway. Create SAM templates, configure GitHub Actions workflow, deploy with SAM CLI in CI/CD. Automated serverless deployments without CodePipeline or CodeBuild. 
-  - [lab_10_g_terraform_cicd.md](session10/lab_10_g_terraform_cicd.md):  
-    *Automate Terraform deployments with GitHub → CodePipeline → CodeBuild → VPC infrastructure. Configure S3 backend for remote state, DynamoDB for state locking, run terraform plan/apply in CodeBuild. GitOps workflow for infrastructure automation with multi-cloud IaC tool. 
+  - [lab_10_g_terraform_github_actions.md](session10/lab_10_g_terraform_github_actions.md):  
+    *Automate Terraform deployments with GitHub Actions → Terraform → VPC infrastructure. Configure S3 backend for remote state, DynamoDB for state locking, run terraform plan/apply in GitHub Actions. GitOps workflow for infrastructure automation with multi-cloud IaC tool. 
 
 </details>
 
