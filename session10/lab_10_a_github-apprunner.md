@@ -1,6 +1,6 @@
 # Lab 10.A: GitHub → App Runner - Direct Code Deployment
 
-<img width="1200" height="634" alt="IMG" src="https://github.com/user-attachments/assets/9f2d9df8-99e8-45b2-a1a3-00d75ae6cd9d" />
+<img width="1536" height="447" alt="IMG" src="https://github.com/user-attachments/assets/ae779103-27b8-404e-9974-c8f6ca7a833a" />
 
 ## Overview
 This lab demonstrates direct deployment from GitHub to AWS App Runner using code-based deployment. You'll connect a GitHub repository to App Runner, which automatically builds and deploys your Flask application without requiring separate build services. This showcases AWS App Runner's fully managed platform with built-in CI/CD capabilities.
