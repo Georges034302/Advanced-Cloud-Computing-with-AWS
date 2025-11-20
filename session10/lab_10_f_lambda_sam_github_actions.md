@@ -1,6 +1,6 @@
 # Lab 10.F: Lambda CI/CD with SAM and GitHub Actions
+<img width="1536" height="1024" alt="IMG" src="https://github.com/user-attachments/assets/5d36742b-d707-4119-a2a1-97003a7fa5b3" />
 
-<img width="1536" height="1024" alt="IMG10G" src="https://github.com/user-attachments/assets/71ffcb72-927b-4fa3-96a6-25ee215d99af" />
 
 ## Overview
 This lab demonstrates building a complete CI/CD pipeline for serverless applications using AWS SAM (Serverless Application Model) and GitHub Actions. You'll create a Lambda function with API Gateway, deploy using SAM templates, and implement automated testing. This showcases production-grade serverless CI/CD workflows.
