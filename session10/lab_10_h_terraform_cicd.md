@@ -1,4 +1,5 @@
 # Lab 10.H: Terraform CI/CD with CodePipeline - Infrastructure Automation
+<img width="1486" height="662" alt="IMG10H" src="https://github.com/user-attachments/assets/f93ba940-654b-43bb-8980-86a9b55034ca" />
 
 
 ## Overview
