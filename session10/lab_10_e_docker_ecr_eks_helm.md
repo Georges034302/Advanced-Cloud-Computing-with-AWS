@@ -1,5 +1,6 @@
 # Lab 10.E: Docker → ECR → EKS with Helm - Kubernetes Deployment
-<img width="1525" height="623" alt="IMG" src="https://github.com/user-attachments/assets/1adbfc14-1520-4eb9-8973-e143898b1b14" />
+<img width="1536" height="1024" alt="IMG" src="https://github.com/user-attachments/assets/d67ca259-23b6-42dd-be1a-96cb4b0657af" />
+
 
 ## Overview
 This lab demonstrates deploying containerized applications to Amazon EKS using Helm charts. You'll create a Flask API, build Docker images locally, push to ECR, package with Helm, and deploy to EKS with rolling updates. This showcases Kubernetes deployment workflows and Helm package management.
