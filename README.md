@@ -186,6 +186,8 @@ This comprehensive lab series provides hands-on experience with Amazon Web Servi
     *Deploy to Kubernetes with GitHub → CodePipeline → CodeBuild → EKS. Create Helm charts for Flask app, build Docker images, push to ECR, deploy to EKS with helm upgrade. Kubernetes CI/CD with rolling updates and LoadBalancer service. 
   - [lab_10_g_lambda_sam_cicd.md](session10/lab_10_g_lambda_sam_cicd.md):  
     *Build serverless pipeline with GitHub → CodePipeline → CodeBuild → Lambda + API Gateway. Create SAM templates, deploy with SAM CLI, automatic CloudFormation stack management. Serverless CI/CD with infrastructure as code. 
+  - [lab_10_h_terraform_cicd.md](session10/lab_10_h_terraform_cicd.md):  
+    *Automate Terraform deployments with GitHub → CodePipeline → CodeBuild → VPC infrastructure. Configure S3 backend for remote state, DynamoDB for state locking, run terraform plan/apply in CodeBuild. GitOps workflow for infrastructure automation with multi-cloud IaC tool. 
 
 </details>
 
