@@ -1,26 +1,28 @@
-# Lab 10.B: GitHub → CodeBuild → ECR → App Runner (Multi-API Pipeline)
+# Lab 10.B: GitHub → Docker → ECR → App Runner (Multi-API Deployment)
 
 <img width="1536" height="834" alt="IMG" src="https://github.com/user-attachments/assets/ff010b78-bfff-4c52-b984-d7296a5664d1" />
 
 ## Overview
-This lab demonstrates building a complete CI/CD pipeline for multiple microservices using AWS CodeBuild and App Runner. You'll create two Flask APIs (Student and Report), containerize them, and deploy to App Runner from ECR images. This showcases AWS-native containerized deployment with automated testing.
+This lab demonstrates building and deploying multiple microservices to AWS App Runner. You'll create two Flask APIs (Student and Report), containerize them locally, push to ECR, and deploy to App Runner. This showcases containerized deployment with local development workflow.
 
 ---
 
 ## Objectives
 - Structure a multi-API GitHub repository with microservices
 - Implement Flask REST APIs with pytest unit tests
-- Configure CodeBuild to build, test, and push Docker images
+- Build and test Docker images locally
+- Push container images to Amazon ECR
 - Deploy multiple App Runner services from ECR
-- Understand container-based CI/CD workflows
+- Understand container-based deployment workflows
 
 ---
 
 ## Prerequisites
 - AWS CLI configured (`aws configure`)
+- Docker installed and running (`docker --version`)
 - Git installed (`git --version`)
 - GitHub account with repository access
-- IAM permissions for CodeBuild, ECR, App Runner, S3, IAM
+- IAM permissions for ECR, App Runner, IAM
 - Region: ap-southeast-2
 
 ---
@@ -28,15 +30,15 @@ This lab demonstrates building a complete CI/CD pipeline for multiple microservi
 ## Architecture
 
 ```
-GitHub → CodeBuild (test + build + push) → ECR → App Runner Services
-                         ↓
-                        S3 (artifacts)
+GitHub (Source) → Local Docker Build → ECR → App Runner Services
+                          ↓
+                     pytest tests
 ```
 
-**Pipeline Flow:**
+**Deployment Flow:**
 1. GitHub hosts source code for both APIs
-2. CodeBuild runs tests, builds Docker images, pushes to ECR
-3. S3 stores build artifacts (imagedefinitions.json)
+2. Local environment builds and tests Docker images
+3. Docker images pushed to Amazon ECR
 4. App Runner deploys two services from ECR images
 
 ---
@@ -60,17 +62,21 @@ STUDENT_REPO_NAME="student-api-repo"
 REPORT_REPO_NAME="report-api-repo"
 STUDENT_SERVICE_NAME="student-api-service"
 REPORT_SERVICE_NAME="report-api-service"
-CODEBUILD_PROJECT_NAME="multi-api-pipeline"
 
-# Get AWS account ID and set bucket name
+# Get AWS account ID
 ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
-ARTIFACT_BUCKET="codebuild-artifacts-${ACCOUNT_ID}"
 
+# Build ECR repository URIs
+STUDENT_ECR_URI="${ACCOUNT_ID}.dkr.ecr.${REGION}.amazonaws.com/${STUDENT_REPO_NAME}"
+REPORT_ECR_URI="${ACCOUNT_ID}.dkr.ecr.${REGION}.amazonaws.com/${REPORT_REPO_NAME}"
+
+# Display configuration
 echo "REGION=$REGION"
 echo "GITHUB_OWNER=$GITHUB_OWNER"
 echo "GITHUB_REPO=$GITHUB_REPO"
 echo "ACCOUNT_ID=$ACCOUNT_ID"
-echo "ARTIFACT_BUCKET=$ARTIFACT_BUCKET"
+echo "STUDENT_ECR_URI=$STUDENT_ECR_URI"
+echo "REPORT_ECR_URI=$REPORT_ECR_URI"
 ```
 
 ---
@@ -314,76 +320,14 @@ EOF
 
 ---
 
-## Step 8 – Create BuildSpec for CodeBuild
-
-```bash
-# CodeBuild build specification
-cat > buildspec.yml <<EOF
-version: 0.2
-
-env:
-  variables:
-    AWS_DEFAULT_REGION: ${REGION}
-    ECR_STUDENT_REPO: ${STUDENT_REPO_NAME}
-    ECR_REPORT_REPO: ${REPORT_REPO_NAME}
-
-phases:
-  install:
-    runtime-versions:
-      python: 3.11
-    commands:
-      # Install Python dependencies
-      - pip install --no-cache-dir -r requirements.txt
-
-  pre_build:
-    commands:
-      # Get AWS account ID
-      - ACCOUNT_ID=\$(aws sts get-caller-identity --query Account --output text)
-      
-      # Build ECR image URIs
-      - STUDENT_URI=\${ACCOUNT_ID}.dkr.ecr.\${AWS_DEFAULT_REGION}.amazonaws.com/\${ECR_STUDENT_REPO}
-      - REPORT_URI=\${ACCOUNT_ID}.dkr.ecr.\${AWS_DEFAULT_REGION}.amazonaws.com/\${ECR_REPORT_REPO}
-      
-      # Login to ECR
-      - aws ecr get-login-password --region \$AWS_DEFAULT_REGION | docker login --username AWS --password-stdin \${ACCOUNT_ID}.dkr.ecr.\${AWS_DEFAULT_REGION}.amazonaws.com
-
-  build:
-    commands:
-      # Run tests for both APIs
-      - pytest -v
-      
-      # Build Docker image for Student API
-      - docker build -t \${STUDENT_URI}:latest -f Dockerfile.student .
-      
-      # Build Docker image for Report API
-      - docker build -t \${REPORT_URI}:latest -f Dockerfile.report .
-
-  post_build:
-    commands:
-      # Push images to ECR
-      - docker push \${STUDENT_URI}:latest
-      - docker push \${REPORT_URI}:latest
-      
-      # Create image definitions artifact
-      - printf '[{"name":"student-api","imageUri":"%s"},{"name":"report-api","imageUri":"%s"}]' \${STUDENT_URI}:latest \${REPORT_URI}:latest > imagedefinitions.json
-
-artifacts:
-  files:
-    - imagedefinitions.json
-  discard-paths: yes
-EOF
-```
-
----
-
-## Step 9 – Commit and Push to GitHub
+## Step 8 – Commit and Push to GitHub
 
 ```bash
 # Add all files to git
 git add .
 
 # Commit changes
-git commit -m "Add Student and Report APIs with CI/CD pipeline"
+git commit -m "Add Student and Report APIs with Docker configuration"
 
 # Push to GitHub
 git push origin main
@@ -391,27 +335,7 @@ git push origin main
 
 ---
 
-## Step 10 – Create S3 Bucket for Artifacts
-
-```bash
-# Create S3 bucket for CodeBuild artifacts
-if [ "$REGION" = "us-east-1" ]; then
-    aws s3api create-bucket \
-      --bucket "$ARTIFACT_BUCKET" \
-      --region "$REGION"
-else
-    aws s3api create-bucket \
-      --bucket "$ARTIFACT_BUCKET" \
-      --region "$REGION" \
-      --create-bucket-configuration LocationConstraint="$REGION"
-fi
-
-echo "ARTIFACT_BUCKET=$ARTIFACT_BUCKET"
-```
-
----
-
-## Step 11 – Create ECR Repositories
+## Step 9 – Create ECR Repositories
 
 ```bash
 # Create ECR repository for Student API
@@ -424,194 +348,127 @@ aws ecr create-repository \
   --repository-name "$REPORT_REPO_NAME" \
   --region "$REGION"
 
-# Get repository URIs
-STUDENT_ECR_URI="${ACCOUNT_ID}.dkr.ecr.${REGION}.amazonaws.com/${STUDENT_REPO_NAME}"
-REPORT_ECR_URI="${ACCOUNT_ID}.dkr.ecr.${REGION}.amazonaws.com/${REPORT_REPO_NAME}"
-
+# Display repository URIs (already set in Step 1)
 echo "STUDENT_ECR_URI=$STUDENT_ECR_URI"
 echo "REPORT_ECR_URI=$REPORT_ECR_URI"
 ```
 
 ---
 
-## Step 12 – Create IAM Role for CodeBuild
+## Step 10 – Run Local Tests
 
 ```bash
-# Create trust policy for CodeBuild
-cat > codebuild-trust-policy.json <<'EOF'
-{
-  "Version": "2012-10-17",
-  "Statement": [
-    {
-      "Effect": "Allow",
-      "Principal": {
-        "Service": "codebuild.amazonaws.com"
-      },
-      "Action": "sts:AssumeRole"
-    }
-  ]
-}
-EOF
+# Install Python dependencies locally
+pip install -r requirements.txt
 
-# Create IAM role
-aws iam create-role \
-  --role-name CodeBuildMultiApiRole \
-  --assume-role-policy-document file://codebuild-trust-policy.json
+# Run tests for Student API
+pytest -v student_api/test_student_api.py
 
-# Create permissions policy
-cat > codebuild-permissions.json <<EOF
-{
-  "Version": "2012-10-17",
-  "Statement": [
-    {
-      "Effect": "Allow",
-      "Action": [
-        "logs:CreateLogGroup",
-        "logs:CreateLogStream",
-        "logs:PutLogEvents"
-      ],
-      "Resource": "arn:aws:logs:${REGION}:${ACCOUNT_ID}:log-group:/aws/codebuild/*"
-    },
-    {
-      "Effect": "Allow",
-      "Action": [
-        "ecr:GetAuthorizationToken",
-        "ecr:BatchCheckLayerAvailability",
-        "ecr:CompleteLayerUpload",
-        "ecr:UploadLayerPart",
-        "ecr:InitiateLayerUpload",
-        "ecr:PutImage",
-        "ecr:BatchGetImage"
-      ],
-      "Resource": "*"
-    },
-    {
-      "Effect": "Allow",
-      "Action": [
-        "s3:PutObject",
-        "s3:GetObject",
-        "s3:ListBucket"
-      ],
-      "Resource": [
-        "arn:aws:s3:::${ARTIFACT_BUCKET}",
-        "arn:aws:s3:::${ARTIFACT_BUCKET}/*"
-      ]
-    },
-    {
-      "Effect": "Allow",
-      "Action": "sts:GetCallerIdentity",
-      "Resource": "*"
-    }
-  ]
-}
-EOF
+# Run tests for Report API
+pytest -v report_api/test_report_api.py
 
-# Attach permissions policy to role
-aws iam put-role-policy \
-  --role-name CodeBuildMultiApiRole \
-  --policy-name CodeBuildMultiApiPermissions \
-  --policy-document file://codebuild-permissions.json
-
-# Wait for IAM propagation
-sleep 10
+# ✅ Ensure all tests pass before building Docker images
 ```
 
 ---
 
-## Step 13 – Create CodeBuild Project
+## Step 11 – Build Docker Images Locally
 
 ```bash
-# Create CodeBuild project configuration
-cat > codebuild-project.json <<EOF
-{
-  "name": "${CODEBUILD_PROJECT_NAME}",
-  "description": "Build and test Student + Report APIs, push to ECR",
-  "source": {
-    "type": "GITHUB",
-    "location": "https://github.com/${GITHUB_OWNER}/${GITHUB_REPO}.git",
-    "gitCloneDepth": 1,
-    "buildspec": "buildspec.yml"
-  },
-  "artifacts": {
-    "type": "S3",
-    "location": "${ARTIFACT_BUCKET}",
-    "packaging": "ZIP",
-    "path": "builds"
-  },
-  "environment": {
-    "type": "LINUX_CONTAINER",
-    "image": "aws/codebuild/standard:7.0",
-    "computeType": "BUILD_GENERAL1_SMALL",
-    "privilegedMode": true,
-    "environmentVariables": [
-      {"name": "AWS_DEFAULT_REGION", "value": "${REGION}"},
-      {"name": "ECR_STUDENT_REPO", "value": "${STUDENT_REPO_NAME}"},
-      {"name": "ECR_REPORT_REPO", "value": "${REPORT_REPO_NAME}"}
-    ]
-  },
-  "serviceRole": "arn:aws:iam::${ACCOUNT_ID}:role/CodeBuildMultiApiRole"
-}
-EOF
+# Build Docker image for Student API
+# -t: Tag the image with ECR URI and 'latest' tag
+# -f: Specify the Dockerfile to use
+# .: Build context (current directory)
+docker build -t "${STUDENT_ECR_URI}:latest" -f Dockerfile.student .
 
-# Create the CodeBuild project
-aws codebuild create-project \
-  --cli-input-json file://codebuild-project.json \
+# Build Docker image for Report API
+docker build -t "${REPORT_ECR_URI}:latest" -f Dockerfile.report .
+
+# Verify images were built successfully
+docker images | grep -E "student-api-repo|report-api-repo"
+```
+
+---
+
+## Step 12 – Test Docker Images Locally (Optional)
+
+```bash
+# Test Student API container locally
+# -d: Run in detached mode
+# -p: Map container port 8000 to host port 8001
+# --name: Give container a friendly name
+docker run -d -p 8001:8000 --name student-api-test "${STUDENT_ECR_URI}:latest"
+
+# Wait a few seconds for container to start
+sleep 3
+
+# Test Student API endpoints
+curl http://localhost:8001/
+curl http://localhost:8001/students
+curl http://localhost:8001/students/1
+
+# Stop and remove test container
+docker stop student-api-test
+docker rm student-api-test
+
+# Test Report API container locally
+docker run -d -p 8002:8000 --name report-api-test "${REPORT_ECR_URI}:latest"
+sleep 3
+
+# Test Report API endpoints
+curl http://localhost:8002/
+curl http://localhost:8002/reports
+curl http://localhost:8002/report/1
+
+# Stop and remove test container
+docker stop report-api-test
+docker rm report-api-test
+```
+
+---
+
+## Step 13 – Login to Amazon ECR
+
+```bash
+# Get ECR login password and authenticate Docker client
+# This command retrieves a temporary authentication token from ECR
+# and pipes it to 'docker login' to authenticate with the ECR registry
+aws ecr get-login-password --region "$REGION" | \
+  docker login --username AWS --password-stdin \
+  "${ACCOUNT_ID}.dkr.ecr.${REGION}.amazonaws.com"
+
+# ✅ You should see "Login Succeeded" message
+```
+
+---
+
+## Step 14 – Push Docker Images to ECR
+
+```bash
+# Push Student API image to ECR
+# This uploads all layers of the Docker image to ECR
+docker push "${STUDENT_ECR_URI}:latest"
+
+# Push Report API image to ECR
+docker push "${REPORT_ECR_URI}:latest"
+
+# Verify images in ECR
+aws ecr describe-images \
+  --repository-name "$STUDENT_REPO_NAME" \
+  --region "$REGION"
+
+aws ecr describe-images \
+  --repository-name "$REPORT_REPO_NAME" \
   --region "$REGION"
 ```
 
 ---
 
-## Step 14 – Authorize GitHub Access
-
-**Manual Step (AWS Console):**
-1. Go to AWS Console → CodeBuild → Build Projects
-2. Select `multi-api-pipeline`
-3. Click Edit → Source
-4. Click "Connect to GitHub" and authorize
-5. Save changes
-
-```bash
-read -p "Press Enter after completing GitHub authorization..."
-```
-
----
-
-## Step 15 – Trigger Build
-
-```bash
-# Start CodeBuild build
-BUILD_ID=$(aws codebuild start-build \
-  --project-name "$CODEBUILD_PROJECT_NAME" \
-  --source-version main \
-  --region "$REGION" \
-  --query 'build.id' \
-  --output text)
-
-echo "BUILD_ID=$BUILD_ID"
-
-# Monitor build status
-while true; do
-  BUILD_STATUS=$(aws codebuild batch-get-builds \
-    --ids "$BUILD_ID" \
-    --region "$REGION" \
-    --query 'builds[0].buildStatus' \
-    --output text)
-  
-  echo "Build status: $BUILD_STATUS"
-  
-  [ "$BUILD_STATUS" = "SUCCEEDED" ] && echo "✅ Build succeeded!" && break
-  [ "$BUILD_STATUS" = "FAILED" ] || [ "$BUILD_STATUS" = "STOPPED" ] && echo "❌ Build failed" && break
-  
-  sleep 15
-done
-```
-
----
-
-## Step 16 – Create IAM Role for App Runner
+## Step 15 – Create IAM Role for App Runner
 
 ```bash
 # Create trust policy for App Runner
+# This allows App Runner service to assume this role
 cat > apprunner-trust-policy.json <<'EOF'
 {
   "Version": "2012-10-17",
@@ -633,20 +490,25 @@ aws iam create-role \
   --assume-role-policy-document file://apprunner-trust-policy.json
 
 # Attach AWS managed policy for ECR access
+# This policy allows App Runner to pull images from ECR
 aws iam attach-role-policy \
   --role-name AppRunnerECRAccessRole \
   --policy-arn arn:aws:iam::aws:policy/AWSAppRunnerServicePolicyForECRAccess
 
-# Wait for IAM propagation
+# Wait for IAM role to propagate across AWS
 sleep 10
 ```
 
 ---
 
-## Step 17 – Create App Runner Services
+## Step 16 – Create App Runner Services
 
 ```bash
 # Create Student API service configuration
+# ServiceName: Name of the App Runner service
+# ImageIdentifier: ECR image URI with tag
+# ImageConfiguration.Port: Container port to expose (must match Dockerfile)
+# AutoDeploymentsEnabled: false = manual deployments only
 cat > apprunner-student.json <<EOF
 {
   "ServiceName": "${STUDENT_SERVICE_NAME}",
@@ -715,10 +577,11 @@ echo "REPORT_SERVICE_ARN=$REPORT_SERVICE_ARN"
 
 ---
 
-## Step 18 – Wait for Services to be Ready
+## Step 17 – Wait for Services to be Ready
 
 ```bash
-# Wait for Student API service
+# Wait for Student API service to become RUNNING
+# App Runner takes 2-4 minutes to deploy the container
 echo "Waiting for Student API service..."
 while true; do
   STUDENT_STATUS=$(aws apprunner describe-service \
@@ -742,7 +605,7 @@ STUDENT_URL=$(aws apprunner describe-service \
 
 echo "STUDENT_URL=$STUDENT_URL"
 
-# Wait for Report API service
+# Wait for Report API service to become RUNNING
 echo "Waiting for Report API service..."
 while true; do
   REPORT_STATUS=$(aws apprunner describe-service \
@@ -769,20 +632,20 @@ echo "REPORT_URL=$REPORT_URL"
 
 ---
 
-## Step 19 – Test Applications
+## Step 18 – Test Applications
 
 ```bash
-# Test Student API
+# Test Student API endpoints
 echo "Testing Student API:"
-curl -s "https://$STUDENT_URL/" | jq .
-curl -s "https://$STUDENT_URL/students" | jq .
-curl -s "https://$STUDENT_URL/students/1" | jq .
+curl -s "https://$STUDENT_URL/" | jq .                # Health check
+curl -s "https://$STUDENT_URL/students" | jq .        # Get all students
+curl -s "https://$STUDENT_URL/students/1" | jq .      # Get student by ID
 
-# Test Report API
+# Test Report API endpoints
 echo -e "\nTesting Report API:"
-curl -s "https://$REPORT_URL/" | jq .
-curl -s "https://$REPORT_URL/reports" | jq .
-curl -s "https://$REPORT_URL/report/1" | jq .
+curl -s "https://$REPORT_URL/" | jq .                 # Health check
+curl -s "https://$REPORT_URL/reports" | jq .          # Get all reports with grades
+curl -s "https://$REPORT_URL/report/1" | jq .         # Get report by ID
 
 # Display URLs for browser testing
 echo -e "\n📱 Student API URLs:"
@@ -796,10 +659,11 @@ echo "https://$REPORT_URL/reports"
 
 ---
 
-## Step 20 – Cleanup
+## Step 19 – Cleanup
 
 ```bash
 # Delete App Runner services
+# This will take 2-3 minutes as App Runner gracefully shuts down
 aws apprunner delete-service \
   --service-arn "$STUDENT_SERVICE_ARN" \
   --region "$REGION"
@@ -812,7 +676,8 @@ aws apprunner delete-service \
 echo "Waiting for services to delete..."
 sleep 30
 
-# Delete ECR repositories (with all images)
+# Delete ECR repositories with all images
+# --force flag deletes repository even if it contains images
 aws ecr delete-repository \
   --repository-name "$STUDENT_REPO_NAME" \
   --force \
@@ -823,40 +688,24 @@ aws ecr delete-repository \
   --force \
   --region "$REGION"
 
-# Delete CodeBuild project
-aws codebuild delete-project \
-  --name "$CODEBUILD_PROJECT_NAME" \
-  --region "$REGION"
-
-# Delete IAM roles and policies
+# Delete IAM role and detach policies
 aws iam detach-role-policy \
   --role-name AppRunnerECRAccessRole \
   --policy-arn arn:aws:iam::aws:policy/AWSAppRunnerServicePolicyForECRAccess
 
 aws iam delete-role --role-name AppRunnerECRAccessRole
 
-aws iam delete-role-policy \
-  --role-name CodeBuildMultiApiRole \
-  --policy-name CodeBuildMultiApiPermissions
-
-aws iam delete-role --role-name CodeBuildMultiApiRole
-
-# Empty and delete S3 bucket
-aws s3 rm "s3://$ARTIFACT_BUCKET" --recursive
-aws s3api delete-bucket \
-  --bucket "$ARTIFACT_BUCKET" \
-  --region "$REGION"
-
-# Remove application directories
+# Remove application directories and files from Git
 cd "$REPO_DIR"
 rm -rf "$STUDENT_API_FOLDER" "$REPORT_API_FOLDER"
-git rm -r "$STUDENT_API_FOLDER" "$REPORT_API_FOLDER"
 
-# Remove Docker and build files
-rm -f Dockerfile.student Dockerfile.report buildspec.yml requirements.txt
-rm -f codebuild-*.json apprunner-*.json
+# Remove Docker and configuration files
+rm -f Dockerfile.student Dockerfile.report requirements.txt
+rm -f apprunner-*.json
+
+# Commit cleanup to Git
 git add .
-git commit -m "Cleanup: Remove multi-API pipeline"
+git commit -m "Cleanup: Remove multi-API deployment"
 git push origin main
 
 echo "✅ Cleanup complete"
@@ -869,85 +718,102 @@ echo "✅ Cleanup complete"
 In this lab, you:
 - Created two Flask microservices (Student API and Report API)
 - Implemented pytest unit tests for both APIs
-- Built Docker images for each service
-- Configured CodeBuild to test, build, and push to ECR
-- Deployed two independent App Runner services
-- Tested endpoints and verified the CI/CD pipeline
+- Built Docker images locally for each service
+- Pushed Docker images to Amazon ECR
+- Deployed two independent App Runner services from ECR images
+- Tested endpoints and verified the deployment
 
 **Key Takeaways:**
 - **Multi-Service Architecture**: Two independent APIs in one repository
+- **Local Development Workflow**: Build and test locally before deploying
 - **Container-Based Deployment**: ECR → App Runner workflow
-- **Automated Testing**: pytest runs before building images
-- **Build Artifacts**: S3 stores imagedefinitions.json for deployment tracking
+- **Automated Testing**: pytest validates code before building images
 - **Fully Managed**: App Runner handles scaling and load balancing
 
-**CI/CD Workflow:**
+**Deployment Workflow:**
 ```
-GitHub → CodeBuild (test + build) → ECR → App Runner
-                ↓
-              S3 (artifacts)
+Local Development → Docker Build → ECR → App Runner
+       ↓
+  pytest tests
 ```
 
 ---
 
 ## Best Practices
 
-**CodeBuild Configuration:**
-- Use privileged mode for Docker builds
-- Set specific runtime versions (python: 3.11)
-- Store build artifacts in S3 for audit trail
-- Use environment variables for flexibility
+**Local Docker Development:**
+- Test Docker images locally before pushing to ECR
+- Use `docker run` to verify container behavior
+- Check container logs with `docker logs` for debugging
+- Tag images with ECR URI for seamless push
 
 **Docker Images:**
-- Use slim base images for smaller size
+- Use slim base images (python:3.11-slim) for smaller size
 - Copy only necessary files to reduce image size
 - Use gunicorn for production WSGI server
-- Set explicit working directories
+- Set explicit working directories and ports
+
+**Amazon ECR:**
+- One repository per microservice for independent versioning
+- Use `:latest` tag for development, semantic versioning for production
+- Authenticate Docker before pushing images
+- Enable image scanning for security vulnerabilities
 
 **App Runner:**
 - Start with 1 vCPU / 2 GB for testing
-- Monitor metrics and adjust resources
+- Monitor metrics and adjust resources as needed
 - Use ECR for private container images
-- Enable auto-deployments for continuous delivery
+- Disable auto-deployments for manual control
+- Enable auto-deployments for continuous delivery in production
 
 **Testing:**
-- Run tests before building images
+- Run pytest locally before building Docker images
+- Test all critical endpoints before deployment
 - Use lightweight pytest for API testing
-- Test all critical endpoints
-- Fail builds on test failures
+- Verify responses with assertions
 
 ---
 
 ## Troubleshooting
 
-**CodeBuild fails during Docker build:**
-- Ensure privilegedMode is set to true
-- Verify Dockerfiles are in repository root
-- Check ECR permissions in IAM role
+**Docker build fails:**
+- Ensure Docker daemon is running (`docker info`)
+- Check Dockerfile syntax and paths
+- Verify requirements.txt exists and is readable
+- Use `docker build --no-cache` to force rebuild
 
-**ECR push fails:**
+**Docker push fails:**
 - Verify ECR repositories exist
-- Check IAM role has ECR push permissions
-- Ensure ECR login command succeeds
+- Check AWS CLI authentication (`aws sts get-caller-identity`)
+- Ensure ECR login succeeded (look for "Login Succeeded" message)
+- Verify IAM permissions for ECR push operations
 
 **App Runner deployment fails:**
-- Verify image exists in ECR with :latest tag
-- Check AccessRoleArn for ECR access
+- Verify image exists in ECR with `:latest` tag
+- Check AccessRoleArn for ECR access role
 - Ensure port 8000 is exposed in Dockerfile
-- Review CloudWatch logs for application errors
+- Review CloudWatch logs: App Runner → Services → Logs
+- Verify application starts successfully (check CMD in Dockerfile)
 
-**Tests fail in CodeBuild:**
-- Check requirements.txt includes pytest
-- Verify test files are named test_*.py
-- Review pytest output for specific failures
-- Ensure Flask test_client is used correctly
+**Local pytest fails:**
+- Install dependencies: `pip install -r requirements.txt`
+- Ensure test files are named `test_*.py`
+- Run with `-v` flag for verbose output: `pytest -v`
+- Check Flask test_client usage in test files
+
+**Cannot access App Runner URL:**
+- Wait for service status to be "RUNNING"
+- App Runner takes 2-4 minutes to deploy
+- Check if URL is HTTPS (App Runner only uses HTTPS)
+- Verify application health endpoint returns 200
 
 ---
 
 ## Additional Resources
 
-- [AWS CodeBuild Documentation](https://docs.aws.amazon.com/codebuild/)
 - [Amazon ECR Documentation](https://docs.aws.amazon.com/ecr/)
 - [AWS App Runner Documentation](https://docs.aws.amazon.com/apprunner/)
+- [Docker Documentation](https://docs.docker.com/)
 - [Flask Testing Documentation](https://flask.palletsprojects.com/en/2.3.x/testing/)
 - [pytest Documentation](https://docs.pytest.org/)
+

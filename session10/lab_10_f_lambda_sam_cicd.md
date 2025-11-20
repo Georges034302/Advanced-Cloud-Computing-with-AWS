@@ -1,4 +1,4 @@
-# Lab 10.G: Lambda CI/CD with SAM - Serverless Pipeline
+# Lab 10.F: Lambda CI/CD with SAM - Serverless Pipeline
 
 <img width="1536" height="1024" alt="IMG10G" src="https://github.com/user-attachments/assets/71ffcb72-927b-4fa3-96a6-25ee215d99af" />
 

@@ -1,4 +1,4 @@
-# Lab 10.F: CodePipeline → EKS with Helm - Kubernetes CI/CD
+# Lab 10.E: CodePipeline → EKS with Helm - Kubernetes CI/CD
 <img width="1525" height="623" alt="IMG" src="https://github.com/user-attachments/assets/1adbfc14-1520-4eb9-8973-e143898b1b14" />
 
 ## Overview
