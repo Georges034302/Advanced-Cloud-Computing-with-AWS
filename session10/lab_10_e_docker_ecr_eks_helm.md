@@ -1,5 +1,5 @@
 # Lab 10.E: Docker → ECR → EKS with Helm - Kubernetes Deployment
-<img width="1536" height="1024" alt="IMG" src="https://github.com/user-attachments/assets/d67ca259-23b6-42dd-be1a-96cb4b0657af" />
+<img width="1536" height="605" alt="IMG" src="https://github.com/user-attachments/assets/5d406dba-462d-4145-949d-24023c9e4be3" />
 
 
 ## Overview
