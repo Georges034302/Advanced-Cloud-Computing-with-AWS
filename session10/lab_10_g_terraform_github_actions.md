@@ -1,6 +1,6 @@
 # Lab 10.G: Terraform CI/CD with GitHub Actions - Infrastructure Automation
-<img width="1486" height="662" alt="IMG10H" src="https://github.com/user-attachments/assets/f93ba940-654b-43bb-8980-86a9b55034ca" />
 
+<img width="1536" height="1024" alt="IMG" src="https://github.com/user-attachments/assets/8e30c62b-e9f3-491b-bc20-4b4f817fcf02" />
 
 ## Overview
 This lab demonstrates building a CI/CD pipeline for Terraform infrastructure deployments using GitHub Actions. You'll create Terraform configurations for VPC infrastructure, automate terraform plan/apply with GitHub Actions, implement remote state in S3, and enable GitOps workflows. This showcases production-grade infrastructure automation with multi-cloud IaC tools.
