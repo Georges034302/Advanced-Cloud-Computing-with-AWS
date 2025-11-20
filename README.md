@@ -174,7 +174,7 @@ This comprehensive lab series provides hands-on experience with Amazon Web Servi
   **Labs for this session:**
   - [lab_10_a_github-apprunner.md](session10/lab_10_a_github-apprunner.md):  
     *Deploy Flask app with direct GitHub → App Runner integration. Connect repository to App Runner for code-based deployment with built-in build system. Python app auto-builds from requirements.txt and deploys with gunicorn. Simple PaaS deployment without separate CI/CD services. 
-  - [lab_10_b_github_codebuild_s3_apprunner.md](session10/lab_10_b_github_codebuild_s3_apprunner.md):  
+  - [lab_10_b_github_codebuild_ecr_apprunner.md](session10/lab_10_b_github_codebuild_ecr_apprunner.md):  
     *Build multi-API pipeline with GitHub → CodeBuild → ECR → App Runner. Create Student and Report microservices with pytest tests, build Docker images in CodeBuild, push to ECR, deploy two independent App Runner services. Container-based CI/CD with automated testing. 
   - [lab_10_c_github-actions-apprunner.md](session10/lab_10_c_github-actions-apprunner.md):  
     *Deploy containers with GitHub Actions → ECR → App Runner. Build Docker image with GitHub Actions, push to ECR, deploy to App Runner in image mode. Third-party CI/CD with container deployment. 
