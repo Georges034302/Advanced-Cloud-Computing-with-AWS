@@ -1,6 +1,6 @@
 # Lab 10.B: GitHub → Docker → ECR → App Runner (Multi-API Deployment)
 
-<img width="1536" height="834" alt="IMG" src="https://github.com/user-attachments/assets/ff010b78-bfff-4c52-b984-d7296a5664d1" />
+<img width="1536" height="476" alt="IMG" src="https://github.com/user-attachments/assets/291a9006-aed2-4869-ad09-946d49a38275" />
 
 ## Overview
 This lab demonstrates building and deploying multiple microservices to AWS App Runner. You'll create two Flask APIs (Student and Report), containerize them locally, push to ECR, and deploy to App Runner. This showcases containerized deployment with local development workflow.
