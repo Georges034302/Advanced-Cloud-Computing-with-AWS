@@ -174,11 +174,13 @@ This comprehensive lab series provides hands-on experience with Amazon Web Servi
   **Labs for this session:**
   - [lab_10_a_github-apprunner.md](session10/lab_10_a_github-apprunner.md):  
     *Deploy Flask app with direct GitHub → App Runner integration. Connect repository to App Runner for code-based deployment with built-in build system. Python app auto-builds from requirements.txt and deploys with gunicorn. Simple PaaS deployment without separate CI/CD services. 
-  - [lab_10_b_codepipeline-multi-stage.md](session10/lab_10_b_codepipeline-multi-stage.md):  
-    *Build multi-stage CI/CD pipeline with GitHub → CodePipeline → CodeBuild → ECS Fargate. Orchestrate source, build (Docker), and deploy stages. Container-based deployment with AWS orchestration. 
+  - [lab_10_b_github_codebuild_s3_apprunner.md](session10/lab_10_b_github_codebuild_s3_apprunner.md):  
+    *Build multi-API pipeline with GitHub → CodeBuild → ECR → App Runner. Create Student and Report microservices with pytest tests, build Docker images in CodeBuild, push to ECR, deploy two independent App Runner services. Container-based CI/CD with automated testing. 
   - [lab_10_c_github-actions-apprunner.md](session10/lab_10_c_github-actions-apprunner.md):  
     *Deploy containers with GitHub Actions → ECR → App Runner. Build Docker image with GitHub Actions, push to ECR, deploy to App Runner in image mode. Third-party CI/CD with container deployment. 
-  - [lab_10_d_codedeploy-bluegreen.md](session10/lab_10_d_codedeploy-bluegreen.md):  
+  - [lab_10_d_codepipeline-multi-stage.md](session10/lab_10_d_codepipeline-multi-stage.md):  
+    *Build multi-stage CI/CD pipeline with GitHub → CodePipeline → CodeBuild → ECS Fargate. Orchestrate source, build (Docker), and deploy stages. Container-based deployment with AWS orchestration. 
+  - [lab_10_e_codedeploy-bluegreen.md](session10/lab_10_e_codedeploy-bluegreen.md):  
     *Implement blue/green deployment with CodeDeploy and Auto Scaling Groups. Deploy new version to "green" environment, shift traffic automatically, and rollback on failure. Zero-downtime VM deployment strategy. 
 
 </details>
