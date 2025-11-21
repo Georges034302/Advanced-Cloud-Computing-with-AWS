@@ -5,3 +5,7 @@
 aws/
 awscli/
 
+.venv/
+env/
+venv/
+__pycache__/

@@ -361,13 +361,13 @@ read
 ## Step 11 – Commit and Push to GitHub
 
 ```bash
-# Commit application code 
+# Commit application code
 # Push to GitHub (this will trigger the workflow)
 git add .
 git commit -m "Add GitHub Actions App Runner deployment"
 git push origin main
 
-# Wait for GitHub Actions to build and push image
+# Wait for GitHub Actions to build and push image to ECR
 ```
 
 ---
@@ -401,9 +401,22 @@ aws apprunner create-service \
 
 ```bash
 # Wait for service to become RUNNING (2-4 minutes)
-aws apprunner wait service-running \
-  --service-arn "arn:aws:apprunner:${REGION}:${ACCOUNT_ID}:service/${APP_RUNNER_SERVICE}" \
-  --region "$REGION"
+echo "⏳ Waiting for App Runner service to become RUNNING..."
+
+while true; do
+  STATUS=$(aws apprunner describe-service \
+    --service-arn "arn:aws:apprunner:${REGION}:${ACCOUNT_ID}:service/${APP_RUNNER_SERVICE}" \
+    --region "$REGION" \
+    --query 'Service.Status' \
+    --output text)
+  
+  echo "Status: $STATUS"
+  
+  [ "$STATUS" = "RUNNING" ] && break
+  [ "$STATUS" = "CREATE_FAILED" ] && echo "❌ Service creation failed" && break
+  
+  sleep 10
+done
 
 # Get service URL
 SERVICE_URL=$(aws apprunner describe-service \
@@ -447,15 +460,7 @@ git add .
 git commit -m "Update to version 2.0"
 git push origin main
 
-# GitHub Actions will build and push new image to ECR
-echo "⏳ Waiting 60 seconds for GitHub Actions workflow..."
-sleep 60
-
-# Manually trigger App Runner deployment
-aws apprunner start-deployment \
-  --service-arn "arn:aws:apprunner:${REGION}:${ACCOUNT_ID}:service/${APP_RUNNER_SERVICE}" \
-  --region "$REGION"
-
+# GitHub Actions will build and push new image to ECR 
 echo "✅ Deployment triggered. Wait 2-3 minutes, then test version 2.0"
 ```
 
@@ -468,9 +473,6 @@ echo "✅ Deployment triggered. Wait 2-3 minutes, then test version 2.0"
 aws apprunner delete-service \
   --service-arn "arn:aws:apprunner:${REGION}:${ACCOUNT_ID}:service/${APP_RUNNER_SERVICE}" \
   --region "$REGION"
-
-echo "⏳ Waiting 30 seconds for service deletion..."
-sleep 30
 
 # Delete ECR repository
 aws ecr delete-repository \
@@ -497,11 +499,12 @@ OIDC_ARN="arn:aws:iam::${ACCOUNT_ID}:oidc-provider/token.actions.githubuserconte
 aws iam delete-open-id-connect-provider \
   --open-id-connect-provider-arn "$OIDC_ARN" 2>/dev/null || true
 
-# Remove application directory from Git
+# Remove application directory and workflow from Git
 REPO_DIR=$(git rev-parse --show-toplevel)
 cd "$REPO_DIR"
 
 git rm -rf "$APP_FOLDER"
+git rm -rf .github/workflows/deploy.yml
 git commit -m "Cleanup: Remove GitHub Actions app"
 git push origin main
 
