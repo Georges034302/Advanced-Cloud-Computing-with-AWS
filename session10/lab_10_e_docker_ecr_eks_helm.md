@@ -439,20 +439,49 @@ curl -s "http://$LB_HOSTNAME/health" | jq .        # Health check
 ## Step 16 – Test Rolling Update
 
 ```bash
-# Update APP_VERSION in values.yaml (1.0.0 → 2.0.0)
-sed -i 's/value: "1.0.0"/value: "2.0.0"/' "helm/${CHART_NAME}/values.yaml"
+# Navigate to application directory
+cd /workspaces/Advanced-Cloud-Computing-with-AWS/flask-k8s-app
 
-# Perform rolling update (Kubernetes replaces pods gradually)
+# Update image tag from 1.0.0 to 2.0.0 in values.yaml
+sed -i 's/tag: "1.0.0"/tag: "2.0.0"/' helm/joke-api-chart/values.yaml
+
+# Update APP_VERSION environment variable to 2.0.0
+sed -i 's/APP_VERSION: "1.0.0"/APP_VERSION: "2.0.0"/' helm/joke-api-chart/values.yaml
+
+# Verify changes were applied successfully
+grep -E 'tag:|APP_VERSION:' helm/joke-api-chart/values.yaml
+
+# Build new Docker image with version 2.0.0 tag
+docker build -t joke-api-k8s:2.0.0 .
+
+# Tag image for ECR repository
+docker tag joke-api-k8s:2.0.0 \
+  013709423315.dkr.ecr.ap-southeast-2.amazonaws.com/joke-api-k8s:2.0.0
+
+# Push new version to ECR
+docker push \
+  013709423315.dkr.ecr.ap-southeast-2.amazonaws.com/joke-api-k8s:2.0.0
+
+# Perform rolling update (Kubernetes replaces pods gradually with zero downtime)
 helm upgrade "${APP_NAME}" "./helm/${CHART_NAME}" \
   --namespace "$NAMESPACE" \
   --wait \
   --timeout 5m
 
-# Watch rolling update progress
+# Watch rolling update progress in real-time
 kubectl rollout status deployment/"$CHART_NAME" -n "$NAMESPACE"
 
-# Verify new version deployed (should show "2.0.0")
-curl -s "http://$LB_HOSTNAME/" | jq .version
+# Get LoadBalancer URL
+LB_URL=$(kubectl get svc -n "$NAMESPACE" "$CHART_NAME" \
+  -o jsonpath='{.status.loadBalancer.ingress[0].hostname}')
+
+# Test updated version - should display "2.0.0"
+echo "=== Testing version after update ==="
+curl -s "http://$LB_URL/" | grep version
+echo ""
+
+# Verify health endpoint also shows version 2.0.0
+curl -s "http://$LB_URL/health"
 ```
 
 ---
