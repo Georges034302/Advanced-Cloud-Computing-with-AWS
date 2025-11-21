@@ -407,6 +407,11 @@ curl http://localhost:8001/
 curl http://localhost:8001/students
 curl http://localhost:8001/students/1
 
+# Open in browser
+"$BROWSER" http://localhost:8001/ &
+"$BROWSER" http://localhost:8001/students &
+"$BROWSER" http://localhost:8001/students/1 &
+
 # Stop and remove test container
 docker stop student-api-test
 docker rm student-api-test
@@ -419,6 +424,11 @@ sleep 3
 curl http://localhost:8002/
 curl http://localhost:8002/reports
 curl http://localhost:8002/report/1
+
+# Open in browser
+"$BROWSER" http://localhost:8002/ &
+"$BROWSER" http://localhost:8002/reports &
+"$BROWSER" http://localhost:8002/report/1 &
 
 # Stop and remove test container
 docker stop report-api-test
@@ -641,20 +651,22 @@ curl -s "https://$STUDENT_URL/" | jq .                # Health check
 curl -s "https://$STUDENT_URL/students" | jq .        # Get all students
 curl -s "https://$STUDENT_URL/students/1" | jq .      # Get student by ID
 
+# Test Student API endpoints in browser
+"$BROWSER" "https://$STUDENT_URL/"
+"$BROWSER" "https://$STUDENT_URL/students"
+"$BROWSER" "https://$STUDENT_URL/students/1"
+
 # Test Report API endpoints
 echo -e "\nTesting Report API:"
 curl -s "https://$REPORT_URL/" | jq .                 # Health check
 curl -s "https://$REPORT_URL/reports" | jq .          # Get all reports with grades
 curl -s "https://$REPORT_URL/report/1" | jq .         # Get report by ID
 
-# Display URLs for browser testing
-echo -e "\n📱 Student API URLs:"
-echo "https://$STUDENT_URL/"
-echo "https://$STUDENT_URL/students"
+# Test Report API endpoints in browser
+"$BROWSER" "https://$REPORT_URL/"
+"$BROWSER" "https://$REPORT_URL/reports"
+"$BROWSER" "https://$REPORT_URL/reports/1"
 
-echo -e "\n📱 Report API URLs:"
-echo "https://$REPORT_URL/"
-echo "https://$REPORT_URL/reports"
 ```
 
 ---
