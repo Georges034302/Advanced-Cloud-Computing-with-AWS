@@ -37,6 +37,11 @@ APP_NAME="flask-bluegreen-app"
 DEPLOYMENT_GROUP="flask-deployment-group"
 KEY_NAME="codedeploy-key"
 
+# Set configuration directory for all files
+REPO_DIR=$(git rev-parse --show-toplevel)
+CONFIG_DIR="$REPO_DIR/codedeploy-config"
+mkdir -p "$CONFIG_DIR"
+
 # Get AWS account ID
 ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
 echo "ACCOUNT_ID=$ACCOUNT_ID"
@@ -47,21 +52,16 @@ echo "ACCOUNT_ID=$ACCOUNT_ID"
 ## Step 2 – Create Key Pair for EC2
 
 ```bash
-# Create directory for SSH keys
-REPO_DIR=$(git rev-parse --show-toplevel)
-KEY_DIR="$REPO_DIR/codedeploy-keys"
-mkdir -p "$KEY_DIR"
-
-# Create EC2 key pair and save private key
+# Create EC2 key pair and save private key to CONFIG_DIR
 aws ec2 create-key-pair \
   --key-name "$KEY_NAME" \
   --region "$REGION" \
   --query 'KeyMaterial' \
-  --output text > "$KEY_DIR/${KEY_NAME}.pem"
+  --output text > "$CONFIG_DIR/${KEY_NAME}.pem"
 
 # Set proper permissions on private key
-chmod 400 "$KEY_DIR/${KEY_NAME}.pem"
-echo "Key pair: $KEY_DIR/${KEY_NAME}.pem"
+chmod 400 "$CONFIG_DIR/${KEY_NAME}.pem"
+echo "Key pair: $CONFIG_DIR/${KEY_NAME}.pem"
 ```
 
 ---
@@ -69,6 +69,9 @@ echo "Key pair: $KEY_DIR/${KEY_NAME}.pem"
 ## Step 3 – Create IAM Role for EC2
 
 ```bash
+# Navigate to CONFIG_DIR
+cd "$REPO_DIR/codedeploy-config"
+
 # Create trust policy for EC2 service
 cat > ec2-trust-policy.json <<'EOF'
 {
@@ -77,6 +80,18 @@ cat > ec2-trust-policy.json <<'EOF'
     "Effect": "Allow",
     "Principal": {"Service": "ec2.amazonaws.com"},
     "Action": "sts:AssumeRole"
+  }]
+}
+EOF
+
+# Create policy to allow EC2 instance to update its own tags
+cat > ec2-tag-policy.json <<'EOF'
+{
+  "Version": "2012-10-17",
+  "Statement": [{
+    "Effect": "Allow",
+    "Action": ["ec2:CreateTags", "ec2:DescribeTags"],
+    "Resource": "*"
   }]
 }
 EOF
@@ -96,6 +111,12 @@ aws iam attach-role-policy \
   --role-name CodeDeployEC2Role \
   --policy-arn arn:aws:iam::aws:policy/CloudWatchAgentServerPolicy
 
+# Add inline policy for EC2 to update its own tags (enables automatic Blue/Green tag switching)
+aws iam put-role-policy \
+  --role-name CodeDeployEC2Role \
+  --policy-name AllowEC2TagUpdate \
+  --policy-document file://ec2-tag-policy.json
+
 # Create instance profile
 aws iam create-instance-profile --instance-profile-name CodeDeployEC2Profile
 
@@ -111,6 +132,9 @@ aws iam add-role-to-instance-profile \
 ## Step 4 – Create IAM Role for CodeDeploy
 
 ```bash
+# Navigate to CONFIG_DIR
+cd "$REPO_DIR/codedeploy-config"
+
 # Create trust policy for CodeDeploy service
 cat > codedeploy-trust-policy.json <<'EOF'
 {
@@ -131,7 +155,7 @@ aws iam create-role \
 # Attach CodeDeploy permissions
 aws iam attach-role-policy \
   --role-name CodeDeployServiceRole \
-  --policy-arn arn:aws:iam::aws:policy/AWSCodeDeployRole
+  --policy-arn arn:aws:iam::aws:policy/service-role/AWSCodeDeployRole
 # Wait for IAM propagation (~30 seconds)
 
 
@@ -188,6 +212,9 @@ aws ec2 authorize-security-group-ingress \
 ## Step 6 – Create User Data Script
 
 ```bash
+# Navigate to CONFIG_DIR
+cd "$REPO_DIR/codedeploy-config"
+
 # Create user data script for EC2 initialization
 cat > user-data.sh <<'EOF'
 #!/bin/bash
@@ -204,8 +231,7 @@ chmod +x ./install
 ./install auto
 
 # Install Python and nginx for application
-yum install -y python3 python3-pip
-amazon-linux-extras install -y nginx1
+yum install -y python3 python3-pip nginx
 systemctl enable nginx
 systemctl start nginx
 EOF
@@ -233,7 +259,7 @@ INSTANCE_ID=$(aws ec2 run-instances \
   --key-name "$KEY_NAME" \
   --security-group-ids "$SG_ID" \
   --iam-instance-profile Name=CodeDeployEC2Profile \
-  --user-data file://user-data.sh \
+  --user-data file://$CONFIG_DIR/user-data.sh \
   --tag-specifications \
     "ResourceType=instance,Tags=[{Key=Name,Value=CodeDeploy-Blue},{Key=Environment,Value=Production},{Key=DeploymentGroup,Value=${DEPLOYMENT_GROUP}}]" \
   --region "$REGION" \
@@ -333,6 +359,9 @@ EOF
 ## Step 9 – Create CodeDeploy Scripts
 
 ```bash
+# Navigate to application workspace
+cd "$REPO_DIR/codedeploy-app"
+
 # Create scripts directory for deployment lifecycle hooks
 mkdir -p scripts
 
@@ -347,7 +376,6 @@ EOF
 cat > scripts/before_install.sh <<'EOF'
 #!/bin/bash
 mkdir -p /var/www/flask-app
-pip3 install --upgrade pip
 EOF
 
 # Install dependencies and configure nginx
@@ -356,9 +384,14 @@ cat > scripts/after_install.sh <<'EOF'
 cd /var/www/flask-app
 pip3 install -r requirements.txt
 
+# Disable default nginx server block
+mv /etc/nginx/nginx.conf /etc/nginx/nginx.conf.orig
+grep -v -A 100 'server {' /etc/nginx/nginx.conf.orig | grep -v -B 100 '^    }' | grep -v '^    }' > /etc/nginx/nginx.conf || cp /etc/nginx/nginx.conf.orig /etc/nginx/nginx.conf
+
+# Create Flask proxy configuration
 cat > /etc/nginx/conf.d/flask.conf <<'NGINX'
 server {
-    listen 80;
+    listen 80 default_server;
     server_name _;
     
     location / {
@@ -385,14 +418,29 @@ gunicorn -b 127.0.0.1:5000 app:app \
   --access-logfile /var/log/gunicorn-access.log \
   --error-logfile /var/log/gunicorn-error.log
 
-systemctl start nginx
+# Test nginx configuration and restart
+nginx -t && systemctl restart nginx
 EOF
 
 # Validate application is responding correctly
 cat > scripts/validate_service.sh <<'EOF'
 #!/bin/bash
-sleep 5
-curl -f http://localhost/health || exit 1
+# Wait for application to be ready (retry up to 30 seconds)
+for i in {1..30}; do
+  if curl -f http://127.0.0.1/health > /dev/null 2>&1; then
+    echo "Application is healthy"
+    
+    # Update instance tag to CodeDeploy-Green after successful deployment
+    INSTANCE_ID=$(ec2-metadata --instance-id | cut -d" " -f2)
+    REGION=$(ec2-metadata --availability-zone | cut -d" " -f2 | sed 's/[a-z]$//')
+    aws ec2 create-tags --resources "$INSTANCE_ID" --tags Key=Name,Value=CodeDeploy-Green --region "$REGION" 2>/dev/null || true
+    
+    exit 0
+  fi
+  sleep 1
+done
+echo "Application failed health check after 30 seconds"
+exit 1
 EOF
 
 # Make all scripts executable
@@ -404,6 +452,9 @@ chmod +x scripts/*.sh
 ## Step 10 – Create AppSpec File
 
 ```bash
+# Navigate to application workspace
+cd "$REPO_DIR/codedeploy-app"
+
 # Create CodeDeploy application specification
 cat > appspec.yml <<'EOF'
 version: 0.0
@@ -442,7 +493,7 @@ hooks:
   
   ValidateService:
     - location: scripts/validate_service.sh
-      timeout: 30
+      timeout: 60
       runas: root
 EOF
 ```
@@ -701,10 +752,6 @@ aws s3api delete-bucket --bucket "$DEPLOY_BUCKET" --region "$REGION"
 aws ec2 delete-security-group --group-id "$SG_ID" --region "$REGION"
 aws ec2 delete-key-pair --key-name "$KEY_NAME" --region "$REGION"
 
-# Delete local key files
-REPO_DIR=$(git rev-parse --show-toplevel)
-rm -rf "$REPO_DIR/codedeploy-keys"
-
 # Delete EC2 instance profile and role
 aws iam remove-role-from-instance-profile \
   --instance-profile-name CodeDeployEC2Profile \
@@ -712,6 +759,12 @@ aws iam remove-role-from-instance-profile \
 
 aws iam delete-instance-profile --instance-profile-name CodeDeployEC2Profile
 
+# Delete inline policy for tag updates
+aws iam delete-role-policy \
+  --role-name CodeDeployEC2Role \
+  --policy-name AllowEC2TagUpdate
+
+# Detach managed policies
 aws iam detach-role-policy \
   --role-name CodeDeployEC2Role \
   --policy-arn arn:aws:iam::aws:policy/AmazonS3ReadOnlyAccess
@@ -725,14 +778,20 @@ aws iam delete-role --role-name CodeDeployEC2Role
 # Delete CodeDeploy service role
 aws iam detach-role-policy \
   --role-name CodeDeployServiceRole \
-  --policy-arn arn:aws:iam::aws:policy/AWSCodeDeployRole
+  --policy-arn arn:aws:iam::aws:policy/service-role/AWSCodeDeployRole
 
 aws iam delete-role --role-name CodeDeployServiceRole
 
-# Delete application files
+# Delete local configuration directory
 REPO_DIR=$(git rev-parse --show-toplevel)
-cd "$REPO_DIR"
-rm -rf codedeploy-app
+rm -rf "$REPO_DIR/codedeploy-config"
+echo "Deleted CONFIG_DIR: $REPO_DIR/codedeploy-config"
+
+# Delete local application directory
+rm -rf "$REPO_DIR/codedeploy-app"
+echo "Deleted application directory: $REPO_DIR/codedeploy-app"
+
+echo "✅ All resources cleaned up successfully!"
 ```
 
 ---
