@@ -243,6 +243,10 @@ EOF
 ## Step 8 – Create GitHub Actions Workflow
 
 ```bash
+# Navigate to repository root
+cd "$REPO_DIR"
+
+# Create workflow directory at repository root
 mkdir -p .github/workflows
 
 cat > .github/workflows/deploy.yml <<EOF
@@ -357,16 +361,13 @@ read
 ## Step 11 – Commit and Push to GitHub
 
 ```bash
-# Commit application code
+# Commit application code 
+# Push to GitHub (this will trigger the workflow)
 git add .
 git commit -m "Add GitHub Actions App Runner deployment"
-
-# Push to GitHub (this will trigger the workflow)
 git push origin main
 
 # Wait for GitHub Actions to build and push image
-echo "⏳ Waiting 60 seconds for GitHub Actions to complete..."
-sleep 60
 ```
 
 ---
