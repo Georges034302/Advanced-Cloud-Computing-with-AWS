@@ -29,24 +29,28 @@ This lab demonstrates third-party CI/CD using GitHub Actions to build Docker ima
 ## Step 1 – Set Variables
 
 ```bash
+# Set AWS region
 REGION="ap-southeast-2"
 export AWS_REGION="$REGION"
 
+# Get GitHub repository information
 GITHUB_URL=$(git remote get-url origin)
 GITHUB_OWNER=$(echo "$GITHUB_URL" | sed -E 's|.*github\.com[:/]([^/]+)/.*|\1|')
 GITHUB_REPO=$(echo "$GITHUB_URL" | sed -E 's|.*github\.com[:/][^/]+/([^/\.]+).*|\1|')
 
+# Get AWS account ID
 ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
 
+# Application configuration
 APP_FOLDER="github-actions-apprunner"
 ECR_REPO="github-actions-app"
 APP_RUNNER_SERVICE="github-actions-service"
 
+# Display configuration
 echo "REGION=$REGION"
 echo "GITHUB_OWNER=$GITHUB_OWNER"
 echo "GITHUB_REPO=$GITHUB_REPO"
 echo "ACCOUNT_ID=$ACCOUNT_ID"
-echo "ECR_REPO=$ECR_REPO"
 ```
 
 ---
@@ -54,10 +58,11 @@ echo "ECR_REPO=$ECR_REPO"
 ## Step 2 – Create GitHub OIDC Provider
 
 ```bash
+# Create OIDC provider (ignore error if already exists)
 aws iam create-open-id-connect-provider \
   --url "https://token.actions.githubusercontent.com" \
   --client-id-list "sts.amazonaws.com" \
-  --thumbprint-list "6938fd4d98bab03faadb97b34396831e3780aea1" 2>/dev/null || echo "OIDC provider already exists"
+  --thumbprint-list "6938fd4d98bab03faadb97b34396831e3780aea1" 2>/dev/null || true
 ```
 
 ---
@@ -128,77 +133,54 @@ aws iam put-role-policy \
   --policy-name GitHubActionsPermissions \
   --policy-document file://github-permissions.json
 
+# Get role ARN for GitHub Secrets
 ROLE_ARN=$(aws iam get-role \
   --role-name GitHubActionsAppRunnerRole \
   --query 'Role.Arn' \
   --output text)
 
+echo "⚠️  Save this ARN for GitHub Secrets (AWS_ROLE_ARN):"
 echo "$ROLE_ARN"
-echo "⚠️  Save this ARN for GitHub Secrets (AWS_ROLE_ARN)"
 ```
 
 ---
 
-## Step 4 – Create App Runner Instance Role
+## Step 4 – Create ECR Repository
 
 ```bash
-cat > apprunner-trust-policy.json <<'EOF'
-{
-  "Version": "2012-10-17",
-  "Statement": [{
-    "Effect": "Allow",
-    "Principal": {"Service": "tasks.apprunner.amazonaws.com"},
-    "Action": "sts:AssumeRole"
-  }]
-}
-EOF
-
-aws iam create-role \
-  --role-name AppRunnerInstanceRole \
-  --assume-role-policy-document file://apprunner-trust-policy.json
-
-APPRUNNER_ROLE_ARN=$(aws iam get-role \
-  --role-name AppRunnerInstanceRole \
-  --query 'Role.Arn' \
-  --output text)
-
-echo "$APPRUNNER_ROLE_ARN"
-```
-
----
-
-## Step 5 – Create ECR Repository
-
-```bash
+# Create ECR repository with image scanning enabled
 aws ecr create-repository \
   --repository-name "$ECR_REPO" \
   --region "$REGION" \
-  --image-scanning-configuration scanOnPush=true 2>/dev/null || echo "ECR repository already exists"
+  --image-scanning-configuration scanOnPush=true 2>/dev/null || true
 
+# Get ECR repository URI
 ECR_URI=$(aws ecr describe-repositories \
   --repository-names "$ECR_REPO" \
   --region "$REGION" \
   --query 'repositories[0].repositoryUri' \
   --output text)
 
-echo "$ECR_URI"
+echo "ECR_URI=$ECR_URI"
 ```
 
 ---
 
-## Step 6 – Create Application Directory
+## Step 5 – Create Application Directory
 
 ```bash
+# Navigate to repository root and create application folder
 REPO_DIR=$(git rev-parse --show-toplevel)
 mkdir -p "$REPO_DIR/$APP_FOLDER"
 cd "$REPO_DIR/$APP_FOLDER"
 
-echo "$(pwd)"
+# Verify current directory
+pwd
 ```
 
 ---
 
-## Step 7 – Create Flask Application
+## Step 6 – Create Flask Application
 
 ```bash
 cat > app.py <<'EOF'
@@ -235,7 +217,7 @@ EOF
 
 ---
 
-## Step 8 – Create Dockerfile
+## Step 7 – Create Dockerfile
 
 ```bash
 cat > Dockerfile <<'EOF'
@@ -258,7 +240,7 @@ EOF
 
 ---
 
-## Step 9 – Create GitHub Actions Workflow
+## Step 8 – Create GitHub Actions Workflow
 
 ```bash
 mkdir -p .github/workflows
@@ -320,9 +302,10 @@ EOF
 
 ---
 
-## Step 10 – Create App Runner Access Role
+## Step 9 – Create App Runner Access Role
 
 ```bash
+# Create trust policy for App Runner to access ECR
 cat > apprunner-access-policy.json <<'EOF'
 {
   "Version": "2012-10-17",
@@ -334,35 +317,56 @@ cat > apprunner-access-policy.json <<'EOF'
 }
 EOF
 
+# Create IAM role for App Runner ECR access
 aws iam create-role \
   --role-name AppRunnerECRAccessRole \
   --assume-role-policy-document file://apprunner-access-policy.json
 
+# Attach AWS managed policy for ECR access
 aws iam attach-role-policy \
   --role-name AppRunnerECRAccessRole \
   --policy-arn arn:aws:iam::aws:policy/service-role/AWSAppRunnerServicePolicyForECRAccess
 
+# Get role ARN
 APPRUNNER_ACCESS_ROLE_ARN=$(aws iam get-role \
   --role-name AppRunnerECRAccessRole \
   --query 'Role.Arn' \
   --output text)
 
-echo "$APPRUNNER_ACCESS_ROLE_ARN"
+echo "AppRunner ECR Access Role ARN: $APPRUNNER_ACCESS_ROLE_ARN"
 ```
 
 ---
 
-## Step 11 – Commit Application to GitHub
+## Step 10 – Configure GitHub Secret
 
 ```bash
+echo "⚠️  Configure GitHub Secret before pushing code:"
+echo ""
+echo "1. Go to: https://github.com/$GITHUB_OWNER/$GITHUB_REPO/settings/secrets/actions"
+echo "2. Click: New repository secret"
+echo "3. Name: AWS_ROLE_ARN"
+echo "4. Value: $ROLE_ARN"
+echo ""
+echo "Press Enter after configuring the secret..."
+read
+```
+
+---
+
+## Step 11 – Commit and Push to GitHub
+
+```bash
+# Commit application code
 git add .
 git commit -m "Add GitHub Actions App Runner deployment"
+
+# Push to GitHub (this will trigger the workflow)
 git push origin main
 
-echo "⚠️  Before pushing, configure GitHub Secret:"
-echo "   Repository Settings → Secrets → Actions → New secret"
-echo "   Name: AWS_ROLE_ARN"
-echo "   Value: $ROLE_ARN"
+# Wait for GitHub Actions to build and push image
+echo "⏳ Waiting 60 seconds for GitHub Actions to complete..."
+sleep 60
 ```
 
 ---
@@ -370,8 +374,7 @@ echo "   Value: $ROLE_ARN"
 ## Step 12 – Create App Runner Service
 
 ```bash
-sleep 15
-
+# Create App Runner service pointing to ECR image
 aws apprunner create-service \
   --service-name "$APP_RUNNER_SERVICE" \
   --source-configuration "{
@@ -388,7 +391,7 @@ aws apprunner create-service \
   --instance-configuration "Cpu=1 vCPU,Memory=2 GB" \
   --region "$REGION"
 
-echo "App Runner service is being created..."
+# Service creation initiated (takes 2-4 minutes)
 ```
 
 ---
@@ -396,17 +399,19 @@ echo "App Runner service is being created..."
 ## Step 13 – Wait for Service Running
 
 ```bash
+# Wait for service to become RUNNING (2-4 minutes)
 aws apprunner wait service-running \
   --service-arn "arn:aws:apprunner:${REGION}:${ACCOUNT_ID}:service/${APP_RUNNER_SERVICE}" \
   --region "$REGION"
 
+# Get service URL
 SERVICE_URL=$(aws apprunner describe-service \
   --service-arn "arn:aws:apprunner:${REGION}:${ACCOUNT_ID}:service/${APP_RUNNER_SERVICE}" \
   --region "$REGION" \
   --query 'Service.ServiceUrl' \
   --output text)
 
-echo "https://$SERVICE_URL"
+echo "Service URL: https://$SERVICE_URL"
 ```
 
 ---
@@ -414,9 +419,14 @@ echo "https://$SERVICE_URL"
 ## Step 14 – Test Application
 
 ```bash
+# Test main endpoint
 curl -s "https://$SERVICE_URL" | jq .
 
+# Test health endpoint
 curl -s "https://$SERVICE_URL/health" | jq .
+
+# Open in browser
+"$BROWSER" "https://$SERVICE_URL" &
 ```
 
 ---
@@ -424,18 +434,28 @@ curl -s "https://$SERVICE_URL/health" | jq .
 ## Step 15 – Test GitHub Actions CI/CD
 
 ```bash
+# Update application to version 2.0
 REPO_DIR=$(git rev-parse --show-toplevel)
 cd "$REPO_DIR/$APP_FOLDER"
 
 sed -i "s/VERSION = os.getenv('APP_VERSION', '1.0')/VERSION = os.getenv('APP_VERSION', '2.0')/" app.py
 sed -i 's/ENV APP_VERSION=1.0/ENV APP_VERSION=2.0/' Dockerfile
 
+# Commit and push changes (triggers GitHub Actions)
 git add .
 git commit -m "Update to version 2.0"
 git push origin main
 
-echo "GitHub Actions workflow will build and push to ECR"
-echo "Then manually trigger App Runner deployment or enable auto-deploy"
+# GitHub Actions will build and push new image to ECR
+echo "⏳ Waiting 60 seconds for GitHub Actions workflow..."
+sleep 60
+
+# Manually trigger App Runner deployment
+aws apprunner start-deployment \
+  --service-arn "arn:aws:apprunner:${REGION}:${ACCOUNT_ID}:service/${APP_RUNNER_SERVICE}" \
+  --region "$REGION"
+
+echo "✅ Deployment triggered. Wait 2-3 minutes, then test version 2.0"
 ```
 
 ---
@@ -443,31 +463,44 @@ echo "Then manually trigger App Runner deployment or enable auto-deploy"
 ## Step 16 – Cleanup
 
 ```bash
+# Delete App Runner service
 aws apprunner delete-service \
   --service-arn "arn:aws:apprunner:${REGION}:${ACCOUNT_ID}:service/${APP_RUNNER_SERVICE}" \
   --region "$REGION"
 
+echo "⏳ Waiting 30 seconds for service deletion..."
+sleep 30
+
+# Delete ECR repository
 aws ecr delete-repository \
   --repository-name "$ECR_REPO" \
   --region "$REGION" \
   --force
 
-aws iam delete-role-policy --role-name GitHubActionsAppRunnerRole --policy-name GitHubActionsPermissions
+# Delete GitHub Actions IAM role
+aws iam delete-role-policy \
+  --role-name GitHubActionsAppRunnerRole \
+  --policy-name GitHubActionsPermissions
+
 aws iam delete-role --role-name GitHubActionsAppRunnerRole
 
-aws iam detach-role-policy --role-name AppRunnerECRAccessRole --policy-arn arn:aws:iam::aws:policy/service-role/AWSAppRunnerServicePolicyForECRAccess
+# Delete App Runner ECR access role
+aws iam detach-role-policy \
+  --role-name AppRunnerECRAccessRole \
+  --policy-arn arn:aws:iam::aws:policy/service-role/AWSAppRunnerServicePolicyForECRAccess
+
 aws iam delete-role --role-name AppRunnerECRAccessRole
 
-aws iam delete-role --role-name AppRunnerInstanceRole
-
+# Delete OIDC provider
 OIDC_ARN="arn:aws:iam::${ACCOUNT_ID}:oidc-provider/token.actions.githubusercontent.com"
-aws iam delete-open-id-connect-provider --open-id-connect-provider-arn "$OIDC_ARN" 2>/dev/null || true
+aws iam delete-open-id-connect-provider \
+  --open-id-connect-provider-arn "$OIDC_ARN" 2>/dev/null || true
 
+# Remove application directory from Git
 REPO_DIR=$(git rev-parse --show-toplevel)
 cd "$REPO_DIR"
-rm -rf "$APP_FOLDER"
 
-git rm -r "$APP_FOLDER"
+git rm -rf "$APP_FOLDER"
 git commit -m "Cleanup: Remove GitHub Actions app"
 git push origin main
 
