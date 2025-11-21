@@ -23,10 +23,9 @@ This lab demonstrates deploying containerized applications to Amazon EKS using H
 - kubectl installed (`kubectl version`)
 - Helm 3 installed (`helm version`)
 - Git installed (`git --version`)
-- Existing EKS cluster (from Session 6 Lab 6.D)
-- GitHub account with repository access
-- IAM permissions for ECR, EKS
+- IAM permissions for ECR, EKS, VPC, EC2
 - Region: ap-southeast-2
+- **Note:** This lab will create an EKS cluster (~15-20 minutes)
 
 ---
 
@@ -55,68 +54,76 @@ REGION="ap-southeast-2"
 export AWS_REGION="$REGION"
 
 # Application configuration
-APP_FOLDER="flask-k8s-app"
-APP_NAME="joke-api"
-CHART_NAME="joke-api-chart"
-ECR_REPO_NAME="joke-api-k8s"
-CLUSTER_NAME="my-eks-cluster"
-NAMESPACE="default"
+APP_FOLDER="flask-k8s-app"           # Local workspace directory
+APP_NAME="joke-api"                  # Helm release name
+CHART_NAME="joke-api-chart"          # Helm chart name
+ECR_REPO_NAME="joke-api-k8s"         # ECR repository name
+CLUSTER_NAME="my-eks-cluster"        # EKS cluster name (from Lab 6.D)
+NAMESPACE="default"                  # Kubernetes namespace
 
-# Get AWS account ID
+# Get AWS account ID for ECR URI
 ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
-
-# Build ECR URI
-ECR_URI="${ACCOUNT_ID}.dkr.ecr.${REGION}.amazonaws.com/${ECR_REPO_NAME}"
-
-# Display configuration
-echo "REGION=$REGION"
 echo "ACCOUNT_ID=$ACCOUNT_ID"
-echo "CLUSTER_NAME=$CLUSTER_NAME"
+
+# Build ECR repository URI
+ECR_URI="${ACCOUNT_ID}.dkr.ecr.${REGION}.amazonaws.com/${ECR_REPO_NAME}"
 echo "ECR_URI=$ECR_URI"
 ```
 
 ---
 
-## Step 2 – Verify EKS Cluster and Configure kubectl
+## Step 2 – Create EKS Cluster
 
 ```bash
-# Verify EKS cluster exists
+# Create EKS cluster using eksctl (takes ~15-20 minutes)
+# eksctl creates VPC, subnets, security groups, and managed node group automatically
+eksctl create cluster \
+  --name "$CLUSTER_NAME" \
+  --region "$REGION" \
+  --nodegroup-name workers \
+  --node-type t3.medium \
+  --nodes 2 \
+  --nodes-min 2 \
+  --nodes-max 3 \
+  --managed
+
+# eksctl automatically configures kubectl context
+# Verify cluster is ready
+kubectl get nodes
+```
+
+---
+
+## Step 3 – Verify EKS Cluster and Configure kubectl
+
+```bash
+# Verify EKS cluster exists and is active
 aws eks describe-cluster \
   --name "$CLUSTER_NAME" \
   --region "$REGION" \
   --query 'cluster.status' \
   --output text
 
-# Update kubeconfig to access EKS cluster
-# This configures kubectl to communicate with your EKS cluster
-aws eks update-kubeconfig \
-  --name "$CLUSTER_NAME" \
-  --region "$REGION"
-
-# Verify kubectl can access the cluster
+# Verify kubectl connection to cluster
 kubectl get nodes
-
-# Expected output: List of worker nodes in READY status
 ```
 
 ---
 
-## Step 3 – Create Application Directory
+## Step 19 – Create Application Directory
 
 ```bash
-# Create application directory in current location
-mkdir -p "$APP_FOLDER"
-cd "$APP_FOLDER"
-
+# Create and navigate to application workspace
+mkdir -p "$APP_FOLDER" && cd "$APP_FOLDER"
 echo "Working directory: $(pwd)"
 ```
 
 ---
 
-## Step 4 – Create Flask Application
+## Step 19 – Create Flask Application
 
 ```bash
-# Create Flask joke API
+# Create Flask API with three endpoints: /, /joke, /health
 cat > app.py <<'EOF'
 from flask import Flask, jsonify
 import random
@@ -156,7 +163,7 @@ EOF
 
 ---
 
-## Step 5 – Create Requirements and Dockerfile
+## Step 19 – Create Requirements and Dockerfile
 
 ```bash
 # Python dependencies
@@ -186,7 +193,7 @@ EOF
 
 ---
 
-## Step 6 – Create Helm Chart Structure
+## Step 19 – Create Helm Chart Structure
 
 ```bash
 # Create Helm chart directory structure
@@ -297,159 +304,131 @@ EOF
 
 ---
 
-## Step 7 – Create ECR Repository
+## Step 19 – Create ECR Repository
 
 ```bash
-# Create ECR repository for Docker images
+# Create ECR repository to store Docker images
 aws ecr create-repository \
   --repository-name "$ECR_REPO_NAME" \
   --region "$REGION"
-
-# Display repository URI (already set in Step 1)
 echo "ECR_URI=$ECR_URI"
 ```
 
 ---
 
-## Step 8 – Build Docker Image Locally
+## Step 19 – Build Docker Image Locally
 
 ```bash
-# Build Docker image with ECR URI and latest tag
-# -t: Tag the image
+# Build Docker image and tag with ECR URI
 docker build -t "${ECR_URI}:latest" .
 
-# Verify image was built successfully
+# Verify image created successfully
 docker images | grep "$ECR_REPO_NAME"
 ```
 
 ---
 
-## Step 9 – Test Docker Image Locally (Optional)
+## Step 19 – Test Docker Image Locally (Optional)
 
 ```bash
-# Run container locally to test
-# -d: Run in detached mode
-# -p: Map container port 8000 to host port 8080
-# --name: Give container a friendly name
+# Run container locally (maps container port 8000 → host port 8080)
 docker run -d -p 8080:8000 --name joke-api-test "${ECR_URI}:latest"
-
-# Wait for container to start
 sleep 3
 
-# Test endpoints
+# Test endpoints with curl
 curl http://localhost:8080/              # Service info
-curl http://localhost:8080/joke          # Get a joke
+curl http://localhost:8080/joke          # Get random joke
 curl http://localhost:8080/health        # Health check
 
-# Open in browser to test endpoints
+# Test endpoints in browser
 "$BROWSER" "http://localhost:8080/" 
 "$BROWSER" "http://localhost:8080/joke" 
 "$BROWSER" "http://localhost:8080/health" 
 
-# Stop and remove test container
-docker stop joke-api-test
-docker rm joke-api-test
+# Clean up test container
+docker stop joke-api-test && docker rm joke-api-test
 ```
 
 ---
 
-## Step 10 – Login to ECR and Push Image
+## Step 19 – Login to ECR and Push Image
 
 ```bash
-# Authenticate Docker to ECR
-# This retrieves temporary authentication token from ECR
+# Authenticate Docker client to ECR
 aws ecr get-login-password --region "$REGION" | \
   docker login --username AWS --password-stdin \
   "${ACCOUNT_ID}.dkr.ecr.${REGION}.amazonaws.com"
 
-# Push Docker image to ECR
-# This uploads all layers of the image to ECR
+# Push Docker image to ECR repository
 docker push "${ECR_URI}:latest"
 
-# Verify image in ECR
+# Verify image uploaded successfully
 aws ecr describe-images \
   --repository-name "$ECR_REPO_NAME" \
-  --region "$REGION"
+  --region "$REGION" \
+  --query 'imageDetails[0].[imageTags[0],imagePushedAt]' \
+  --output table
 ```
 
 ---
 
-## Step 11 – Validate Helm Chart
+## Step 19 – Validate Helm Chart
 
 ```bash
-# Check Helm chart syntax and values
-# This validates the chart structure and templates
+# Validate Helm chart syntax and structure
 helm lint "./helm/${CHART_NAME}"
 
-# Dry-run to see what Kubernetes resources will be created
-# --dry-run: Simulate installation without applying
-# --debug: Show all generated manifests
+# Preview Kubernetes resources that will be created (dry-run)
 helm install "${APP_NAME}" "./helm/${CHART_NAME}" \
   --namespace "$NAMESPACE" \
-  --dry-run --debug
-
-# Expected: YAML output showing Deployment and Service resources
+  --dry-run --debug | head -100
 ```
 
 ---
 
-## Step 12 – Deploy to EKS with Helm
+## Step 19 – Deploy to EKS with Helm
 
 ```bash
-# Deploy application to EKS using Helm
-# upgrade --install: Install if not exists, upgrade if exists
-# --wait: Wait for all resources to be ready
-# --timeout: Maximum time to wait
+# Deploy application to EKS (installs if new, upgrades if exists)
 helm upgrade --install "${APP_NAME}" "./helm/${CHART_NAME}" \
   --namespace "$NAMESPACE" \
   --wait \
   --timeout 5m
 
-# Verify deployment
+# Verify pods are running (should see 2 replicas)
 kubectl get pods -n "$NAMESPACE" -l app="$CHART_NAME"
-
-# Expected: 2 pods in Running status (replicaCount: 2)
 ```
 
 ---
 
-## Step 13 – Check Deployment Status
+## Step 19 – Check Deployment Status
 
 ```bash
-# View deployment details
-kubectl get deployment -n "$NAMESPACE" "$CHART_NAME"
+# View all resources (deployment, pods, service)
+kubectl get all -n "$NAMESPACE" -l app="$CHART_NAME"
 
-# View pod details
-kubectl get pods -n "$NAMESPACE" -l app="$CHART_NAME" -o wide
-
-# View service and get LoadBalancer URL
-kubectl get svc -n "$NAMESPACE" "$CHART_NAME"
-
-# Get detailed service info including LoadBalancer hostname
+# View service details including LoadBalancer hostname
 kubectl describe svc -n "$NAMESPACE" "$CHART_NAME"
 
-# Wait 2-3 minutes for AWS to provision the LoadBalancer
+# Note: Wait 2-3 minutes for AWS to provision the LoadBalancer
 ```
 
 ---
 
-## Step 14 – Get LoadBalancer URL and Test Application
+## Step 19 – Get LoadBalancer URL and Test Application
 
 ```bash
-# Wait for LoadBalancer to be provisioned (2-3 minutes)
-# Get the LoadBalancer hostname
+# Get LoadBalancer hostname (wait 2-3 minutes if not ready)
 LB_HOSTNAME=$(kubectl get svc -n "$NAMESPACE" "$CHART_NAME" \
   -o jsonpath='{.status.loadBalancer.ingress[0].hostname}')
-
 echo "LoadBalancer URL: http://$LB_HOSTNAME"
 
-# Test application endpoints
-echo "Testing application..."
+# Test application endpoints with curl
 curl -s "http://$LB_HOSTNAME/" | jq .              # Service info
-curl -s "http://$LB_HOSTNAME/joke" | jq .          # Get a joke
+curl -s "http://$LB_HOSTNAME/joke" | jq .          # Random joke
 curl -s "http://$LB_HOSTNAME/health" | jq .        # Health check
 
-# Open application in browser
+# Test application in browser
 "$BROWSER" "http://$LB_HOSTNAME/" 
 "$BROWSER" "http://$LB_HOSTNAME/joke" 
 "$BROWSER" "http://$LB_HOSTNAME/health" 
@@ -457,90 +436,78 @@ curl -s "http://$LB_HOSTNAME/health" | jq .        # Health check
 
 ---
 
-## Step 15 – Test Rolling Update
+## Step 19 – Test Rolling Update
 
 ```bash
-# Update application version to test rolling update
-# Modify the values.yaml to change APP_VERSION
+# Update APP_VERSION in values.yaml (1.0.0 → 2.0.0)
 sed -i 's/value: "1.0.0"/value: "2.0.0"/' "helm/${CHART_NAME}/values.yaml"
 
-# Perform rolling update with Helm
-# Helm will update the deployment and Kubernetes will perform rolling update
+# Perform rolling update (Kubernetes replaces pods gradually)
 helm upgrade "${APP_NAME}" "./helm/${CHART_NAME}" \
   --namespace "$NAMESPACE" \
   --wait \
   --timeout 5m
 
-# Watch the rolling update in real-time
-# This shows pods being terminated and new ones starting
+# Watch rolling update progress
 kubectl rollout status deployment/"$CHART_NAME" -n "$NAMESPACE"
 
-# Verify new version is deployed
-kubectl get pods -n "$NAMESPACE" -l app="$CHART_NAME"
-
-# Test updated application
-curl -s "http://$LB_HOSTNAME/" | jq .
-
-# Expected: version should show "2.0.0"
+# Verify new version deployed (should show "2.0.0")
+curl -s "http://$LB_HOSTNAME/" | jq .version
 ```
 
 ---
 
-## Step 16 – View Application Logs
+## Step 19 – View Application Logs
 
 ```bash
-# Get pod names
-POD_NAMES=$(kubectl get pods -n "$NAMESPACE" -l app="$CHART_NAME" -o jsonpath='{.items[*].metadata.name}')
+# Get first pod name
+FIRST_POD=$(kubectl get pods -n "$NAMESPACE" -l app="$CHART_NAME" \
+  -o jsonpath='{.items[0].metadata.name}')
 
-# View logs from first pod
-FIRST_POD=$(echo $POD_NAMES | awk '{print $1}')
-kubectl logs -n "$NAMESPACE" "$FIRST_POD"
+# View pod logs
+kubectl logs -n "$NAMESPACE" "$FIRST_POD" --tail=50
 
-# Stream logs in real-time
+# Stream logs in real-time (Ctrl+C to stop)
 kubectl logs -n "$NAMESPACE" "$FIRST_POD" -f
-
-# Press Ctrl+C to stop streaming
 ```
 
 ---
 
-## Step 17 – View Helm Release Information
+## Step 19 – View Helm Release Information
 
 ```bash
-# List all Helm releases in namespace
+# List all Helm releases
 helm list -n "$NAMESPACE"
 
-# Get release history
+# View deployment history (shows all revisions)
 helm history "${APP_NAME}" -n "$NAMESPACE"
 
-# Get release values
+# View current values used for deployment
 helm get values "${APP_NAME}" -n "$NAMESPACE"
-
-# Get all Kubernetes manifests for the release
-helm get manifest "${APP_NAME}" -n "$NAMESPACE"
 ```
 
 ---
 
-## Step 18 – Cleanup
+## Step 19 – Cleanup
 
 ```bash
-# Uninstall Helm release from EKS
-# This removes all Kubernetes resources (Deployment, Service, Pods)
+# Uninstall Helm release (removes all Kubernetes resources)
 helm uninstall "$APP_NAME" -n "$NAMESPACE"
 
-# Verify resources are deleted
+# Verify resources deleted
 kubectl get all -n "$NAMESPACE" -l app="$CHART_NAME"
 
-# Delete ECR repository with all images
+# Delete ECR repository and all images
 aws ecr delete-repository \
   --repository-name "$ECR_REPO_NAME" \
   --force \
   --region "$REGION"
 
-# Remove application directory
-cd ..
-rm -rf "$APP_FOLDER"
+# Delete EKS cluster (removes all nodes, VPC, and associated resources)
+eksctl delete cluster --name "$CLUSTER_NAME" --region "$REGION"
+
+# Remove local application directory
+cd .. && rm -rf "$APP_FOLDER"
 
 echo "✅ Cleanup complete"
 ```
