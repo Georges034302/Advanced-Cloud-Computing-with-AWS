@@ -645,6 +645,12 @@ echo "REPORT_URL=$REPORT_URL"
 ## Step 18 – Test Applications
 
 ```bash
+# Verify App Runner services before testing
+aws apprunner list-services \
+  --region ap-southeast-2 \
+  --query 'ServiceSummaryList[?ServiceName==`student-api-service` || ServiceName==`report-api-service`].[ServiceName,Status]' \
+  --output table
+
 # Test Student API endpoints
 echo "Testing Student API:"
 curl -s "https://$STUDENT_URL/" | jq .                # Health check
@@ -706,6 +712,16 @@ aws iam detach-role-policy \
   --policy-arn arn:aws:iam::aws:policy/AWSAppRunnerServicePolicyForECRAccess
 
 aws iam delete-role --role-name AppRunnerECRAccessRole
+
+# Remove local Docker images
+# List all images related to the APIs
+docker images | grep -E "student-api|report-api"
+
+# Remove all student-api and report-api images (force delete)
+docker rmi -f $(docker images --filter=reference='*student-api*' --filter=reference='*report-api*' -q)
+
+# Verify images are removed
+docker images | grep -E "student-api|report-api" || echo "All API Docker images removed"
 
 # Remove application directories and files from Git
 cd "$REPO_DIR"
