@@ -341,6 +341,11 @@ curl http://localhost:8080/              # Service info
 curl http://localhost:8080/joke          # Get a joke
 curl http://localhost:8080/health        # Health check
 
+# Open in browser to test endpoints
+"$BROWSER" "http://localhost:8080/" 
+"$BROWSER" "http://localhost:8080/joke" 
+"$BROWSER" "http://localhost:8080/health" 
+
 # Stop and remove test container
 docker stop joke-api-test
 docker rm joke-api-test
