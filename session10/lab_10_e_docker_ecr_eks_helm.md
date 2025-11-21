@@ -110,7 +110,7 @@ kubectl get nodes
 
 ---
 
-## Step 19 – Create Application Directory
+## Step 4 – Create Application Directory
 
 ```bash
 # Create and navigate to application workspace
@@ -120,7 +120,7 @@ echo "Working directory: $(pwd)"
 
 ---
 
-## Step 19 – Create Flask Application
+## Step 5 – Create Flask Application
 
 ```bash
 # Create Flask API with three endpoints: /, /joke, /health
@@ -163,7 +163,7 @@ EOF
 
 ---
 
-## Step 19 – Create Requirements and Dockerfile
+## Step 6 – Create Requirements and Dockerfile
 
 ```bash
 # Python dependencies
@@ -193,7 +193,7 @@ EOF
 
 ---
 
-## Step 19 – Create Helm Chart Structure
+## Step 7 – Create Helm Chart Structure
 
 ```bash
 # Create Helm chart directory structure
@@ -304,7 +304,7 @@ EOF
 
 ---
 
-## Step 19 – Create ECR Repository
+## Step 8 – Create ECR Repository
 
 ```bash
 # Create ECR repository to store Docker images
@@ -316,7 +316,7 @@ echo "ECR_URI=$ECR_URI"
 
 ---
 
-## Step 19 – Build Docker Image Locally
+## Step 9 – Build Docker Image Locally
 
 ```bash
 # Build Docker image and tag with ECR URI
@@ -328,7 +328,7 @@ docker images | grep "$ECR_REPO_NAME"
 
 ---
 
-## Step 19 – Test Docker Image Locally (Optional)
+## Step 10 – Test Docker Image Locally (Optional)
 
 ```bash
 # Run container locally (maps container port 8000 → host port 8080)
@@ -351,7 +351,7 @@ docker stop joke-api-test && docker rm joke-api-test
 
 ---
 
-## Step 19 – Login to ECR and Push Image
+## Step 11 – Login to ECR and Push Image
 
 ```bash
 # Authenticate Docker client to ECR
@@ -372,7 +372,7 @@ aws ecr describe-images \
 
 ---
 
-## Step 19 – Validate Helm Chart
+## Step 12 – Validate Helm Chart
 
 ```bash
 # Validate Helm chart syntax and structure
@@ -386,7 +386,7 @@ helm install "${APP_NAME}" "./helm/${CHART_NAME}" \
 
 ---
 
-## Step 19 – Deploy to EKS with Helm
+## Step 13 – Deploy to EKS with Helm
 
 ```bash
 # Deploy application to EKS (installs if new, upgrades if exists)
@@ -401,7 +401,7 @@ kubectl get pods -n "$NAMESPACE" -l app="$CHART_NAME"
 
 ---
 
-## Step 19 – Check Deployment Status
+## Step 14 – Check Deployment Status
 
 ```bash
 # View all resources (deployment, pods, service)
@@ -415,7 +415,7 @@ kubectl describe svc -n "$NAMESPACE" "$CHART_NAME"
 
 ---
 
-## Step 19 – Get LoadBalancer URL and Test Application
+## Step 15 – Get LoadBalancer URL and Test Application
 
 ```bash
 # Get LoadBalancer hostname (wait 2-3 minutes if not ready)
@@ -436,7 +436,7 @@ curl -s "http://$LB_HOSTNAME/health" | jq .        # Health check
 
 ---
 
-## Step 19 – Test Rolling Update
+## Step 16 – Test Rolling Update
 
 ```bash
 # Update APP_VERSION in values.yaml (1.0.0 → 2.0.0)
@@ -457,7 +457,7 @@ curl -s "http://$LB_HOSTNAME/" | jq .version
 
 ---
 
-## Step 19 – View Application Logs
+## Step 17 – View Application Logs
 
 ```bash
 # Get first pod name
@@ -473,7 +473,7 @@ kubectl logs -n "$NAMESPACE" "$FIRST_POD" -f
 
 ---
 
-## Step 19 – View Helm Release Information
+## Step 18 – View Helm Release Information
 
 ```bash
 # List all Helm releases
