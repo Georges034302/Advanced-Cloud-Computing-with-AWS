@@ -783,9 +783,12 @@ aws s3api delete-bucket \
   --bucket "$SAM_BUCKET" \
   --region "$REGION"
 
-# Remove application and workflow directories
+# Remove application directory, workflow directory, and policy file
 cd "$REPO_DIR"
-rm -rf "$APP_FOLDER" .github/workflows/deploy-sam.yml
+rm -rf "$APP_FOLDER"
+rm -rf .github
+rm -f github-actions-policy.json
+
 git add -A
 git commit -m "Cleanup: Remove SAM serverless app and GitHub Actions workflow"
 git push origin main
