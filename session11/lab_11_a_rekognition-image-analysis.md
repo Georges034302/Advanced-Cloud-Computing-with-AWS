@@ -3,8 +3,6 @@
 ## Overview
 This lab introduces Amazon Rekognition for image analysis using machine learning without requiring ML expertise. You'll detect faces, analyze facial attributes, identify objects and scenes, detect text in images, and compare faces across different images.
 
-**💰 Cost**: FREE TIER (5,000 images/month for 12 months)
-
 ---
 
 ## Objectives
@@ -45,22 +43,20 @@ Analysis Results (JSON)
 ## Step 1 – Set Variables and Create S3 Bucket
 
 ```bash
-# Set region
+# Set AWS region for all operations
 REGION="ap-southeast-2"
 export AWS_REGION="$REGION"
-echo "REGION=$REGION"
 
-# Get account ID
+# Get AWS account ID for unique bucket naming
 ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
 
-# Set bucket name
+# Create unique S3 bucket name
 BUCKET_NAME="rekognition-demo-${ACCOUNT_ID}"
-echo "BUCKET_NAME=$BUCKET_NAME"
 
-# Create S3 bucket
-echo ""
-echo "Creating S3 bucket for images..."
+echo "Region: $REGION"
+echo "Bucket: $BUCKET_NAME"
 
+# Create S3 bucket for storing images (region-specific configuration)
 if [ "$REGION" = "us-east-1" ]; then
     aws s3api create-bucket \
       --bucket "$BUCKET_NAME" \
@@ -71,8 +67,6 @@ else
       --region "$REGION" \
       --create-bucket-configuration LocationConstraint="$REGION"
 fi
-
-echo "✅ S3 bucket created: $BUCKET_NAME"
 ```
 
 ---
@@ -80,13 +74,12 @@ echo "✅ S3 bucket created: $BUCKET_NAME"
 ## Step 2 – Create Test Images Directory
 
 ```bash
-echo ""
-echo "Creating test images directory..."
+# Get repository root directory
+REPO_DIR=$(git rev-parse --show-toplevel)
 
-mkdir -p /tmp/rekognition-images
-cd /tmp/rekognition-images
-
-echo "✅ Directory created: $(pwd)"
+# Create images directory in repository
+mkdir -p "$REPO_DIR/rekognition-images"
+cd "$REPO_DIR/rekognition-images"
 ```
 
 ---
@@ -94,18 +87,14 @@ echo "✅ Directory created: $(pwd)"
 ## Step 3 – Download Sample Images
 
 ```bash
-echo ""
-echo "Downloading sample images for testing..."
-
-# Download sample images (free stock photos)
+# Download sample images from Pexels (free stock photos)
 curl -s -o person1.jpg "https://images.pexels.com/photos/220453/pexels-photo-220453.jpeg?w=500"
 curl -s -o person2.jpg "https://images.pexels.com/photos/774909/pexels-photo-774909.jpeg?w=500"
-curl -s -o group.jpg "https://images.pexels.com/photos/1270171/pexels-photo-1270171.jpeg?w=500"
-curl -s -o street.jpg "https://images.pexels.com/photos/2253879/pexels-photo-2253879.jpeg?w=500"
+curl -s -o group.jpg "https://images.pexels.com/photos/2253879/pexels-photo-2253879.jpeg?w=500"
+curl -s -o street.jpg "https://images.pexels.com/photos/1270171/pexels-photo-1270171.jpeg?w=500"
 curl -s -o text-sign.jpg "https://images.pexels.com/photos/262470/pexels-photo-262470.jpeg?w=500"
 
-echo "✅ Sample images downloaded"
-echo ""
+# List downloaded images
 ls -lh *.jpg
 ```
 
@@ -114,21 +103,14 @@ ls -lh *.jpg
 ## Step 4 – Upload Images to S3
 
 ```bash
-echo ""
-echo "Uploading images to S3..."
-
-# Upload all images
+# Upload all JPG images to S3 bucket
 for img in *.jpg; do
-    aws s3 cp "$img" s3://"$BUCKET_NAME"/ \
-      --region "$REGION"
+    aws s3 cp "$img" s3://"$BUCKET_NAME"/ --region "$REGION"
     echo "Uploaded: $img"
 done
 
-echo ""
-echo "✅ All images uploaded to S3"
-
-# List uploaded images
-aws s3 ls s3://"$BUCKET_NAME"/ --region "$REGION"
+# Verify uploaded images in S3
+aws s3 ls s3://"$BUCKET_NAME"/  --region "$REGION"
 ```
 
 ---
@@ -140,9 +122,8 @@ echo ""
 echo "================================================"
 echo "FACE DETECTION - Analyzing person1.jpg"
 echo "================================================"
-echo ""
 
-# Detect faces with attributes
+# Detect faces and analyze attributes (age, gender, emotions, smile, eyes)
 aws rekognition detect-faces \
   --image "{\"S3Object\":{\"Bucket\":\"${BUCKET_NAME}\",\"Name\":\"person1.jpg\"}}" \
   --attributes "ALL" \
@@ -156,9 +137,6 @@ aws rekognition detect-faces \
     Confidence:Confidence
   }' \
   --output table
-
-echo ""
-echo "✅ Face attributes detected"
 ```
 
 ---
@@ -169,15 +147,13 @@ echo "✅ Face attributes detected"
 echo ""
 echo "Analyzing emotions in detail..."
 
+# Detect all emotions with confidence scores (happy, sad, angry, etc.)
 aws rekognition detect-faces \
   --image "{\"S3Object\":{\"Bucket\":\"${BUCKET_NAME}\",\"Name\":\"person1.jpg\"}}" \
   --attributes "ALL" \
   --region "$REGION" \
   --query 'FaceDetails[0].Emotions[*].{Emotion:Type,Confidence:Confidence}' \
   --output table
-
-echo ""
-echo "✅ Emotion analysis complete"
 ```
 
 ---
@@ -189,19 +165,18 @@ echo ""
 echo "================================================"
 echo "MULTIPLE FACE DETECTION - Analyzing group.jpg"
 echo "================================================"
-echo ""
 
-# Detect all faces in group photo
+# Count total faces detected in group photo
 FACE_COUNT=$(aws rekognition detect-faces \
   --image "{\"S3Object\":{\"Bucket\":\"${BUCKET_NAME}\",\"Name\":\"group.jpg\"}}" \
   --region "$REGION" \
   --query 'length(FaceDetails)' \
   --output text)
 
-echo "Number of faces detected: $FACE_COUNT"
+echo "Faces detected: $FACE_COUNT"
 echo ""
 
-# Show details for each face
+# Analyze attributes for each detected face
 aws rekognition detect-faces \
   --image "{\"S3Object\":{\"Bucket\":\"${BUCKET_NAME}\",\"Name\":\"group.jpg\"}}" \
   --attributes "ALL" \
@@ -213,9 +188,6 @@ aws rekognition detect-faces \
     Confidence:Confidence
   }' \
   --output table
-
-echo ""
-echo "✅ Multiple faces analyzed"
 ```
 
 ---
@@ -227,9 +199,8 @@ echo ""
 echo "================================================"
 echo "LABEL DETECTION - Analyzing street.jpg"
 echo "================================================"
-echo ""
 
-# Detect labels (objects, scenes, activities)
+# Detect objects, scenes, and activities with confidence threshold
 aws rekognition detect-labels \
   --image "{\"S3Object\":{\"Bucket\":\"${BUCKET_NAME}\",\"Name\":\"street.jpg\"}}" \
   --max-labels 10 \
@@ -237,9 +208,6 @@ aws rekognition detect-labels \
   --region "$REGION" \
   --query 'Labels[*].{Label:Name,Confidence:Confidence,Parents:Parents[*].Name}' \
   --output table
-
-echo ""
-echo "✅ Labels detected with confidence scores"
 ```
 
 ---
@@ -251,17 +219,13 @@ echo ""
 echo "================================================"
 echo "TEXT DETECTION - Analyzing text-sign.jpg"
 echo "================================================"
-echo ""
 
-# Detect text in image
+# Extract text from image using OCR (Optical Character Recognition)
 aws rekognition detect-text \
   --image "{\"S3Object\":{\"Bucket\":\"${BUCKET_NAME}\",\"Name\":\"text-sign.jpg\"}}" \
   --region "$REGION" \
   --query 'TextDetections[?Type==`LINE`].{Text:DetectedText,Confidence:Confidence}' \
   --output table
-
-echo ""
-echo "✅ Text extracted from image (OCR)"
 ```
 
 ---
@@ -273,9 +237,8 @@ echo ""
 echo "================================================"
 echo "FACE COMPARISON - Comparing person1.jpg vs person2.jpg"
 echo "================================================"
-echo ""
 
-# Compare two faces
+# Compare source face against target face with similarity threshold
 aws rekognition compare-faces \
   --source-image "{\"S3Object\":{\"Bucket\":\"${BUCKET_NAME}\",\"Name\":\"person1.jpg\"}}" \
   --target-image "{\"S3Object\":{\"Bucket\":\"${BUCKET_NAME}\",\"Name\":\"person2.jpg\"}}" \
@@ -290,8 +253,6 @@ aws rekognition compare-faces \
 
 echo ""
 echo "Similarity threshold: 80% (faces above this are considered a match)"
-echo ""
-echo "✅ Face comparison complete"
 ```
 
 ---
@@ -303,20 +264,18 @@ echo ""
 echo "================================================"
 echo "CREATING FACE COLLECTION"
 echo "================================================"
+
+# Create collection ID for storing indexed faces
+COLLECTION_ID="employees-collection"
+echo "Collection ID: $COLLECTION_ID"
 echo ""
 
-COLLECTION_ID="employees-collection"
-echo "COLLECTION_ID=$COLLECTION_ID"
-
-# Create collection
+# Create face collection (searchable database of faces)
 aws rekognition create-collection \
   --collection-id "$COLLECTION_ID" \
   --region "$REGION"
 
-echo ""
-echo "✅ Face collection created"
-
-# List collections
+# List all collections in current region
 aws rekognition list-collections \
   --region "$REGION" \
   --query 'CollectionIds' \
@@ -331,7 +290,7 @@ aws rekognition list-collections \
 echo ""
 echo "Indexing faces from person1.jpg into collection..."
 
-# Index face with external ID
+# Index face into collection with external ID for identification
 FACE_ID=$(aws rekognition index-faces \
   --collection-id "$COLLECTION_ID" \
   --image "{\"S3Object\":{\"Bucket\":\"${BUCKET_NAME}\",\"Name\":\"person1.jpg\"}}" \
@@ -341,11 +300,10 @@ FACE_ID=$(aws rekognition index-faces \
   --query 'FaceRecords[0].Face.FaceId' \
   --output text)
 
-echo "FACE_ID=$FACE_ID"
+echo "Face ID: $FACE_ID"
 echo ""
-echo "✅ Face indexed in collection"
 
-# List faces in collection
+# List all indexed faces in collection
 aws rekognition list-faces \
   --collection-id "$COLLECTION_ID" \
   --region "$REGION" \
@@ -361,7 +319,7 @@ aws rekognition list-faces \
 echo ""
 echo "Searching for matching face in collection using person2.jpg..."
 
-# Search for face by image
+# Search collection for matching faces with similarity threshold
 aws rekognition search-faces-by-image \
   --collection-id "$COLLECTION_ID" \
   --image "{\"S3Object\":{\"Bucket\":\"${BUCKET_NAME}\",\"Name\":\"person2.jpg\"}}" \
@@ -373,9 +331,6 @@ aws rekognition search-faces-by-image \
     Matches:FaceMatches[*].{Similarity:Similarity,FaceId:Face.FaceId,ExternalId:Face.ExternalImageId}
   }' \
   --output json | jq .
-
-echo ""
-echo "✅ Face search complete"
 ```
 
 ---
@@ -410,16 +365,13 @@ echo "(Empty result means no inappropriate content detected)"
 echo ""
 echo "Getting image properties and quality..."
 
-# Detect image quality
+# Analyze image quality metrics (brightness and sharpness)
 aws rekognition detect-faces \
   --image "{\"S3Object\":{\"Bucket\":\"${BUCKET_NAME}\",\"Name\":\"person1.jpg\"}}" \
   --attributes "ALL" \
   --region "$REGION" \
   --query 'FaceDetails[0].Quality.{Brightness:Brightness,Sharpness:Sharpness}' \
   --output table
-
-echo ""
-echo "✅ Image quality metrics retrieved"
 ```
 
 ---
@@ -429,6 +381,9 @@ echo "✅ Image quality metrics retrieved"
 ```bash
 echo ""
 echo "Creating Python script for batch image analysis..."
+
+# Create Python script in images directory
+cd "$REPO_DIR/rekognition-images"
 
 cat > batch_analyze.py <<'EOF'
 import boto3
@@ -483,7 +438,6 @@ if __name__ == '__main__':
         analyze_image(bucket, image)
 EOF
 
-echo "✅ Python script created: batch_analyze.py"
 ```
 
 ---
@@ -493,6 +447,10 @@ echo "✅ Python script created: batch_analyze.py"
 ```bash
 echo ""
 echo "Running batch analysis on all images..."
+echo ""
+
+# Navigate to images directory and run Python script
+cd "$REPO_DIR/rekognition-images"
 
 python3 batch_analyze.py "$BUCKET_NAME" \
   person1.jpg \
@@ -500,50 +458,24 @@ python3 batch_analyze.py "$BUCKET_NAME" \
   group.jpg \
   street.jpg \
   text-sign.jpg
-
-echo ""
-echo "✅ Batch analysis complete"
 ```
 
 ---
 
-## Step 18 – Get Rekognition Usage Statistics
-
-```bash
-echo ""
-echo "Checking Rekognition API usage..."
-
-echo ""
-echo "Note: Usage statistics are available in AWS Cost Explorer"
-echo "Free tier includes 5,000 images/month for 12 months"
-echo ""
-echo "Services used in this lab:"
-echo "  - DetectFaces: Face detection and attributes"
-echo "  - DetectLabels: Object and scene detection"
-echo "  - DetectText: Text extraction (OCR)"
-echo "  - CompareFaces: Face comparison"
-echo "  - IndexFaces: Store faces in collection"
-echo "  - SearchFacesByImage: Search for faces"
-echo "  - DetectModerationLabels: Content moderation"
-```
-
----
-
-## Step 19 – Cleanup
+## Step 18 – Cleanup
 
 ```bash
 echo ""
 echo "Cleaning up resources..."
 
-# Delete all faces from collection
-echo "Deleting faces from collection..."
-
+# Get all face IDs from collection
 FACE_IDS=$(aws rekognition list-faces \
   --collection-id "$COLLECTION_ID" \
   --region "$REGION" \
   --query 'Faces[*].FaceId' \
   --output text)
 
+# Delete each face from collection
 if [ ! -z "$FACE_IDS" ]; then
     for face_id in $FACE_IDS; do
         aws rekognition delete-faces \
@@ -551,23 +483,25 @@ if [ ! -z "$FACE_IDS" ]; then
           --face-ids "$face_id" \
           --region "$REGION" >/dev/null 2>&1
     done
-    echo "✅ Faces deleted from collection"
 fi
 
-# Delete collection
+# Delete face collection
 aws rekognition delete-collection \
   --collection-id "$COLLECTION_ID" \
   --region "$REGION"
 
-echo "✅ Collection deleted"
-
-# Empty and delete S3 bucket
+# Delete all images from S3 bucket
 aws s3 rm s3://"$BUCKET_NAME" --recursive --region "$REGION"
+
+# Delete S3 bucket
 aws s3api delete-bucket --bucket "$BUCKET_NAME" --region "$REGION"
 
-echo "✅ S3 bucket deleted"
+# Remove local images directory and Python script
+cd "$REPO_DIR"
+rm -rf rekognition-images
+
 echo ""
-echo "All resources cleaned up!"
+echo "✅ Lab 11.A cleanup complete!"
 ```
 
 ---
