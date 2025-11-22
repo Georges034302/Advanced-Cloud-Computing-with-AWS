@@ -583,7 +583,7 @@ aws iam create-role \
   --role-name ComprehendBatchRole \
   --assume-role-policy-document file://comprehend-trust-policy.json
 
-# Create permissions policy
+# Create permissions policy with separate statements for object and bucket operations
 cat > comprehend-permissions.json <<EOF
 {
   "Version": "2012-10-17",
@@ -591,13 +591,29 @@ cat > comprehend-permissions.json <<EOF
     {
       "Effect": "Allow",
       "Action": [
-        "s3:GetObject",
-        "s3:PutObject",
-        "s3:ListBucket"
+        "s3:GetObject"
       ],
       "Resource": [
-        "arn:aws:s3:::${BUCKET_NAME}",
         "arn:aws:s3:::${BUCKET_NAME}/*"
+      ]
+    },
+    {
+      "Effect": "Allow",
+      "Action": [
+        "s3:PutObject"
+      ],
+      "Resource": [
+        "arn:aws:s3:::${BUCKET_NAME}/*"
+      ]
+    },
+    {
+      "Effect": "Allow",
+      "Action": [
+        "s3:ListBucket",
+        "s3:GetBucketLocation"
+      ],
+      "Resource": [
+        "arn:aws:s3:::${BUCKET_NAME}"
       ]
     }
   ]
@@ -611,7 +627,8 @@ aws iam put-role-policy \
   --policy-document file://comprehend-permissions.json
 
 echo "✅ IAM role created"
-sleep 10
+echo "Waiting for IAM propagation..."
+sleep 30
 
 # Get role ARN
 ROLE_ARN=$(aws iam get-role \
@@ -624,7 +641,7 @@ echo "Role ARN: $ROLE_ARN"
 
 ---
 
-## Step 16 – Start Batch Sentiment Analysis Job
+## Step 16 – Start Batch Sentiment Analysis Job (~ 3-5 minutes)
 
 ```bash
 echo ""
@@ -633,29 +650,36 @@ echo "STARTING BATCH SENTIMENT ANALYSIS JOB"
 echo "================================================"
 echo ""
 
-# Start batch job
-JOB_ID=$(aws comprehend start-sentiment-detection-job \
+# Start batch job and capture full response
+JOB_RESPONSE=$(aws comprehend start-sentiment-detection-job \
   --input-data-config "S3Uri=s3://${BUCKET_NAME}/input/" \
   --output-data-config "S3Uri=s3://${BUCKET_NAME}/output/" \
   --data-access-role-arn "$ROLE_ARN" \
   --language-code en \
-  --region "$REGION" \
-  --query 'JobId' \
-  --output text)
+  --region "$REGION" 2>&1)
 
-echo "JOB_ID=$JOB_ID"
+# Extract job ID
+JOB_ID=$(echo "$JOB_RESPONSE" | jq -r '.JobId // empty' 2>/dev/null)
+
+if [ -z "$JOB_ID" ]; then
+    echo "❌ Failed to start batch job:"
+    echo "$JOB_RESPONSE"
+    exit 1
+fi
+
+echo "Job ID: $JOB_ID"
 echo ""
 echo "Batch job started! Monitoring status..."
 
 # Poll job status
-while true; do
+for i in {1..40}; do
     STATUS=$(aws comprehend describe-sentiment-detection-job \
       --job-id "$JOB_ID" \
       --region "$REGION" \
       --query 'SentimentDetectionJobProperties.JobStatus' \
-      --output text)
+      --output text 2>/dev/null)
     
-    echo "Job status: $STATUS"
+    echo "[$i] Job status: $STATUS"
     
     if [ "$STATUS" = "COMPLETED" ]; then
         echo ""
@@ -664,6 +688,12 @@ while true; do
     elif [ "$STATUS" = "FAILED" ]; then
         echo ""
         echo "❌ Batch job failed"
+        # Show error message
+        aws comprehend describe-sentiment-detection-job \
+          --job-id "$JOB_ID" \
+          --region "$REGION" \
+          --query 'SentimentDetectionJobProperties.Message' \
+          --output text
         break
     fi
     
@@ -682,16 +712,22 @@ echo "Retrieving batch analysis results..."
 # Navigate to comprehend directory
 cd "$REPO_DIR/comprehend-demo"
 
+# Create output directory
+mkdir -p ./output
+
 # Download output
+echo "Downloading from s3://$BUCKET_NAME/output/..."
 aws s3 sync s3://"$BUCKET_NAME"/output/ ./output/ \
   --region "$REGION"
 
 echo ""
-echo "Output files downloaded to: ./output/"
+echo "Output files:"
+ls -lh ./output/
 echo ""
 
 # Display results
 if [ -f ./output/output.tar.gz ]; then
+    echo "Extracting results..."
     tar -xzf ./output/output.tar.gz -C ./output/
     echo "Results extracted:"
     ls -lh ./output/
@@ -702,10 +738,18 @@ if [ -f ./output/output.tar.gz ]; then
         echo "Sample results:"
         head -5 ./output/output | jq .
     fi
+    echo ""
+    echo "✅ Batch results retrieved"
+elif [ -f ./output/output ]; then
+    echo "Results file found (not compressed)"
+    echo ""
+    echo "Sample results:"
+    head -5 ./output/output | jq .
+    echo ""
+    echo "✅ Batch results retrieved"
+else
+    echo "⚠️  No output files found. Job may have failed or still processing."
 fi
-
-echo ""
-echo "✅ Batch results retrieved"
 ```
 
 ---
@@ -814,12 +858,14 @@ echo ""
 echo "Cleaning up resources..."
 
 # Empty and delete S3 bucket
+echo "Deleting S3 bucket and contents..."
 aws s3 rm s3://"$BUCKET_NAME" --recursive --region "$REGION"
 aws s3api delete-bucket --bucket "$BUCKET_NAME" --region "$REGION"
 
 echo "✅ S3 bucket deleted"
 
-# Delete IAM role
+# Delete IAM role policy and role
+echo "Deleting IAM role..."
 aws iam delete-role-policy \
   --role-name ComprehendBatchRole \
   --policy-name ComprehendS3Access
@@ -829,12 +875,20 @@ aws iam delete-role --role-name ComprehendBatchRole
 echo "✅ IAM role deleted"
 
 # Remove local comprehend directory
+echo "Removing local files..."
 cd "$REPO_DIR"
 rm -rf comprehend-demo
 
 echo "✅ Local files deleted"
 echo ""
-echo "All resources cleaned up!"
+echo "Note: Any running Comprehend batch jobs cannot be manually cancelled."
+echo "They will:"
+echo "  - Complete automatically (usually 5-15 minutes for small datasets)"
+echo "  - Stop consuming resources once complete"
+echo "  - Not incur additional costs after completion"
+echo "  - Expire automatically from the job list after 7 days"
+echo ""
+echo "✅ Lab 11.B cleanup complete!"
 ```
 
 ---
@@ -882,12 +936,6 @@ In this lab, you have:
 - Implement async processing for real-time applications
 - Cache results to reduce API calls
 - Use appropriate language codes
-
-**Cost Optimization:**
-- Monitor free tier usage (50K units/month)
-- Use batch processing for cost efficiency
-- Implement text preprocessing to reduce size
-- Cache frequently analyzed content
 
 **Security:**
 - Use IAM roles with least privilege
