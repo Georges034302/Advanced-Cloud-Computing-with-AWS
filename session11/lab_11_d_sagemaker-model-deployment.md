@@ -22,6 +22,7 @@ This lab introduces Amazon SageMaker for deploying machine learning models witho
 - IAM permissions for SageMaker, S3
 - Region: ap-southeast-2
 - Python 3.x installed
+- **AWS Service Quotas**: SageMaker training instances (requires quota increase for new accounts)
 
 ---
 
@@ -45,20 +46,20 @@ Training Data (S3)
 ## Step 1 – Set Variables
 
 ```bash
-# Set region
+# Set AWS region for all operations
 REGION="ap-southeast-2"
 export AWS_REGION="$REGION"
-echo "REGION=$REGION"
 
-# Get account ID
+# Get AWS account ID for unique resource naming
 ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
-echo "ACCOUNT_ID=$ACCOUNT_ID"
 
-# Set unique names
+# Set unique names for SageMaker resources
 BUCKET_NAME="sagemaker-demo-${ACCOUNT_ID}"
 ROLE_NAME="SageMakerExecutionRole"
-NOTEBOOK_NAME="ml-demo-notebook"
-echo "BUCKET_NAME=$BUCKET_NAME"
+
+echo "Region: $REGION"
+echo "Account ID: $ACCOUNT_ID"
+echo "Bucket: $BUCKET_NAME"
 ```
 
 ---
@@ -69,6 +70,7 @@ echo "BUCKET_NAME=$BUCKET_NAME"
 echo ""
 echo "Creating S3 bucket for SageMaker..."
 
+# Create S3 bucket for training data and model artifacts (region-specific configuration)
 if [ "$REGION" = "us-east-1" ]; then
     aws s3api create-bucket \
       --bucket "$BUCKET_NAME" \
@@ -80,7 +82,7 @@ else
       --create-bucket-configuration LocationConstraint="$REGION"
 fi
 
-echo "✅ S3 bucket created: $BUCKET_NAME"
+echo "Bucket: $BUCKET_NAME"
 ```
 
 ---
@@ -91,7 +93,14 @@ echo "✅ S3 bucket created: $BUCKET_NAME"
 echo ""
 echo "Creating IAM role for SageMaker..."
 
-# Create trust policy
+# Get repository root directory
+REPO_DIR=$(git rev-parse --show-toplevel)
+
+# Create sagemaker directory in repository
+mkdir -p "$REPO_DIR/sagemaker-demo"
+cd "$REPO_DIR/sagemaker-demo"
+
+# Create trust policy allowing SageMaker service to assume role
 cat > sagemaker-trust-policy.json <<'EOF'
 {
   "Version": "2012-10-17",
@@ -107,24 +116,25 @@ cat > sagemaker-trust-policy.json <<'EOF'
 }
 EOF
 
-# Create role
+# Create IAM role with trust policy
 aws iam create-role \
   --role-name "$ROLE_NAME" \
   --assume-role-policy-document file://sagemaker-trust-policy.json
 
-# Attach AWS managed policies
+# Attach managed policy for SageMaker operations
 aws iam attach-role-policy \
   --role-name "$ROLE_NAME" \
   --policy-arn arn:aws:iam::aws:policy/AmazonSageMakerFullAccess
 
+# Attach managed policy for S3 access (training data and models)
 aws iam attach-role-policy \
   --role-name "$ROLE_NAME" \
   --policy-arn arn:aws:iam::aws:policy/AmazonS3FullAccess
 
-echo "✅ IAM role created"
+echo "Waiting for IAM propagation..."
 sleep 10
 
-# Get role ARN
+# Get role ARN for SageMaker configuration
 ROLE_ARN=$(aws iam get-role \
   --role-name "$ROLE_NAME" \
   --query 'Role.Arn' \
@@ -141,10 +151,10 @@ echo "Role ARN: $ROLE_ARN"
 echo ""
 echo "Creating sample training data for customer churn prediction..."
 
-mkdir -p /tmp/sagemaker-demo
-cd /tmp/sagemaker-demo
+# Navigate to sagemaker directory
+cd "$REPO_DIR/sagemaker-demo"
 
-# Create Python script to generate synthetic data
+# Create Python script to generate synthetic customer churn data
 cat > generate_data.py <<'EOF'
 #!/usr/bin/env python3
 import csv
@@ -199,8 +209,6 @@ python3 generate_data.py
 echo ""
 echo "Sample training data:"
 head -5 train.csv
-echo ""
-echo "✅ Training data created"
 ```
 
 ---
@@ -211,15 +219,14 @@ echo "✅ Training data created"
 echo ""
 echo "Uploading training data to S3..."
 
-# Upload training data
+# Upload training data to S3 for SageMaker access
 aws s3 cp train.csv s3://"$BUCKET_NAME"/data/train/ \
   --region "$REGION"
 
-# Upload test data
+# Upload test data to S3 for batch predictions
 aws s3 cp test.csv s3://"$BUCKET_NAME"/data/test/ \
   --region "$REGION"
 
-echo "✅ Data uploaded to S3"
 echo "Training data: s3://${BUCKET_NAME}/data/train/"
 echo "Test data: s3://${BUCKET_NAME}/data/test/"
 ```
@@ -232,87 +239,131 @@ echo "Test data: s3://${BUCKET_NAME}/data/test/"
 echo ""
 echo "Creating SageMaker training script..."
 
-cat > train_model.py <<EOF
+# Navigate to sagemaker directory
+cd "$REPO_DIR/sagemaker-demo"
+
+# Create Python script for model training
+cat > train_model.py <<'EOF'
 #!/usr/bin/env python3
 import boto3
-import sagemaker
-from sagemaker import get_execution_role
-from sagemaker.estimator import Estimator
+import time
 
-# Initialize SageMaker session
-sagemaker_session = sagemaker.Session()
-region = '$REGION'
-bucket = '$BUCKET_NAME'
-role = '$ROLE_ARN'
+# Configuration
+region = 'ap-southeast-2'
+bucket = 'sagemaker-demo-013709423315'
+role = 'arn:aws:iam::013709423315:role/SageMakerExecutionRole'
+
+# Initialize SageMaker client
+sm_client = boto3.client('sagemaker', region_name=region)
 
 print("="*70)
 print("SAGEMAKER XGBOOST TRAINING")
 print("="*70)
 print()
 
-# Get XGBoost container image
-from sagemaker.image_uris import retrieve
-container = retrieve('xgboost', region, version='1.5-1')
-print(f"XGBoost container: {container}")
+# Get XGBoost container image for ap-southeast-2
+account_mapping = {
+    'ap-southeast-2': '544295431143'
+}
+account_id = account_mapping[region]
+image_uri = f'{account_id}.dkr.ecr.{region}.amazonaws.com/xgboost:1.5-1'
+
+print(f"XGBoost container: {image_uri}")
 print()
 
 # Set S3 paths
 train_data_path = f's3://{bucket}/data/train/'
-test_data_path = f's3://{bucket}/data/test/'
 output_path = f's3://{bucket}/models/'
 
 print(f"Training data: {train_data_path}")
-print(f"Test data: {test_data_path}")
 print(f"Model output: {output_path}")
 print()
 
-# Configure XGBoost estimator
-xgb = Estimator(
-    container,
-    role=role,
-    instance_count=1,
-    instance_type='ml.m4.xlarge',
-    output_path=output_path,
-    sagemaker_session=sagemaker_session
-)
+# Create training job name
+training_job_name = f'xgboost-churn-{int(time.time())}'
 
-# Set hyperparameters
-xgb.set_hyperparameters(
-    objective='binary:logistic',
-    num_round=50,
-    max_depth=5,
-    eta=0.2,
-    subsample=0.8,
-    colsample_bytree=0.8
-)
-
-print("Hyperparameters configured:")
-print(f"  objective: binary:logistic (classification)")
+print("XGBoost configuration:")
+print(f"  Instance type: ml.m5.large")
+print(f"  Objective: binary:logistic (classification)")
 print(f"  num_round: 50 (training iterations)")
 print(f"  max_depth: 5 (tree depth)")
 print()
 
-# Define data channels
-train_input = sagemaker.inputs.TrainingInput(
-    train_data_path,
-    content_type='text/csv'
-)
-
-# Start training
-print("Starting training job...")
+# Start training job
+print(f"Starting training job: {training_job_name}")
 print("(This will take 5-10 minutes)")
 print()
 
-xgb.fit({'train': train_input})
+sm_client.create_training_job(
+    TrainingJobName=training_job_name,
+    RoleArn=role,
+    AlgorithmSpecification={
+        'TrainingImage': image_uri,
+        'TrainingInputMode': 'File'
+    },
+    InputDataConfig=[
+        {
+            'ChannelName': 'train',
+            'DataSource': {
+                'S3DataSource': {
+                    'S3DataType': 'S3Prefix',
+                    'S3Uri': train_data_path,
+                    'S3DataDistributionType': 'FullyReplicated'
+                }
+            },
+            'ContentType': 'text/csv'
+        }
+    ],
+    OutputDataConfig={
+        'S3OutputPath': output_path
+    },
+    ResourceConfig={
+        'InstanceType': 'ml.m5.large',
+        'InstanceCount': 1,
+        'VolumeSizeInGB': 10
+    },
+    HyperParameters={
+        'objective': 'binary:logistic',
+        'num_round': '50',
+        'max_depth': '5',
+        'eta': '0.2',
+        'subsample': '0.8',
+        'colsample_bytree': '0.8'
+    },
+    StoppingCondition={
+        'MaxRuntimeInSeconds': 3600
+    }
+)
 
-print()
-print("✅ Training completed!")
-print(f"Model artifacts: {xgb.model_data}")
+# Monitor training job
+print("Training job status:")
+while True:
+    response = sm_client.describe_training_job(
+        TrainingJobName=training_job_name
+    )
+    status = response['TrainingJobStatus']
+    print(f"  {status}", end='')
+    
+    if status in ['Completed', 'Failed', 'Stopped']:
+        print()
+        break
+    
+    print(" (checking in 30s)...")
+    time.sleep(30)
+
+if status == 'Completed':
+    model_artifacts = response['ModelArtifacts']['S3ModelArtifacts']
+    print()
+    print("✅ Training completed!")
+    print(f"Model artifacts: {model_artifacts}")
+else:
+    print()
+    print(f"❌ Training {status}")
+    if 'FailureReason' in response:
+        print(f"Reason: {response['FailureReason']}")
 EOF
 
 chmod +x train_model.py
-
-echo "✅ Training script created"
 ```
 
 ---
@@ -323,14 +374,23 @@ echo "✅ Training script created"
 echo ""
 echo "Installing SageMaker Python SDK..."
 
+# Install SageMaker SDK and dependencies
 pip3 install -q sagemaker boto3
-
-echo "✅ SageMaker SDK installed"
 ```
 
 ---
 
 ## Step 8 – Train the Model
+
+> **⚠️ NOTE: This step requires SageMaker service quotas.**
+> 
+> If you receive `ResourceLimitExceeded` error, you need to:
+> - Go to AWS Service Quotas console
+> - Search for "SageMaker"
+> - Request increase for "ml.m5.large for training job usage"
+> - Wait 1-2 business days for approval
+> 
+> For learning purposes, you can skip to Step 19 (cleanup) if quota increase is not approved yet.
 
 ```bash
 echo ""
@@ -339,10 +399,10 @@ echo "TRAINING XGBOOST MODEL"
 echo "================================================"
 echo ""
 
-python3 train_model.py
+# Navigate to sagemaker directory and run training
+cd "$REPO_DIR/sagemaker-demo"
 
-echo ""
-echo "✅ Model training complete"
+python3 train_model.py
 ```
 
 ---
@@ -353,6 +413,10 @@ echo "✅ Model training complete"
 echo ""
 echo "Creating deployment script..."
 
+# Navigate to sagemaker directory
+cd "$REPO_DIR/sagemaker-demo"
+
+# Create Python script for model deployment
 cat > deploy_model.py <<EOF
 #!/usr/bin/env python3
 import boto3
@@ -422,8 +486,6 @@ with open('endpoint_name.txt', 'w') as f:
 EOF
 
 chmod +x deploy_model.py
-
-echo "✅ Deployment script created"
 ```
 
 ---
@@ -437,10 +499,10 @@ echo "DEPLOYING MODEL ENDPOINT"
 echo "================================================"
 echo ""
 
-python3 deploy_model.py
+# Navigate to sagemaker directory and deploy model
+cd "$REPO_DIR/sagemaker-demo"
 
-echo ""
-echo "✅ Endpoint deployed and ready for predictions"
+python3 deploy_model.py
 ```
 
 ---
@@ -451,6 +513,10 @@ echo "✅ Endpoint deployed and ready for predictions"
 echo ""
 echo "Creating prediction script..."
 
+# Navigate to sagemaker directory
+cd "$REPO_DIR/sagemaker-demo"
+
+# Create Python script for real-time predictions
 cat > predict.py <<'EOF'
 #!/usr/bin/env python3
 import boto3
@@ -515,8 +581,6 @@ print("✅ Real-time predictions complete")
 EOF
 
 chmod +x predict.py
-
-echo "✅ Prediction script created"
 ```
 
 ---
@@ -530,10 +594,10 @@ echo "TESTING REAL-TIME PREDICTIONS"
 echo "================================================"
 echo ""
 
-python3 predict.py
+# Navigate to sagemaker directory and run predictions
+cd "$REPO_DIR/sagemaker-demo"
 
-echo ""
-echo "✅ Predictions successful"
+python3 predict.py
 ```
 
 ---
@@ -544,6 +608,10 @@ echo "✅ Predictions successful"
 echo ""
 echo "Creating batch prediction script..."
 
+# Navigate to sagemaker directory
+cd "$REPO_DIR/sagemaker-demo"
+
+# Create Python script for batch transform job
 cat > batch_predict.py <<EOF
 #!/usr/bin/env python3
 import boto3
@@ -612,7 +680,7 @@ sm_client.create_transform_job(
         'Accept': 'text/csv'
     },
     TransformResources={
-        'InstanceType': 'ml.m4.xlarge',
+        'InstanceType': 'ml.m5.large',
         'InstanceCount': 1
     }
 )
@@ -642,8 +710,6 @@ else:
 EOF
 
 chmod +x batch_predict.py
-
-echo "✅ Batch prediction script created"
 ```
 
 ---
@@ -657,19 +723,21 @@ echo "BATCH PREDICTIONS"
 echo "================================================"
 echo ""
 
+# Navigate to sagemaker directory and run batch job
+cd "$REPO_DIR/sagemaker-demo"
+
 python3 batch_predict.py
 
 echo ""
 echo "Downloading batch results..."
 
+# Download batch prediction results from S3
 aws s3 sync s3://"$BUCKET_NAME"/batch-output/ ./batch-output/ \
   --region "$REGION"
 
 echo ""
 echo "Sample batch predictions:"
 head -10 ./batch-output/*.out 2>/dev/null || echo "Results processing..."
-echo ""
-echo "✅ Batch predictions complete"
 ```
 
 ---
@@ -683,9 +751,9 @@ echo "ENDPOINT MONITORING"
 echo "================================================"
 echo ""
 
-# Get endpoint metrics
 ENDPOINT_NAME="xgboost-churn-endpoint"
 
+# Query CloudWatch for average model latency over past hour
 aws cloudwatch get-metric-statistics \
   --namespace AWS/SageMaker \
   --metric-name ModelLatency \
@@ -703,8 +771,6 @@ echo "Available metrics:"
 echo "  - ModelLatency: Inference latency"
 echo "  - Invocations: Number of predictions"
 echo "  - ModelInvocationErrors: Failed predictions"
-echo ""
-echo "✅ Use CloudWatch console for detailed monitoring"
 ```
 
 ---
@@ -715,6 +781,10 @@ echo "✅ Use CloudWatch console for detailed monitoring"
 echo ""
 echo "Creating A/B testing script..."
 
+# Navigate to sagemaker directory
+cd "$REPO_DIR/sagemaker-demo"
+
+# Create Python script explaining A/B testing concepts
 cat > ab_testing.py <<EOF
 #!/usr/bin/env python3
 import boto3
@@ -764,6 +834,7 @@ echo ""
 
 echo "Listing model artifacts in S3..."
 
+# List all model artifacts stored in S3
 aws s3 ls s3://"$BUCKET_NAME"/models/ --recursive --human-readable \
   --region "$REGION"
 
@@ -771,8 +842,6 @@ echo ""
 echo "Model artifacts contain:"
 echo "  - xgboost-model: Trained model file"
 echo "  - Training metadata and logs"
-echo ""
-echo "✅ Model artifacts stored in S3"
 ```
 
 ---
@@ -787,6 +856,7 @@ echo "================================================"
 echo ""
 
 echo "Training Jobs:"
+# List recent SageMaker training jobs
 aws sagemaker list-training-jobs \
   --region "$REGION" \
   --max-results 5 \
@@ -795,6 +865,7 @@ aws sagemaker list-training-jobs \
 
 echo ""
 echo "Endpoints:"
+# List active SageMaker endpoints
 aws sagemaker list-endpoints \
   --region "$REGION" \
   --query 'Endpoints[*].[EndpointName,EndpointStatus,CreationTime]' \
@@ -802,74 +873,31 @@ aws sagemaker list-endpoints \
 
 echo ""
 echo "Models:"
+# List deployed SageMaker models
 aws sagemaker list-models \
   --region "$REGION" \
   --max-results 5 \
   --query 'Models[*].[ModelName,CreationTime]' \
   --output table
-
-echo ""
-echo "✅ SageMaker resources listed"
 ```
 
 ---
 
-## Step 19 – Cost Estimation
-
-```bash
-echo ""
-echo "================================================"
-echo "COST ESTIMATION"
-echo "================================================"
-echo ""
-
-cat <<'EOF'
-SageMaker Costs (ap-southeast-2 pricing):
-
-TRAINING:
-- ml.m4.xlarge: $0.28/hour
-- Training time: ~10 minutes = $0.05
-
-ENDPOINT (Real-Time Inference):
-- ml.t2.medium: $0.065/hour (FREE TIER: 125 hours/month for 2 months)
-- Monthly cost: ~$47 (after free tier)
-
-BATCH TRANSFORM:
-- ml.m4.xlarge: $0.28/hour
-- Batch job time: ~5 minutes = $0.02
-
-STORAGE:
-- S3 storage: $0.025/GB
-- Model size: ~1MB = negligible
-
-RECOMMENDATIONS:
-✅ Use ml.t2.medium endpoints (free tier eligible)
-✅ Delete endpoints when not in use
-✅ Use batch transform for offline predictions
-✅ Use serverless inference for sporadic workloads
-
-Total lab cost with cleanup: < $0.10
-Total lab cost without cleanup: ~$1.50/day (endpoint running)
-EOF
-
-echo ""
-```
-
----
-
-## Step 20 – Cleanup
+## Step 19 – Cleanup
 
 ```bash
 echo ""
 echo "Cleaning up resources..."
 
-# Delete endpoint
 ENDPOINT_NAME="xgboost-churn-endpoint"
 
-echo "Deleting endpoint: $ENDPOINT_NAME"
+# Delete SageMaker endpoint
+echo "Deleting endpoint..."
 aws sagemaker delete-endpoint \
   --endpoint-name "$ENDPOINT_NAME" \
   --region "$REGION" 2>/dev/null
+
+echo "✅ Endpoint deleted"
 
 # Delete endpoint configuration
 ENDPOINT_CONFIG=$(aws sagemaker list-endpoint-configs \
@@ -877,37 +905,37 @@ ENDPOINT_CONFIG=$(aws sagemaker list-endpoint-configs \
   --query 'EndpointConfigs[0].EndpointConfigName' \
   --output text 2>/dev/null)
 
-if [ "$ENDPOINT_CONFIG" != "None" ]; then
-    echo "Deleting endpoint config: $ENDPOINT_CONFIG"
+if [ "$ENDPOINT_CONFIG" != "None" ] && [ -n "$ENDPOINT_CONFIG" ]; then
+    echo "Deleting endpoint config..."
     aws sagemaker delete-endpoint-config \
       --endpoint-config-name "$ENDPOINT_CONFIG" \
       --region "$REGION" 2>/dev/null
+    echo "✅ Endpoint config deleted"
 fi
 
-# Delete model
+# Delete SageMaker model
 MODEL_NAME=$(aws sagemaker list-models \
   --region "$REGION" \
   --max-results 1 \
   --query 'Models[0].ModelName' \
   --output text 2>/dev/null)
 
-if [ "$MODEL_NAME" != "None" ]; then
-    echo "Deleting model: $MODEL_NAME"
+if [ "$MODEL_NAME" != "None" ] && [ -n "$MODEL_NAME" ]; then
+    echo "Deleting model..."
     aws sagemaker delete-model \
       --model-name "$MODEL_NAME" \
       --region "$REGION" 2>/dev/null
+    echo "✅ Model deleted"
 fi
 
-echo "✅ SageMaker resources deleted"
-
 # Empty and delete S3 bucket
-echo "Deleting S3 bucket..."
+echo "Deleting S3 bucket and contents..."
 aws s3 rm s3://"$BUCKET_NAME" --recursive --region "$REGION"
 aws s3api delete-bucket --bucket "$BUCKET_NAME" --region "$REGION"
 
 echo "✅ S3 bucket deleted"
 
-# Delete IAM role
+# Detach managed policies and delete IAM role
 echo "Deleting IAM role..."
 aws iam detach-role-policy \
   --role-name "$ROLE_NAME" \
@@ -920,13 +948,18 @@ aws iam detach-role-policy \
 aws iam delete-role --role-name "$ROLE_NAME" 2>/dev/null
 
 echo "✅ IAM role deleted"
+
+# Remove local sagemaker directory
+echo "Removing local files..."
+cd "$REPO_DIR"
+rm -rf sagemaker-demo
+
+echo "✅ Local files deleted"
 echo ""
-echo "All resources cleaned up!"
+echo "✅ Lab 11.D cleanup complete!"
 echo ""
-echo "IMPORTANT: Verify cleanup in console:"
-echo "  - SageMaker > Endpoints (should be empty)"
-echo "  - S3 buckets (sagemaker-demo-* deleted)"
-echo "  - CloudWatch alarms (optional cleanup)"
+echo "Note: If you started a batch transform job (Step 14), it cannot be cancelled."
+echo "The job will complete automatically. Batch job records auto-expire after 7 days."
 ```
 
 ---
@@ -1046,6 +1079,7 @@ In this lab, you have:
 ## Troubleshooting
 
 **Training job fails:**
+- **ResourceLimitExceeded**: Service quota is 0 for training instances - request quota increase via AWS Service Quotas
 - Check S3 data format (CSV without headers for XGBoost)
 - Verify IAM role has S3 access
 - Ensure sufficient data (minimum 100 samples)
