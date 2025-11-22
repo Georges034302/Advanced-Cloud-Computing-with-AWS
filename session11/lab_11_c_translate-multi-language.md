@@ -42,14 +42,15 @@ Source Text (Any Language)
 ## Step 1 – Set Variables
 
 ```bash
-# Set region
+# Set AWS region for all operations
 REGION="ap-southeast-2"
 export AWS_REGION="$REGION"
-echo "REGION=$REGION"
 
-# Get account ID
+# Get AWS account ID for unique bucket naming
 ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
-echo "ACCOUNT_ID=$ACCOUNT_ID"
+
+echo "Region: $REGION"
+echo "Account ID: $ACCOUNT_ID"
 ```
 
 ---
@@ -69,7 +70,7 @@ echo "Source (English):"
 echo "$SOURCE_TEXT"
 echo ""
 
-# Translate to Spanish
+# Translate English text to Spanish using Translate API
 TRANSLATION=$(aws translate translate-text \
   --text "$SOURCE_TEXT" \
   --source-language-code en \
@@ -80,8 +81,6 @@ TRANSLATION=$(aws translate translate-text \
 
 echo "Translation (Spanish):"
 echo "$TRANSLATION"
-echo ""
-echo "✅ Translation complete"
 ```
 
 ---
@@ -99,7 +98,7 @@ TEXT="Good morning! How can I help you today?"
 echo "Original: $TEXT"
 echo ""
 
-# French
+# Translate to French
 FRENCH=$(aws translate translate-text \
   --text "$TEXT" \
   --source-language-code en \
@@ -110,7 +109,7 @@ FRENCH=$(aws translate translate-text \
 
 echo "French: $FRENCH"
 
-# German
+# Translate to German
 GERMAN=$(aws translate translate-text \
   --text "$TEXT" \
   --source-language-code en \
@@ -121,7 +120,7 @@ GERMAN=$(aws translate translate-text \
 
 echo "German: $GERMAN"
 
-# Italian
+# Translate to Italian
 ITALIAN=$(aws translate translate-text \
   --text "$TEXT" \
   --source-language-code en \
@@ -132,7 +131,7 @@ ITALIAN=$(aws translate translate-text \
 
 echo "Italian: $ITALIAN"
 
-# Portuguese
+# Translate to Portuguese
 PORTUGUESE=$(aws translate translate-text \
   --text "$TEXT" \
   --source-language-code en \
@@ -143,7 +142,7 @@ PORTUGUESE=$(aws translate translate-text \
 
 echo "Portuguese: $PORTUGUESE"
 
-# Japanese
+# Translate to Japanese
 JAPANESE=$(aws translate translate-text \
   --text "$TEXT" \
   --source-language-code en \
@@ -154,7 +153,7 @@ JAPANESE=$(aws translate translate-text \
 
 echo "Japanese: $JAPANESE"
 
-# Chinese (Simplified)
+# Translate to Chinese (Simplified)
 CHINESE=$(aws translate translate-text \
   --text "$TEXT" \
   --source-language-code en \
@@ -164,9 +163,6 @@ CHINESE=$(aws translate translate-text \
   --output text)
 
 echo "Chinese: $CHINESE"
-
-echo ""
-echo "✅ Translated to 6 languages"
 ```
 
 ---
@@ -180,13 +176,13 @@ echo "AUTO-DETECT SOURCE LANGUAGE"
 echo "================================================"
 echo ""
 
-# French text (source unknown)
+# Test text in French (pretend source language is unknown)
 MYSTERY_TEXT="Bonjour! Comment allez-vous aujourd'hui?"
 
 echo "Mystery text: $MYSTERY_TEXT"
 echo ""
 
-# Translate with auto-detection (use 'auto' as source)
+# Translate with auto-detection using 'auto' as source language code
 RESULT=$(aws translate translate-text \
   --text "$MYSTERY_TEXT" \
   --source-language-code auto \
@@ -211,8 +207,6 @@ RESULT=$(aws translate translate-text \
 
 echo "Detected language: $(echo "$RESULT" | jq -r '.SourceLanguageCode')"
 echo "Translation to English: $(echo "$RESULT" | jq -r '.TranslatedText')"
-echo ""
-echo "✅ Auto-detection working"
 ```
 
 ---
@@ -230,7 +224,7 @@ ORIGINAL="The quick brown fox jumps over the lazy dog."
 echo "Original English: $ORIGINAL"
 echo ""
 
-# English → Japanese
+# Translate English to Japanese
 JAPANESE=$(aws translate translate-text \
   --text "$ORIGINAL" \
   --source-language-code en \
@@ -242,7 +236,7 @@ JAPANESE=$(aws translate translate-text \
 echo "Japanese: $JAPANESE"
 echo ""
 
-# Japanese → English (back translation)
+# Translate Japanese back to English to verify quality
 BACK_TRANSLATION=$(aws translate translate-text \
   --text "$JAPANESE" \
   --source-language-code ja \
@@ -252,8 +246,6 @@ BACK_TRANSLATION=$(aws translate translate-text \
   --output text)
 
 echo "Back to English: $BACK_TRANSLATION"
-echo ""
-echo "✅ Bidirectional translation complete"
 ```
 
 ---
@@ -264,9 +256,14 @@ echo "✅ Bidirectional translation complete"
 echo ""
 echo "Creating multi-language support bot..."
 
-mkdir -p /tmp/translate-demo
-cd /tmp/translate-demo
+# Get repository root directory
+REPO_DIR=$(git rev-parse --show-toplevel)
 
+# Create translate directory in repository
+mkdir -p "$REPO_DIR/translate-demo"
+cd "$REPO_DIR/translate-demo"
+
+# Create Python script for multi-language customer support bot
 cat > support_bot.py <<'EOF'
 #!/usr/bin/env python3
 import boto3
@@ -324,8 +321,6 @@ print("✅ All customer inquiries handled in their native language")
 EOF
 
 chmod +x support_bot.py
-
-echo "✅ Support bot created"
 ```
 
 ---
@@ -337,10 +332,10 @@ echo ""
 echo "Running multi-language support bot..."
 echo ""
 
-python3 support_bot.py
+# Navigate to translate directory and run support bot
+cd "$REPO_DIR/translate-demo"
 
-echo ""
-echo "✅ Support bot test complete"
+python3 support_bot.py
 ```
 
 ---
@@ -354,7 +349,10 @@ echo "CUSTOM TERMINOLOGY"
 echo "================================================"
 echo ""
 
-# Create terminology file (CSV format)
+# Navigate to translate directory
+cd "$REPO_DIR/translate-demo"
+
+# Create custom terminology CSV file with technical terms
 cat > custom_terms.csv <<'EOF'
 en,es,fr
 AWS,AWS,AWS
@@ -370,10 +368,11 @@ echo "Custom terminology file created"
 cat custom_terms.csv
 echo ""
 
-# Create S3 bucket for terminology
+# Create unique S3 bucket name for terminology files
 BUCKET_NAME="translate-terminology-${ACCOUNT_ID}"
-echo "BUCKET_NAME=$BUCKET_NAME"
+echo "Bucket: $BUCKET_NAME"
 
+# Create S3 bucket (region-specific configuration)
 if [ "$REGION" = "us-east-1" ]; then
     aws s3api create-bucket \
       --bucket "$BUCKET_NAME" \
@@ -385,20 +384,16 @@ else
       --create-bucket-configuration LocationConstraint="$REGION"
 fi
 
-# Upload terminology file
+# Upload custom terminology CSV to S3
 aws s3 cp custom_terms.csv s3://"$BUCKET_NAME"/custom_terms.csv \
   --region "$REGION"
 
-echo "✅ Terminology uploaded to S3"
-
-# Import custom terminology
+# Import custom terminology into Translate service (base64 encoded)
 aws translate import-terminology \
   --name AWSTerminology \
   --merge-strategy OVERWRITE \
   --terminology-data "Format=CSV,File=$(base64 -w 0 < custom_terms.csv)" \
   --region "$REGION"
-
-echo "✅ Custom terminology imported"
 ```
 
 ---
@@ -415,7 +410,7 @@ TECH_TEXT="AWS Lambda is a serverless compute service. You can deploy machine le
 echo "Original: $TECH_TEXT"
 echo ""
 
-# Translate WITHOUT custom terminology
+# Translate without custom terminology (default behavior)
 echo "Without terminology:"
 TRANSLATION_NORMAL=$(aws translate translate-text \
   --text "$TECH_TEXT" \
@@ -428,7 +423,7 @@ TRANSLATION_NORMAL=$(aws translate translate-text \
 echo "$TRANSLATION_NORMAL"
 echo ""
 
-# Translate WITH custom terminology
+# Translate with custom terminology to preserve technical terms
 echo "With custom terminology:"
 TRANSLATION_CUSTOM=$(aws translate translate-text \
   --text "$TECH_TEXT" \
@@ -441,7 +436,7 @@ TRANSLATION_CUSTOM=$(aws translate translate-text \
 
 echo "$TRANSLATION_CUSTOM"
 echo ""
-echo "✅ Notice: Technical terms preserved correctly"
+echo "Notice: Technical terms (AWS, Lambda, S3, EC2) preserved correctly"
 ```
 
 ---
@@ -452,6 +447,10 @@ echo "✅ Notice: Technical terms preserved correctly"
 echo ""
 echo "Creating website localizer..."
 
+# Navigate to translate directory
+cd "$REPO_DIR/translate-demo"
+
+# Create Python script for website localization
 cat > localize_website.py <<'EOF'
 #!/usr/bin/env python3
 import boto3
@@ -505,8 +504,6 @@ print("✅ Website localized to 5 languages")
 EOF
 
 chmod +x localize_website.py
-
-echo "✅ Website localizer created"
 ```
 
 ---
@@ -518,10 +515,10 @@ echo ""
 echo "Running website localizer..."
 echo ""
 
-python3 localize_website.py
+# Navigate to translate directory and run localizer
+cd "$REPO_DIR/translate-demo"
 
-echo ""
-echo "✅ Localization complete"
+python3 localize_website.py
 ```
 
 ---
@@ -535,22 +532,25 @@ echo "BATCH TRANSLATION"
 echo "================================================"
 echo ""
 
-# Create batch input documents
+# Navigate to translate directory
+cd "$REPO_DIR/translate-demo"
+
+# Create directory for batch input documents
 mkdir -p batch_input
 
-# Document 1
+# Create sample document 1
 cat > batch_input/doc1.txt <<'EOF'
 Our company is committed to delivering exceptional customer service.
 We value innovation, integrity, and excellence in everything we do.
 EOF
 
-# Document 2
+# Create sample document 2
 cat > batch_input/doc2.txt <<'EOF'
 Thank you for choosing our products. Your satisfaction is our priority.
 Please contact support if you have any questions or concerns.
 EOF
 
-# Document 3
+# Create sample document 3
 cat > batch_input/doc3.txt <<'EOF'
 New features are now available in the latest version of our software.
 Upgrade today to experience improved performance and security.
@@ -559,11 +559,9 @@ EOF
 echo "Created 3 documents for batch translation"
 ls -lh batch_input/
 
-# Upload to S3
+# Upload all batch input documents to S3
 aws s3 sync batch_input/ s3://"$BUCKET_NAME"/batch_input/ \
   --region "$REGION"
-
-echo "✅ Batch input uploaded to S3"
 ```
 
 ---
@@ -574,7 +572,10 @@ echo "✅ Batch input uploaded to S3"
 echo ""
 echo "Creating IAM role for batch translation..."
 
-# Create trust policy
+# Navigate to translate directory
+cd "$REPO_DIR/translate-demo"
+
+# Create trust policy allowing Translate service to assume role
 cat > translate-trust-policy.json <<'EOF'
 {
   "Version": "2012-10-17",
@@ -590,42 +591,48 @@ cat > translate-trust-policy.json <<'EOF'
 }
 EOF
 
-# Create role
+# Create IAM role with trust policy
 aws iam create-role \
   --role-name TranslateBatchRole \
   --assume-role-policy-document file://translate-trust-policy.json
 
-# Create permissions policy
+# Create permissions policy for S3 access (separate statements for object vs bucket)
 cat > translate-permissions.json <<EOF
 {
   "Version": "2012-10-17",
   "Statement": [
     {
       "Effect": "Allow",
+      "Action": "s3:GetObject",
+      "Resource": "arn:aws:s3:::${BUCKET_NAME}/*"
+    },
+    {
+      "Effect": "Allow",
+      "Action": "s3:PutObject",
+      "Resource": "arn:aws:s3:::${BUCKET_NAME}/*"
+    },
+    {
+      "Effect": "Allow",
       "Action": [
-        "s3:GetObject",
-        "s3:PutObject",
-        "s3:ListBucket"
+        "s3:ListBucket",
+        "s3:GetBucketLocation"
       ],
-      "Resource": [
-        "arn:aws:s3:::${BUCKET_NAME}",
-        "arn:aws:s3:::${BUCKET_NAME}/*"
-      ]
+      "Resource": "arn:aws:s3:::${BUCKET_NAME}"
     }
   ]
 }
 EOF
 
-# Attach policy
+# Attach permissions policy to role
 aws iam put-role-policy \
   --role-name TranslateBatchRole \
   --policy-name TranslateS3Access \
   --policy-document file://translate-permissions.json
 
-echo "✅ IAM role created"
-sleep 10
+echo "Waiting for IAM propagation..."
+sleep 30
 
-# Get role ARN
+# Get role ARN for batch job
 ROLE_ARN=$(aws iam get-role \
   --role-name TranslateBatchRole \
   --query 'Role.Arn' \
@@ -642,7 +649,7 @@ echo "Role ARN: $ROLE_ARN"
 echo ""
 echo "Starting batch translation job..."
 
-# Start batch job (English → Spanish)
+# Start batch translation job (English to Spanish, French, German)
 JOB_ID=$(aws translate start-text-translation-job \
   --input-data-config "S3Uri=s3://${BUCKET_NAME}/batch_input/,ContentType=text/plain" \
   --output-data-config "S3Uri=s3://${BUCKET_NAME}/batch_output/" \
@@ -653,11 +660,11 @@ JOB_ID=$(aws translate start-text-translation-job \
   --query 'JobId' \
   --output text)
 
-echo "JOB_ID=$JOB_ID"
+echo "Job ID: $JOB_ID"
 echo ""
 echo "Batch translation job started! Monitoring status..."
 
-# Poll job status
+# Poll job status every 15 seconds
 while true; do
     STATUS=$(aws translate describe-text-translation-job \
       --job-id "$JOB_ID" \
@@ -689,7 +696,10 @@ done
 echo ""
 echo "Retrieving batch translation results..."
 
-# Download output
+# Navigate to translate directory
+cd "$REPO_DIR/translate-demo"
+
+# Download batch translation output from S3
 aws s3 sync s3://"$BUCKET_NAME"/batch_output/ ./batch_output/ \
   --region "$REGION"
 
@@ -697,16 +707,13 @@ echo ""
 echo "Output files downloaded to: ./batch_output/"
 echo ""
 
-# List translated files
+# Display translated files
 find ./batch_output -type f -name "*.txt" | while read file; do
     echo "File: $file"
     echo "Content:"
     head -5 "$file"
     echo "---"
 done
-
-echo ""
-echo "✅ Batch translation results retrieved"
 ```
 
 ---
@@ -717,6 +724,10 @@ echo "✅ Batch translation results retrieved"
 echo ""
 echo "Creating real-time translation chat simulator..."
 
+# Navigate to translate directory
+cd "$REPO_DIR/translate-demo"
+
+# Create Python script for real-time bilingual chat
 cat > translation_chat.py <<'EOF'
 #!/usr/bin/env python3
 import boto3
@@ -756,8 +767,6 @@ print("✅ Real-time translation enables seamless communication")
 EOF
 
 chmod +x translation_chat.py
-
-echo "✅ Translation chat created"
 ```
 
 ---
@@ -769,10 +778,10 @@ echo ""
 echo "Running translation chat simulator..."
 echo ""
 
-python3 translation_chat.py
+# Navigate to translate directory and run chat simulator
+cd "$REPO_DIR/translate-demo"
 
-echo ""
-echo "✅ Chat simulation complete"
+python3 translation_chat.py
 ```
 
 ---
@@ -786,8 +795,7 @@ echo "SUPPORTED LANGUAGES"
 echo "================================================"
 echo ""
 
-# List supported languages
-echo "Fetching supported languages..."
+# List all supported languages (filtering languages starting with 'A' for sample)
 aws translate list-languages \
   --region "$REGION" \
   --query 'Languages[?starts_with(LanguageName, `A`)].[LanguageCode, LanguageName]' \
@@ -795,7 +803,7 @@ aws translate list-languages \
 
 echo ""
 echo "Sample languages shown (75+ total supported)"
-echo "✅ Use 'aws translate list-languages' to see all"
+echo "Use 'aws translate list-languages' to see all supported languages"
 ```
 
 ---
@@ -806,6 +814,10 @@ echo "✅ Use 'aws translate list-languages' to see all"
 echo ""
 echo "Creating production translation pipeline..."
 
+# Navigate to translate directory
+cd "$REPO_DIR/translate-demo"
+
+# Create Python script demonstrating translation caching
 cat > translation_pipeline.py <<'EOF'
 #!/usr/bin/env python3
 import boto3
@@ -875,8 +887,6 @@ print("✅ Translation pipeline with caching demonstrated")
 EOF
 
 chmod +x translation_pipeline.py
-
-echo "✅ Translation pipeline created"
 ```
 
 ---
@@ -887,7 +897,8 @@ echo "✅ Translation pipeline created"
 echo ""
 echo "Cleaning up resources..."
 
-# Delete custom terminology
+# Delete custom terminology from Translate service
+echo "Deleting custom terminology..."
 aws translate delete-terminology \
   --name AWSTerminology \
   --region "$REGION" 2>/dev/null
@@ -895,12 +906,14 @@ aws translate delete-terminology \
 echo "✅ Custom terminology deleted"
 
 # Empty and delete S3 bucket
+echo "Deleting S3 bucket and contents..."
 aws s3 rm s3://"$BUCKET_NAME" --recursive --region "$REGION"
 aws s3api delete-bucket --bucket "$BUCKET_NAME" --region "$REGION"
 
 echo "✅ S3 bucket deleted"
 
-# Delete IAM role
+# Delete IAM role policy and role
+echo "Deleting IAM role..."
 aws iam delete-role-policy \
   --role-name TranslateBatchRole \
   --policy-name TranslateS3Access 2>/dev/null
@@ -908,8 +921,15 @@ aws iam delete-role-policy \
 aws iam delete-role --role-name TranslateBatchRole 2>/dev/null
 
 echo "✅ IAM role deleted"
+
+# Remove local translate directory
+echo "Removing local files..."
+cd "$REPO_DIR"
+rm -rf translate-demo
+
+echo "✅ Local files deleted"
 echo ""
-echo "All resources cleaned up!"
+echo "✅ Lab 11.C cleanup complete!"
 ```
 
 ---
