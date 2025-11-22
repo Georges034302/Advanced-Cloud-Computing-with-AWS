@@ -1,4 +1,5 @@
 # Lab 11.D: Amazon SageMaker - Simple Model Deployment
+<img width="1536" height="1024" alt="IMG" src="https://github.com/user-attachments/assets/cfd3e134-1b72-4031-9817-661709857534" />
 
 ## Overview
 This lab introduces Amazon SageMaker for deploying machine learning models without deep ML expertise. You'll use pre-built algorithms, deploy a simple XGBoost model for classification, create real-time prediction endpoints, perform batch predictions, and implement A/B testing. Focus is on practical ML deployment, not model training theory.
