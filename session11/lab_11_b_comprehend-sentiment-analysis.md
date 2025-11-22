@@ -303,8 +303,12 @@ echo "✅ Syntax analysis complete (DET=Determiner, ADJ=Adjective, NOUN=Noun, VE
 echo ""
 echo "Creating sample customer reviews..."
 
-mkdir -p /tmp/comprehend-demo
-cd /tmp/comprehend-demo
+# Get repository root directory
+REPO_DIR=$(git rev-parse --show-toplevel)
+
+# Create comprehend directory in repository
+mkdir -p "$REPO_DIR/comprehend-demo"
+cd "$REPO_DIR/comprehend-demo"
 
 cat > reviews.json <<'EOF'
 [
@@ -353,6 +357,9 @@ echo "✅ Customer reviews file created: reviews.json"
 ```bash
 echo ""
 echo "Creating Python script for batch sentiment analysis..."
+
+# Navigate to comprehend directory
+cd "$REPO_DIR/comprehend-demo"
 
 cat > analyze_reviews.py <<'EOF'
 #!/usr/bin/env python3
@@ -455,6 +462,9 @@ echo ""
 echo "Running batch sentiment analysis on customer reviews..."
 echo ""
 
+# Navigate to comprehend directory and run analysis
+cd "$REPO_DIR/comprehend-demo"
+
 python3 analyze_reviews.py
 
 echo ""
@@ -522,6 +532,9 @@ echo "✅ S3 bucket created"
 echo ""
 echo "Preparing batch input file..."
 
+# Navigate to comprehend directory
+cd "$REPO_DIR/comprehend-demo"
+
 # Create batch input file (one document per line)
 cat > batch_input.txt <<'EOF'
 This product is amazing! Best purchase I ever made.
@@ -545,6 +558,9 @@ echo "✅ Batch input file uploaded to S3"
 ```bash
 echo ""
 echo "Creating IAM role for Comprehend batch jobs..."
+
+# Navigate to comprehend directory
+cd "$REPO_DIR/comprehend-demo"
 
 # Create trust policy
 cat > comprehend-trust-policy.json <<'EOF'
@@ -663,6 +679,9 @@ done
 echo ""
 echo "Retrieving batch analysis results..."
 
+# Navigate to comprehend directory
+cd "$REPO_DIR/comprehend-demo"
+
 # Download output
 aws s3 sync s3://"$BUCKET_NAME"/output/ ./output/ \
   --region "$REGION"
@@ -696,6 +715,9 @@ echo "✅ Batch results retrieved"
 ```bash
 echo ""
 echo "Creating social media sentiment tracker..."
+
+# Navigate to comprehend directory
+cd "$REPO_DIR/comprehend-demo"
 
 cat > social_media_analysis.py <<'EOF'
 #!/usr/bin/env python3
@@ -774,6 +796,9 @@ echo ""
 echo "Running social media sentiment analysis..."
 echo ""
 
+# Navigate to comprehend directory and run analysis
+cd "$REPO_DIR/comprehend-demo"
+
 python3 social_media_analysis.py
 
 echo ""
@@ -802,6 +827,12 @@ aws iam delete-role-policy \
 aws iam delete-role --role-name ComprehendBatchRole
 
 echo "✅ IAM role deleted"
+
+# Remove local comprehend directory
+cd "$REPO_DIR"
+rm -rf comprehend-demo
+
+echo "✅ Local files deleted"
 echo ""
 echo "All resources cleaned up!"
 ```
