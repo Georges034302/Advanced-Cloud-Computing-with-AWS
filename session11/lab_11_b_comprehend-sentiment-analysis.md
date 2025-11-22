@@ -1,4 +1,5 @@
 # Lab 11.B: Amazon Comprehend - Text Sentiment Analysis
+<img width="1536" height="1024" alt="IMG" src="https://github.com/user-attachments/assets/f2ed9440-ff3b-4b8c-b2c9-722884ad66de" />
 
 ## Overview
 This lab introduces Amazon Comprehend for natural language processing (NLP) without requiring ML expertise. You'll analyze text sentiment, detect entities (people, places, organizations), identify key phrases, detect language, perform syntax analysis, and extract insights from customer reviews and social media posts.
