@@ -87,7 +87,22 @@ echo "TF_STATE_BUCKET=$TF_STATE_BUCKET"
 
 ---
 
-## Step 2 – Verify GitHub Repository
+## Step 2 – Create Application Directory Structure
+
+**Directory structure to be created:**
+```
+repo-root/
+├── .github/
+│   └── workflows/
+│       └── deploy-terraform.yml
+└── terraform-vpc-app/
+    ├── backend.tf
+    ├── providers.tf
+    ├── variables.tf
+    ├── main.tf
+    ├── outputs.tf
+    └── terraform.tfvars
+```
 
 ```bash
 # Navigate to repository root
@@ -97,25 +112,22 @@ cd "$REPO_DIR"
 # Sync with remote
 git checkout main
 git pull origin main
+
+# Create directory structure
+mkdir -p "$APP_FOLDER"
+mkdir -p .github/workflows
+
+echo "✅ Directory structure created"
 ```
 
 ---
 
-## Step 3 – Create Application Directory
+## Step 3 – Create Terraform Backend Configuration
 
 ```bash
-# Create application folder
-mkdir -p "$APP_FOLDER"
-cd "$APP_FOLDER"
-
-echo "Created application directory: $APP_FOLDER"
+# Navigate to application directory
+cd "$REPO_DIR/$APP_FOLDER"
 ```
-
----
-
-## Step 4 – Create Terraform Backend Configuration
-
-Create `backend.tf`:
 
 ```bash
 cat > backend.tf << 'EOF'
@@ -132,13 +144,11 @@ terraform {
   }
 }
 EOF
-
-echo "Created backend.tf"
 ```
 
 ---
 
-## Step 5 – Create Terraform Provider Configuration
+## Step 4 – Create Terraform Provider Configuration
 
 Create `providers.tf`:
 
@@ -168,13 +178,11 @@ provider "aws" {
   }
 }
 EOF
-
-echo "Created providers.tf"
 ```
 
 ---
 
-## Step 6 – Create Terraform Variables
+## Step 5 – Create Terraform Variables
 
 Create `variables.tf`:
 
@@ -224,13 +232,11 @@ variable "project_name" {
   default     = "terraform-vpc-cicd"
 }
 EOF
-
-echo "Created variables.tf"
 ```
 
 ---
 
-## Step 7 – Create Terraform Main Configuration
+## Step 6 – Create Terraform Main Configuration
 
 Create `main.tf`:
 
@@ -378,13 +384,11 @@ resource "aws_instance" "web" {
   }
 }
 EOF
-
-echo "Created main.tf"
 ```
 
 ---
 
-## Step 8 – Create Terraform Outputs
+## Step 7 – Create Terraform Outputs
 
 Create `outputs.tf`:
 
@@ -432,17 +436,15 @@ output "security_group_id" {
   value       = aws_security_group.web.id
 }
 EOF
-
-echo "Created outputs.tf"
 ```
 
 ---
 
-## Step 9 – Create GitHub Actions Workflow
+## Step 8 – Create GitHub Actions Workflow
 
 ```bash
-# Create GitHub Actions directory
-mkdir -p .github/workflows
+# Navigate to repository root
+cd "$REPO_DIR"
 
 # Create Terraform deployment workflow
 cat > .github/workflows/deploy-terraform.yml <<'EOF'
@@ -520,11 +522,14 @@ echo "✅ GitHub Actions workflow created"
 
 ---
 
-## Step 10 – Create README
+## Step 9 – Create README
 
-Create `README.md`:
+Create `README.md` in the application folder:
 
 ```bash
+# Navigate to application directory
+cd "$REPO_DIR/$APP_FOLDER"
+
 cat > README.md << 'EOF'
 # Terraform VPC CI/CD
 
@@ -557,19 +562,17 @@ GitHub Push → GitHub Actions → Terraform Apply → AWS Resources
 - S3 Bucket: Stores terraform.tfstate
 - DynamoDB Table: Provides state locking for concurrent operations
 EOF
-
-echo "Created README.md"
 ```
 
 ---
 
-## Step 11 – Create AWS Credentials for GitHub Actions
+## Step 10 – Create AWS Credentials for GitHub Actions
 
 ```bash
-# Create IAM user for GitHub Actions
+# Create IAM user for GitHub Actions Terraform deployments
 aws iam create-user --user-name github-actions-terraform-deploy
 
-# Create access policy for Terraform deployments
+# Create IAM policy with permissions for EC2, VPC, S3, DynamoDB
 cat > github-actions-terraform-policy.json <<EOF
 {
   "Version": "2012-10-17",
@@ -624,12 +627,12 @@ ACCESS_KEYS=$(aws iam create-access-key \
   --user-name github-actions-terraform-deploy \
   --output json)
 
+# Extract access keys
 AWS_ACCESS_KEY_ID=$(echo "$ACCESS_KEYS" | jq -r '.AccessKey.AccessKeyId')
 AWS_SECRET_ACCESS_KEY=$(echo "$ACCESS_KEYS" | jq -r '.AccessKey.SecretAccessKey')
 
-echo "✅ IAM user created with access keys"
 echo ""
-echo "⚠️  SAVE THESE CREDENTIALS - They will not be shown again:"
+echo "⚠️  SAVE THESE CREDENTIALS (will not be shown again):"
 echo "AWS_ACCESS_KEY_ID=$AWS_ACCESS_KEY_ID"
 echo "AWS_SECRET_ACCESS_KEY=$AWS_SECRET_ACCESS_KEY"
 echo "TF_STATE_BUCKET=$TF_STATE_BUCKET"
@@ -637,7 +640,7 @@ echo "TF_STATE_BUCKET=$TF_STATE_BUCKET"
 
 ---
 
-## Step 12 – Configure GitHub Secrets
+## Step 11 – Configure GitHub Secrets
 
 ```bash
 echo "Configure GitHub repository secrets:"
@@ -661,42 +664,42 @@ read
 
 ---
 
-## Step 13 – Commit and Push to GitHub
+## Step 12 – Commit and Push to GitHub
 
 ```bash
 # Navigate to repository root
 cd "$REPO_DIR"
 
-# Add all files
+# Stage Terraform files and workflow
 git add "$APP_FOLDER/" .github/
 
-# Commit changes
+# Commit with descriptive message
 git commit -m "Add Terraform VPC with GitHub Actions CI/CD"
 
-# Push to GitHub (triggers workflow)
+# Push to GitHub (triggers GitHub Actions workflow)
 git push origin main
 
-echo "✅ Code pushed - GitHub Actions workflow will start automatically"
+echo ""
 echo "📊 Monitor workflow: https://github.com/${GITHUB_OWNER}/${GITHUB_REPO}/actions"
 ```
 
 ---
 
-## Step 14 – Create S3 Bucket for Terraform State
+## Step 13 – Create S3 Bucket for Terraform State
 
 ```bash
-# Create S3 bucket for Terraform state
+# Create S3 bucket for Terraform remote state storage
 aws s3api create-bucket \
   --bucket "$TF_STATE_BUCKET" \
   --region "$REGION" \
   --create-bucket-configuration LocationConstraint="$REGION"
 
-# Enable versioning for state bucket
+# Enable versioning (allows state rollback)
 aws s3api put-bucket-versioning \
   --bucket "$TF_STATE_BUCKET" \
   --versioning-configuration Status=Enabled
 
-# Enable encryption
+# Enable server-side encryption
 aws s3api put-bucket-encryption \
   --bucket "$TF_STATE_BUCKET" \
   --server-side-encryption-configuration '{
@@ -706,16 +709,14 @@ aws s3api put-bucket-encryption \
       }
     }]
   }'
-
-echo "Created S3 bucket: $TF_STATE_BUCKET"
 ```
 
 ---
 
-## Step 15 – Create DynamoDB Table for State Locking
+## Step 14 – Create DynamoDB Table for State Locking
 
 ```bash
-# Create DynamoDB table for Terraform state locking
+# Create DynamoDB table for state locking (prevents concurrent modifications)
 aws dynamodb create-table \
   --table-name "$TF_LOCK_TABLE" \
   --attribute-definitions AttributeName=LockID,AttributeType=S \
@@ -723,47 +724,44 @@ aws dynamodb create-table \
   --billing-mode PAY_PER_REQUEST \
   --region "$REGION"
 
-# Wait for table to be active
+# Wait for table creation to complete
 aws dynamodb wait table-exists \
   --table-name "$TF_LOCK_TABLE" \
   --region "$REGION"
-
-echo "Created DynamoDB table: $TF_LOCK_TABLE"
 ```
 
 ---
 
-## Step 16 – Monitor GitHub Actions Workflow
+## Step 15 – Monitor GitHub Actions Workflow
 
 ```bash
-# Open workflow in browser
-echo "📊 Monitor deployment:"
-echo "https://github.com/${GITHUB_OWNER}/${GITHUB_REPO}/actions"
+cd "$REPO_DIR"
+
+git add .
+
+git commit -m "Add Terraform VPC with GitHub Actions CI/CD"
+
+git push origin main
+
 echo ""
-echo "Or use GitHub CLI:"
-gh run list --limit 5
-gh run watch
+echo "📊 Monitor workflow: https://github.com/${GITHUB_OWNER}/${GITHUB_REPO}/actions"
 ```
 
 ---
 
-## Step 17 – Verify Terraform Deployment
+## Step 16 – Verify Terraform Deployment
 
 ```bash
-# Wait for GitHub Actions workflow to complete (2-3 minutes)
-echo "Waiting for deployment to complete..."
-sleep 120
-
-# Check VPC creation
+# Verify VPC was created by Terraform
 VPC_ID=$(aws ec2 describe-vpcs \
   --filters "Name=tag:Name,Values=terraform-vpc-cicd-vpc" \
   --query 'Vpcs[0].VpcId' \
   --output text \
   --region "$REGION")
 
-echo "VPC_ID=$VPC_ID"
+echo "VPC ID: $VPC_ID"
 
-# Check EC2 instance
+# Verify EC2 instance is running
 INSTANCE_ID=$(aws ec2 describe-instances \
   --filters "Name=tag:Name,Values=terraform-vpc-cicd-web-server" \
             "Name=instance-state-name,Values=running" \
@@ -777,200 +775,31 @@ INSTANCE_IP=$(aws ec2 describe-instances \
   --output text \
   --region "$REGION")
 
-echo "INSTANCE_ID=$INSTANCE_ID"
-echo "INSTANCE_IP=$INSTANCE_IP"
+echo "Instance ID: $INSTANCE_ID"
+echo "Instance IP: $INSTANCE_IP"
 ```
 
 ---
 
-## Step 18 – View Terraform Outputs
+## Step 17 – View Terraform Outputs
 
 ```bash
-# Get Terraform state from S3
+# Download Terraform state file from S3
 aws s3 cp "s3://${TF_STATE_BUCKET}/terraform-vpc/terraform.tfstate" terraform.tfstate
 
-# Extract outputs using jq
-cat terraform.tfstate | jq '.outputs'
+# View outputs from state file
+jq '.outputs' terraform.tfstate
 
-# Or view directly from workflow logs
-echo "View outputs in GitHub Actions:"
+# Alternative: view outputs in GitHub Actions workflow logs
 echo "https://github.com/${GITHUB_OWNER}/${GITHUB_REPO}/actions"
 ```
 
 ---
 
-## Step 19 – Test Web Server
+## Step 18 – Test Web Server
 
 ```bash
-# Create CodeStar connection to GitHub
-CONNECTION_ARN=$(aws codestar-connections create-connection \
-  --provider-type GitHub \
-  --connection-name terraform-github-connection \
-  --region "$REGION" \
-  --query 'ConnectionArn' \
-  --output text)
-
-echo "CONNECTION_ARN=$CONNECTION_ARN"
-echo ""
-echo "⚠️  IMPORTANT: Complete the connection in AWS Console:"
-echo "1. Go to: https://${REGION}.console.aws.amazon.com/codesuite/settings/connections"
-echo "2. Find 'terraform-github-connection' with status 'PENDING'"
-echo "3. Click 'Update pending connection'"
-echo "4. Click 'Install a new app' or select existing GitHub App"
-echo "5. Authorize AWS Connector for GitHub"
-echo "6. Click 'Connect'"
-echo ""
-read -p "Press Enter after completing the connection in AWS Console..."
-```
-
----
-
-## Step 18 – Create CodePipeline
-
-```bash
-# Create CodePipeline configuration
-cat > codepipeline-config.json << EOF
-{
-  "pipeline": {
-    "name": "$PIPELINE_NAME",
-    "roleArn": "arn:aws:iam::${ACCOUNT_ID}:role/CodePipelineTerraformRole",
-    "artifactStore": {
-      "type": "S3",
-      "location": "$ARTIFACT_BUCKET"
-    },
-    "stages": [
-      {
-        "name": "Source",
-        "actions": [
-          {
-            "name": "SourceAction",
-            "actionTypeId": {
-              "category": "Source",
-              "owner": "AWS",
-              "provider": "CodeStarSourceConnection",
-              "version": "1"
-            },
-            "configuration": {
-              "ConnectionArn": "$CONNECTION_ARN",
-              "FullRepositoryId": "${GITHUB_OWNER}/${GITHUB_REPO}",
-              "BranchName": "main",
-              "OutputArtifactFormat": "CODE_ZIP"
-            },
-            "outputArtifacts": [
-              {
-                "name": "SourceOutput"
-              }
-            ]
-          }
-        ]
-      },
-      {
-        "name": "Deploy",
-        "actions": [
-          {
-            "name": "TerraformDeploy",
-            "actionTypeId": {
-              "category": "Build",
-              "owner": "AWS",
-              "provider": "CodeBuild",
-              "version": "1"
-            },
-            "configuration": {
-              "ProjectName": "$CODEBUILD_PROJECT"
-            },
-            "inputArtifacts": [
-              {
-                "name": "SourceOutput"
-              }
-            ],
-            "outputArtifacts": [
-              {
-                "name": "TerraformOutputs"
-              }
-            ]
-          }
-        ]
-      }
-    ]
-  }
-}
-EOF
-
-# Create CodePipeline
-aws codepipeline create-pipeline \
-  --cli-input-json file://codepipeline-config.json \
-  --region "$REGION"
-
-echo "Created CodePipeline: $PIPELINE_NAME"
-```
-
----
-
-## Step 19 – Monitor Pipeline Execution
-
-```bash
-# Get pipeline execution status
-aws codepipeline get-pipeline-state \
-  --name "$PIPELINE_NAME" \
-  --region "$REGION" \
-  --query 'stageStates[*].[stageName,latestExecution.status]' \
-  --output table
-
-echo ""
-echo "Pipeline Console:"
-echo "https://${REGION}.console.aws.amazon.com/codesuite/codepipeline/pipelines/${PIPELINE_NAME}/view"
-```
-
-**Wait for pipeline to complete** (approximately 5-8 minutes):
-- Source stage: Pull code from GitHub
-- Deploy stage: Run Terraform in CodeBuild
-
----
-
-## Step 20 – Verify Terraform Outputs
-
-```bash
-# Wait for pipeline to complete
-echo "Waiting for pipeline to complete..."
-aws codepipeline get-pipeline-state \
-  --name "$PIPELINE_NAME" \
-  --region "$REGION" \
-  --query 'stageStates[*].[stageName,latestExecution.status]' \
-  --output table
-
-# Get CodeBuild build ID
-BUILD_ID=$(aws codebuild list-builds-for-project \
-  --project-name "$CODEBUILD_PROJECT" \
-  --region "$REGION" \
-  --query 'ids[0]' \
-  --output text)
-
-echo "Latest build: $BUILD_ID"
-
-# Get CodeBuild logs
-echo ""
-echo "CodeBuild Logs:"
-aws codebuild batch-get-builds \
-  --ids "$BUILD_ID" \
-  --region "$REGION" \
-  --query 'builds[0].logs.deepLink' \
-  --output text
-```
-
----
-
-## Step 21 – Test Web Server
-
-```bash
-# Wait for GitHub Actions to complete (5-8 minutes)
-echo "Waiting for deployment..."
-sleep 60
-
-# Get VPC ID from Terraform state in S3
-aws s3 cp "s3://${TF_STATE_BUCKET}/terraform-vpc/terraform.tfstate" - 2>/dev/null | \
-  grep -A 5 '"web_server_public_ip"' || echo "State file not yet available"
-
-# Get instance IP from EC2 tags
+# Get web server public IP
 WEB_IP=$(aws ec2 describe-instances \
   --filters "Name=tag:Project,Values=TerraformVPCCICD" \
             "Name=instance-state-name,Values=running" \
@@ -978,12 +807,9 @@ WEB_IP=$(aws ec2 describe-instances \
   --output text \
   --region "$REGION")
 
-echo ""
-echo "Web Server IP: $WEB_IP"
-echo "Web Server URL: http://$WEB_IP"
-echo ""
-echo "Testing web server..."
-curl -s "http://$WEB_IP" || echo "Server not yet ready (wait 2-3 minutes)"
+# Test web server (wait 2-3 minutes if server not ready)
+echo "Testing: http://$WEB_IP"
+curl -s "http://$WEB_IP" || echo "⚠️  Server not ready yet (wait 2-3 minutes)"
 ```
 
 **Expected Output:**
@@ -995,7 +821,7 @@ curl -s "http://$WEB_IP" || echo "Server not yet ready (wait 2-3 minutes)"
 
 ---
 
-## Step 20 – Test GitOps Workflow
+## Step 19 – Test GitOps Workflow
 
 ```bash
 # Navigate to application directory
@@ -1007,13 +833,11 @@ cat >> main.tf << 'EOF'
 # Updated: $(date)
 EOF
 
-# Commit and push changes
+# Commit and push changes (triggers GitHub Actions)
 git add main.tf
-git commit -m "Update Terraform configuration - test GitOps workflow"
+git commit -m "Test GitOps workflow - auto-trigger deployment"
 git push origin main
 
-echo ""
-echo "✅ Pushed changes to GitHub - GitHub Actions will automatically trigger"
 echo "📊 Monitor: https://github.com/${GITHUB_OWNER}/${GITHUB_REPO}/actions"
 ```
 
@@ -1025,29 +849,28 @@ echo "📊 Monitor: https://github.com/${GITHUB_OWNER}/${GITHUB_REPO}/actions"
 
 ---
 
-## Step 21 – View Terraform State
+## Step 20 – View Terraform State
 
 ```bash
-# Download and view Terraform state from S3
+# Download Terraform state from S3 and format as JSON
 aws s3 cp "s3://${TF_STATE_BUCKET}/terraform-vpc/terraform.tfstate" - | jq '.' > terraform-state.json
 
-echo "Terraform state downloaded to terraform-state.json"
-echo ""
+# View state file version
 echo "State version:"
 jq '.version' terraform-state.json
 
-echo ""
-echo "Resources in state:"
+# List all resources in state
+echo "\nResources:"
 jq '.resources[].type' terraform-state.json
 
-echo ""
-echo "Outputs:"
+# Show outputs
+echo "\nOutputs:"
 jq '.outputs' terraform-state.json
 ```
 
 ---
 
-## Step 22 – Compare Terraform vs SAM/CloudFormation CI/CD
+## Step 21 – Compare Terraform vs SAM/CloudFormation CI/CD
 
 | Feature | Terraform (Lab 10.G) | SAM (Lab 10.F) | CloudFormation (Session 9) |
 |---------|---------------------|----------------|----------------------------|
@@ -1085,22 +908,22 @@ ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
 TF_STATE_BUCKET="terraform-state-${ACCOUNT_ID}"
 TF_LOCK_TABLE="terraform-state-lock"
 
-# Install Terraform locally (if not already installed)
+# Install Terraform CLI locally
 wget -q https://releases.hashicorp.com/terraform/1.6.6/terraform_1.6.6_linux_amd64.zip
 unzip -q terraform_1.6.6_linux_amd64.zip
 sudo mv terraform /usr/local/bin/
 terraform --version
 
-# Initialize Terraform with S3 backend
+# Initialize Terraform with remote state backend
 cd "$REPO_DIR/terraform-vpc-app"
 terraform init \
   -backend-config="bucket=${TF_STATE_BUCKET}" \
   -backend-config="dynamodb_table=${TF_LOCK_TABLE}"
 
-# Destroy infrastructure
+# Destroy all Terraform-managed infrastructure
 terraform destroy -auto-approve
 
-# Delete IAM user and access keys
+# Delete IAM access keys for GitHub Actions user
 aws iam list-access-keys \
   --user-name github-actions-terraform-deploy \
   --query 'AccessKeyMetadata[*].AccessKeyId' \
@@ -1110,35 +933,48 @@ aws iam list-access-keys \
       --access-key-id "$key"
 done
 
+# Delete IAM policy
 aws iam delete-user-policy \
   --user-name github-actions-terraform-deploy \
   --policy-name TerraformDeployPolicy
 
+# Delete IAM user
 aws iam delete-user \
   --user-name github-actions-terraform-deploy
 
-# Delete S3 bucket
-aws s3 rm "s3://${TF_STATE_BUCKET}" --recursive
+# Delete Terraform state bucket and contents (including all versions)
+aws s3api delete-objects \
+  --bucket "$TF_STATE_BUCKET" \
+  --delete "$(aws s3api list-object-versions \
+    --bucket "$TF_STATE_BUCKET" \
+    --query '{Objects: Versions[].{Key:Key,VersionId:VersionId}}' \
+    --output json)"
+
+aws s3api delete-objects \
+  --bucket "$TF_STATE_BUCKET" \
+  --delete "$(aws s3api list-object-versions \
+    --bucket "$TF_STATE_BUCKET" \
+    --query '{Objects: DeleteMarkers[].{Key:Key,VersionId:VersionId}}' \
+    --output json)" 2>/dev/null || true
+
 aws s3 rb "s3://${TF_STATE_BUCKET}"
 
-# Delete DynamoDB table
+# Delete DynamoDB state locking table
 aws dynamodb delete-table \
   --table-name "$TF_LOCK_TABLE" \
   --region "$REGION"
 
-# Remove application directory and workflow
+# Remove local files and commit changes
 cd "$REPO_DIR"
-rm -rf "$APP_FOLDER" .github/workflows/deploy-terraform.yml
+rm -rf terraform-vpc-app .github github-actions-terraform-policy.json terraform.tfstate terraform_1.6.6_linux_amd64.zip
 git add -A
 git commit -m "Cleanup: Remove Terraform VPC application"
 git push origin main
 
-echo ""
 echo "⚠️  Manually remove GitHub secrets:"
 echo "https://github.com/${GITHUB_OWNER}/${GITHUB_REPO}/settings/secrets/actions"
-
 echo ""
-echo "✅ Cleanup complete!"
+echo "✅ Lab 10.G cleanup complete!"
 ```
 
 ---
