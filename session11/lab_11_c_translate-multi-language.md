@@ -389,11 +389,12 @@ fi
 aws s3 cp custom_terms.csv s3://"$BUCKET_NAME"/custom_terms.csv \
   --region "$REGION"
 
-# Import custom terminology into Translate service (base64 encoded)
+# Import custom terminology into Translate service
 aws translate import-terminology \
   --name AWSTerminology \
   --merge-strategy OVERWRITE \
-  --terminology-data "Format=CSV,File=$(base64 -w 0 < custom_terms.csv)" \
+  --terminology-data Format=CSV \
+  --data-file fileb://custom_terms.csv \
   --region "$REGION"
 ```
 
@@ -691,7 +692,7 @@ done
 
 ---
 
-## Step 15 – Retrieve Batch Translation Results
+## Step 15 – Retrieve Batch Translation Results (wait 5-10 minutes for translate jobs)
 
 ```bash
 echo ""
@@ -931,6 +932,11 @@ rm -rf translate-demo
 echo "✅ Local files deleted"
 echo ""
 echo "✅ Lab 11.C cleanup complete!"
+echo ""
+echo "Note: If you started a batch translation job (Step 14), it cannot be cancelled."
+echo "The job will complete automatically and attempt to write output to S3."
+echo "Since the S3 bucket is deleted, the output write will fail (harmless)."
+echo "Batch job records auto-expire after 7 days."
 ```
 
 ---
