@@ -1,4 +1,5 @@
 # Lab 11.C: Amazon Translate - Multi-Language Translation API
+<img width="1536" height="1024" alt="IMG" src="https://github.com/user-attachments/assets/d6846909-817d-462e-a610-ec797ca7973f" />
 
 ## Overview
 This lab introduces Amazon Translate for real-time language translation supporting 75+ languages. You'll translate text, documents, and web content, implement auto-language detection, perform batch translations, create a multi-language chatbot, and handle custom terminology for accurate domain-specific translations.
