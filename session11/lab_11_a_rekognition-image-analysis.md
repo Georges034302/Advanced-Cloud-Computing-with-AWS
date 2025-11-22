@@ -1,4 +1,5 @@
 # Lab 11.A: Amazon Rekognition - Image Analysis and Face Detection
+<img width="1536" height="724" alt="IMG" src="https://github.com/user-attachments/assets/f58ffa85-d64c-4b4f-abb8-dc5c02ea5eeb" />
 
 ## Overview
 This lab introduces Amazon Rekognition for image analysis using machine learning without requiring ML expertise. You'll detect faces, analyze facial attributes, identify objects and scenes, detect text in images, and compare faces across different images.
