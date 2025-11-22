@@ -92,12 +92,34 @@ git pull origin main
 
 ---
 
-## Step 3 – Create Application Directory
+## Step 3 – Create Application Directory Structure
+
+**Directory structure to be created:**
+```
+repo-root/
+├── .github/
+│   └── workflows/
+│       └── deploy-sam.yml
+└── serverless-sam-app/
+    ├── joke_api/
+    │   ├── app.py
+    │   └── requirements.txt
+    ├── events/
+    │   ├── root-event.json
+    │   └── joke-event.json
+    └── template.yaml
+```
 
 ```bash
-# Create and navigate to application directory
-mkdir -p "$APP_FOLDER"
-cd "$APP_FOLDER"
+# Navigate to repository root
+cd "$REPO_DIR"
+
+# Create directory structure
+mkdir -p "$APP_FOLDER/joke_api"
+mkdir -p "$APP_FOLDER/events"
+mkdir -p .github/workflows
+
+echo "✅ Directory structure created"
 ```
 
 ---
@@ -105,8 +127,8 @@ cd "$APP_FOLDER"
 ## Step 4 – Create Lambda Function
 
 ```bash
-# Create Lambda function directory
-mkdir -p joke_api
+# Navigate to application directory
+cd "$REPO_DIR/$APP_FOLDER"
 
 # Create Lambda function handler
 cat > joke_api/app.py <<'EOF'
@@ -272,8 +294,8 @@ EOF
 ## Step 6 – Create GitHub Actions Workflow
 
 ```bash
-# Create GitHub Actions directory
-mkdir -p .github/workflows
+# Navigate to repository root
+cd "$REPO_DIR"
 
 # Create deployment workflow
 cat > .github/workflows/deploy-sam.yml <<'EOF'
@@ -357,8 +379,8 @@ echo "✅ GitHub Actions workflow created"
 ## Step 7 – Create Lambda Tests (Optional)
 
 ```bash
-# Create test events directory
-mkdir -p events
+# Navigate to application directory
+cd "$REPO_DIR/$APP_FOLDER"
 
 # Create test event for root endpoint
 cat > events/root-event.json <<'EOF'
@@ -388,6 +410,9 @@ EOF
 ## Step 8 – Create AWS Credentials for GitHub Actions
 
 ```bash
+# Navigate to repository root for policy file
+cd "$REPO_DIR"
+
 # Create IAM user for GitHub Actions
 aws iam create-user --user-name github-actions-sam-deploy
 
@@ -410,7 +435,10 @@ cat > github-actions-policy.json <<EOF
         "cloudformation:ExecuteChangeSet",
         "cloudformation:GetTemplateSummary"
       ],
-      "Resource": "arn:aws:cloudformation:${REGION}:${ACCOUNT_ID}:stack/${STACK_NAME}/*"
+      "Resource": [
+        "arn:aws:cloudformation:${REGION}:${ACCOUNT_ID}:stack/${STACK_NAME}/*",
+        "arn:aws:cloudformation:${REGION}:aws:transform/Serverless-2016-10-31"
+      ]
     },
     {
       "Effect": "Allow",
@@ -592,7 +620,6 @@ gh run watch
 ```bash
 # Wait for workflow to complete (2-3 minutes)
 echo "Waiting for deployment to complete..."
-sleep 120
 
 # Get CloudFormation stack outputs
 API_URL=$(aws cloudformation describe-stacks \
@@ -620,10 +647,9 @@ echo -e "\nTesting health endpoint:"
 curl -s "$API_URL/health" | jq .
 
 # Open in browser
-echo -e "\n📱 Open in browser:"
-echo "$API_URL/"
-echo "$API_URL/joke"
-echo "$API_URL/health"
+"$BROWSER" "$API_URL/"
+"$BROWSER" "$API_URL/joke"
+"$BROWSER" "$API_URL/health"
 ```
 
 ---

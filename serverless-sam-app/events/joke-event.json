@@ -1,7 +1,0 @@
-{
-  "httpMethod": "GET",
-  "path": "/joke",
-  "headers": {
-    "Content-Type": "application/json"
-  }
-}
