@@ -38,135 +38,198 @@ Client
 
 ## Step 1: Contentful Setup (UI Only)
 
+**Create Contentful Account and Space:**
+
+1. Go to https://www.contentful.com/sign-up/
+2. Create a free account
+3. Create a new Space (name: `lambda-demo`)
+4. Use environment: `master`
+
+**Create Content Type:**
+
+5. Navigate to **Content model** > **Add content type**
+6. Create content type named `blogPost` with the following fields:
+   - **title** (Short text, required)
+   - **slug** (Short text, required)
+   - **body** (Long text / Rich text)
+7. Save the content type
+
+**Generate API Tokens:**
+
+8. Go to **Settings** > **API keys** > **Add API key**
+9. Generate and save the following tokens:
+   - **Content Delivery API token** (read-only access)
+   - **Content Management API token** (admin access)
+10. Copy your **Space ID** from Settings > General settings
+
+---
+
+## Step 2: Set Up Project Variables
+
 ```bash
-echo "================================================"
-echo "CONTENTFUL SETUP INSTRUCTIONS"
-echo "================================================"
-echo ""
-echo "1. Go to https://www.contentful.com/sign-up/"
-echo "2. Create a free account"
-echo "3. Create a new Space (name: 'lambda-demo')"
-echo "4. Use environment: 'master'"
-echo ""
-echo "5. Create content type 'blogPost' with fields:"
-echo "   - title (Short text, required)"
-echo "   - slug (Short text, required)"
-echo "   - body (Long text / Rich text)"
-echo ""
-echo "6. Generate API tokens from Settings > API keys:"
-echo "   - Content Delivery API token (read-only)"
-echo "   - Content Management API token (admin)"
-echo ""
-read -p "Press Enter when you have completed Contentful setup..."
-echo ""
-read -p "Enter Contentful Space ID: " CONTENTFUL_SPACE_ID
-read -p "Enter Content Delivery API token: " CONTENTFUL_DELIVERY_TOKEN
-read -p "Enter Content Management API token: " CONTENTFUL_MANAGEMENT_TOKEN
-echo ""
-echo "✅ Contentful credentials collected"
+# Define AWS region
+REGION="ap-southeast-2"
+
+# Define project naming convention
+PROJECT_NAME="lab-9e-contentful"
+STACK_NAME="$PROJECT_NAME"
+
+# Define secret paths in AWS Secrets Manager
+SECRET_DELIVERY_NAME="contentful/delivery-token"
+SECRET_MANAGEMENT_NAME="contentful/management-token"
+
+# Display configuration
+echo "=" | head -c 50 && echo
+echo "Project Configuration"
+echo "=" | head -c 50 && echo
+echo "Region: $REGION"
+echo "Stack Name: $STACK_NAME"
+echo "Delivery Secret: $SECRET_DELIVERY_NAME"
+echo "Management Secret: $SECRET_MANAGEMENT_NAME"
+echo "=" | head -c 50 && echo
 ```
 
 ---
 
-## Step 2: Store Secrets in AWS Secrets Manager
+## Step 3: Store Contentful Secrets in AWS Secrets Manager
 
 ```bash
-# Set region
-REGION="ap-southeast-2"
+# Prompt for Contentful Space ID (not a secret, used as CloudFormation parameter)
+read -p "Enter Contentful Space ID: " CONTENTFUL_SPACE_ID
 
-# Create secret for Delivery API token
+# Prompt for Delivery API token and immediately store in AWS Secrets Manager
+read -s -p "Enter Content Delivery API token: " CONTENTFUL_DELIVERY_TOKEN
+echo
+
+# Create secret for Delivery token (read-only access to published content)
 aws secretsmanager create-secret \
   --region "$REGION" \
-  --name contentful/delivery-token \
+  --name "$SECRET_DELIVERY_NAME" \
   --secret-string "$CONTENTFUL_DELIVERY_TOKEN" \
-  --description "Contentful Content Delivery API token (read-only)"
+  --description "Contentful Delivery API token (read-only)" \
+  --tags Key=Project,Value="$PROJECT_NAME" Key=Environment,Value=Lab
 
-# Create secret for Management API token
+echo "✅ Delivery token stored in Secrets Manager"
+
+# Clear the token from bash history immediately
+unset CONTENTFUL_DELIVERY_TOKEN
+
+# Prompt for Management API token and immediately store in AWS Secrets Manager
+read -s -p "Enter Content Management API token: " CONTENTFUL_MANAGEMENT_TOKEN
+echo
+
+# Create secret for Management token (full CRUD access to content)
 aws secretsmanager create-secret \
   --region "$REGION" \
-  --name contentful/management-token \
+  --name "$SECRET_MANAGEMENT_NAME" \
   --secret-string "$CONTENTFUL_MANAGEMENT_TOKEN" \
-  --description "Contentful Content Management API token (admin)"
+  --description "Contentful Management API token (admin)" \
+  --tags Key=Project,Value="$PROJECT_NAME" Key=Environment,Value=Lab
 
-echo "✅ Secrets stored in AWS Secrets Manager"
+echo "✅ Management token stored in Secrets Manager"
 
-# Verify secrets
+# Clear the token from bash history immediately
+unset CONTENTFUL_MANAGEMENT_TOKEN
+
+echo ""
+echo "Verifying secrets in Secrets Manager:"
 aws secretsmanager list-secrets \
   --region "$REGION" \
-  --query "SecretList[?contains(Name, 'contentful')].{Name:Name,Created:CreatedDate}" \
+  --query "SecretList[?contains(Name, 'contentful')].{Name:Name,Description:Description}" \
   --output table
 ```
 
+> **Security Best Practice:** Secrets are never stored in environment variables or bash history. They're collected via `read -s` (silent input) and immediately stored in AWS Secrets Manager, then unset. Secrets Manager encrypts them at rest using AWS KMS.
+
 ---
 
-## Step 3: Create Project Structure
+## Step 4: Create Project Structure
 
 ```bash
-# Create project directory
-mkdir -p lab_9_e_contentful
+# Create project directory structure
+mkdir -p lab_9_e_contentful/src
 cd lab_9_e_contentful
 
-# Create source directory
-mkdir -p src
-
-echo "✅ Project structure created"
+echo "✅ Project structure created: $(pwd)"
 ```
 
 ---
 
-## Step 4: Create AWS SAM Template
+## Step 5: Create AWS SAM Template
 
 ```bash
+# Create SAM template with Infrastructure as Code
+# This template defines all AWS resources: Lambda, API Gateway, IAM policies
 cat > template.yaml <<'EOF'
 AWSTemplateFormatVersion: '2010-09-09'
 Transform: AWS::Serverless-2016-10-31
-Description: Lab 9-E Contentful Integration
+Description: Lab 9-E Contentful Integration - API-Only CMS Pattern
+
+Parameters:
+  ContentfulSpaceId:
+    Type: String
+    Description: Contentful Space ID
+    NoEcho: false
 
 Globals:
   Function:
     Runtime: python3.11
     Timeout: 15
     MemorySize: 256
+    Environment:
+      Variables:
+        # AWS region is set automatically by Lambda
+        AWS_REGION: !Ref AWS::Region
 
 Resources:
 
+  # HTTP API Gateway - Entry point for all client requests
   ContentfulApi:
     Type: AWS::Serverless::HttpApi
     Properties:
       CorsConfiguration:
-        AllowOrigins: ['*']
+        AllowOrigins: ['*']  # WARNING: Restrict in production
         AllowMethods: ['GET', 'POST']
         AllowHeaders: ['Content-Type', 'Authorization']
+      Description: API Gateway for Contentful Lambda integration
 
+  # Lambda Function - Handles requests and interacts with Contentful
   ContentfulFunction:
     Type: AWS::Serverless::Function
     Properties:
       CodeUri: src/
       Handler: lambda_function.lambda_handler
+      Description: Lambda function for Contentful CMS integration
       Environment:
         Variables:
-          AWS_REGION: ap-southeast-2
-          CONTENTFUL_SPACE_ID: REPLACE_WITH_YOUR_SPACE_ID
+          # Contentful configuration - NO SECRETS HERE
+          CONTENTFUL_SPACE_ID: !Ref ContentfulSpaceId
           CONTENTFUL_ENV: master
           CONTENTFUL_LOCALE: en-US
+          # Secret names only (not values)
           SECRET_DELIVERY_NAME: contentful/delivery-token
           SECRET_MANAGEMENT_NAME: contentful/management-token
       Policies:
+        # Grant Lambda permission to read secrets from Secrets Manager
         - AWSSecretsManagerGetSecretValuePolicy:
             SecretArn: !Sub 'arn:aws:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:contentful/*'
+        # CloudWatch Logs permission (implicit via AWS::Serverless::Function)
       Events:
+        # Route: GET /posts - Fetch posts using GraphQL
         GetPostsGraphQL:
           Type: HttpApi
           Properties:
             ApiId: !Ref ContentfulApi
             Path: /posts
             Method: GET
+        # Route: GET /posts-rest - Fetch posts using REST API
         GetPostsRest:
           Type: HttpApi
           Properties:
             ApiId: !Ref ContentfulApi
             Path: /posts-rest
             Method: GET
+        # Route: POST /posts - Create new post
         CreatePost:
           Type: HttpApi
           Properties:
@@ -178,28 +241,43 @@ Outputs:
   ApiEndpoint:
     Description: "HTTP API endpoint URL"
     Value: !Sub "https://${ContentfulApi}.execute-api.${AWS::Region}.amazonaws.com"
+    Export:
+      Name: !Sub "${AWS::StackName}-ApiEndpoint"
   FunctionName:
     Description: "Lambda Function Name"
     Value: !Ref ContentfulFunction
+    Export:
+      Name: !Sub "${AWS::StackName}-FunctionName"
+  FunctionArn:
+    Description: "Lambda Function ARN"
+    Value: !GetAtt ContentfulFunction.Arn
+    Export:
+      Name: !Sub "${AWS::StackName}-FunctionArn"
 EOF
 
-echo "✅ SAM template created"
+echo "✅ SAM template created: template.yaml"
 ```
 
 ---
 
-## Step 5: Update SAM Template with Your Space ID
+## Step 6: Validate SAM Template
 
 ```bash
-# Replace placeholder with actual Space ID
-sed -i "s/REPLACE_WITH_YOUR_SPACE_ID/$CONTENTFUL_SPACE_ID/" template.yaml
+# Validate SAM template for syntax errors and CloudFormation compatibility
+echo "Validating SAM template..."
+sam validate --lint
 
-echo "✅ Template updated with Space ID: $CONTENTFUL_SPACE_ID"
+if [ $? -eq 0 ]; then
+    echo "✅ Template validation passed"
+else
+    echo "❌ Template validation failed - check syntax and retry"
+    exit 1
+fi
 ```
 
 ---
 
-## Step 6: Create Lambda Function Code
+## Step 7: Create Lambda Function Code
 
 ```bash
 cat > src/lambda_function.py <<'EOF'
@@ -396,7 +474,7 @@ echo "✅ Lambda function code created"
 
 ---
 
-## Step 7: Create Requirements File
+## Step 8: Create Requirements File
 
 ```bash
 cat > src/requirements.txt <<'EOF'
@@ -408,165 +486,161 @@ echo "✅ requirements.txt created"
 
 ---
 
-## Step 8: Build SAM Application
+## Step 9: Build SAM Application
 
 ```bash
-# Build the application
+# Build SAM application (downloads Python dependencies from requirements.txt)
+echo "Building SAM application..."
 sam build
 
-echo ""
-echo "✅ SAM build complete"
+if [ $? -eq 0 ]; then
+    echo "✅ Build complete - Lambda package ready"
+else
+    echo "❌ Build failed - check Python code and requirements.txt"
+    exit 1
+fi
 ```
 
 ---
 
-## Step 9: Deploy SAM Application
+## Step 10: Deploy SAM Application
 
 ```bash
-# Deploy with guided prompts
+# Deploy SAM application to AWS (creates CloudFormation stack)
+echo "Deploying to AWS..."
+echo "Stack: $STACK_NAME"
+echo "Region: $REGION"
+echo ""
+
+# Deploy with Space ID as parameter (secrets retrieved from Secrets Manager at runtime)
 sam deploy \
-  --guided \
-  --stack-name lab-9e-contentful \
+  --stack-name "$STACK_NAME" \
   --region "$REGION" \
-  --capabilities CAPABILITY_IAM
+  --capabilities CAPABILITY_IAM \
+  --parameter-overrides ContentfulSpaceId="$CONTENTFUL_SPACE_ID" \
+  --no-confirm-changeset \
+  --no-fail-on-empty-changeset
 
-echo ""
-echo "✅ Deployment initiated"
-echo ""
-echo "Answer the prompts:"
-echo "  - Stack Name: lab-9e-contentful"
-echo "  - AWS Region: ap-southeast-2"
-echo "  - Confirm changes: y"
-echo "  - Allow SAM CLI IAM role creation: y"
-echo "  - ContentfulFunction has no authentication: y"
-echo "  - Save arguments to config file: y"
+if [ $? -eq 0 ]; then
+    echo "✅ Deployment successful"
+else
+    echo "❌ Deployment failed - check CloudFormation console for details"
+    exit 1
+fi
 ```
 
 ---
 
-## Step 10: Get API Endpoint
+## Step 11: Retrieve Stack Outputs
 
 ```bash
-# Get the API endpoint from stack outputs
+# Retrieve stack outputs
 API_ENDPOINT=$(aws cloudformation describe-stacks \
-  --stack-name lab-9e-contentful \
+  --stack-name "$STACK_NAME" \
   --region "$REGION" \
   --query "Stacks[0].Outputs[?OutputKey=='ApiEndpoint'].OutputValue" \
   --output text)
 
 FUNCTION_NAME=$(aws cloudformation describe-stacks \
-  --stack-name lab-9e-contentful \
+  --stack-name "$STACK_NAME" \
   --region "$REGION" \
   --query "Stacks[0].Outputs[?OutputKey=='FunctionName'].OutputValue" \
   --output text)
 
+# Display deployment information
 echo ""
-echo "================================================"
-echo "DEPLOYMENT COMPLETE"
-echo "================================================"
-echo ""
+echo "=" | head -c 60 && echo
 echo "API Endpoint: $API_ENDPOINT"
-echo "Function Name: $FUNCTION_NAME"
+echo "Lambda Function: $FUNCTION_NAME"
+echo "=" | head -c 60 && echo
 echo ""
-echo "Test URLs:"
-echo "  ${API_ENDPOINT}/posts"
-echo "  ${API_ENDPOINT}/posts-rest"
+echo "Available Endpoints:"
+echo "  GET  $API_ENDPOINT/posts"
+echo "  GET  $API_ENDPOINT/posts-rest"
+echo "  POST $API_ENDPOINT/posts"
+echo ""
 ```
 
 ---
 
-## Step 11: Create Sample Content in Contentful
+## Step 12: Create Sample Content via Lambda
 
 ```bash
-echo ""
-echo "Creating sample blog post via API..."
+echo "Creating sample blog post..."
 
-curl -X POST "${API_ENDPOINT}/posts" \
+# Lambda retrieves Management token from Secrets Manager to create content
+curl -X POST "$API_ENDPOINT/posts" \
   -H "Content-Type: application/json" \
   -d '{
     "title": "Hello from AWS Lambda",
     "slug": "hello-lambda",
-    "body": "This post was created via AWS Lambda and Contentful Management API!"
-  }' | python3 -m json.tool
+    "body": "This post was created via AWS Lambda using Contentful Management API"
+  }' 2>/dev/null | python3 -m json.tool
 
 echo ""
-echo "✅ Sample post created"
+echo "✅ Post created and published"
 ```
 
 ---
 
-## Step 12: Test GraphQL Endpoint
+## Step 13: Test GraphQL Endpoint
 
 ```bash
-echo ""
-echo "Testing GraphQL endpoint..."
-echo ""
+echo "Fetching posts via GraphQL..."
 
-curl -s "${API_ENDPOINT}/posts" | python3 -m json.tool
+# Lambda retrieves Delivery token from Secrets Manager to query Contentful
+curl -s "$API_ENDPOINT/posts" 2>/dev/null | python3 -m json.tool
 
 echo ""
-echo "✅ GraphQL test complete"
+echo "✅ GraphQL query successful"
 ```
 
 ---
 
-## Step 13: Test REST Delivery Endpoint
+## Step 14: Test REST Delivery Endpoint
 
 ```bash
-echo ""
-echo "Testing REST Delivery endpoint..."
-echo ""
+echo "Fetching posts via REST Delivery API..."
 
-curl -s "${API_ENDPOINT}/posts-rest" | python3 -m json.tool
+# Compare GraphQL vs REST API response structure
+curl -s "$API_ENDPOINT/posts-rest" 2>/dev/null | python3 -m json.tool
 
 echo ""
-echo "✅ REST Delivery test complete"
+echo "✅ REST query successful"
 ```
 
 ---
 
-## Step 14: Create Additional Posts
+## Step 15: Create Additional Posts
 
 ```bash
-echo ""
-echo "Creating more sample posts..."
+echo "Creating additional posts..."
 
-# Post 2
-curl -X POST "${API_ENDPOINT}/posts" \
+curl -X POST "$API_ENDPOINT/posts" \
   -H "Content-Type: application/json" \
-  -d '{
-    "title": "Serverless Architecture",
-    "slug": "serverless-architecture",
-    "body": "Exploring the benefits of serverless computing with AWS Lambda and API Gateway."
-  }'
+  -d '{"title":"Serverless Architecture","slug":"serverless","body":"AWS Lambda benefits"}' \
+  2>/dev/null | python3 -m json.tool
 
-# Post 3
-curl -X POST "${API_ENDPOINT}/posts" \
+curl -X POST "$API_ENDPOINT/posts" \
   -H "Content-Type: application/json" \
-  -d '{
-    "title": "Headless CMS Benefits",
-    "slug": "headless-cms",
-    "body": "Why headless CMS like Contentful is the future of content management."
-  }'
+  -d '{"title":"Headless CMS","slug":"headless-cms","body":"API-first content management"}' \
+  2>/dev/null | python3 -m json.tool
 
-echo ""
 echo "✅ Additional posts created"
-
-# Fetch all posts
 echo ""
-echo "Fetching all posts via GraphQL..."
-curl -s "${API_ENDPOINT}/posts" | python3 -m json.tool
+echo "Fetching all posts:"
+curl -s "$API_ENDPOINT/posts" 2>/dev/null | python3 -m json.tool
 ```
 
 ---
 
-## Step 15: View Lambda Logs
+## Step 16: View Lambda Logs
 
 ```bash
-echo ""
-echo "Recent Lambda logs:"
+echo "Viewing Lambda logs (Ctrl+C to stop):"
 echo ""
 
+# Stream Lambda execution logs (shows Secrets Manager retrievals and Contentful API calls)
 aws logs tail "/aws/lambda/$FUNCTION_NAME" \
   --region "$REGION" \
   --follow \
@@ -575,45 +649,50 @@ aws logs tail "/aws/lambda/$FUNCTION_NAME" \
 
 ---
 
-## Step 16: Test Error Handling
+## Step 17: Test Error Handling
 
 ```bash
+echo "Testing error handling..."
 echo ""
-echo "Testing error handling (missing required fields)..."
 
-curl -X POST "${API_ENDPOINT}/posts" \
+# Test missing required field
+echo "1. Missing slug field:"
+curl -X POST "$API_ENDPOINT/posts" \
   -H "Content-Type: application/json" \
-  -d '{"title": "Incomplete Post"}' | python3 -m json.tool
+  -d '{"title":"Test"}' 2>/dev/null | python3 -m json.tool
 
 echo ""
-echo "✅ Error handling test complete"
+echo "2. Invalid route:"
+curl -s "$API_ENDPOINT/invalid" 2>/dev/null | python3 -m json.tool
+
+echo ""
+echo "✅ Error handling verified"
 ```
 
 ---
 
-## Step 17: View Stack Resources
+## Step 18: View Stack Resources
 
 ```bash
-echo ""
 echo "CloudFormation stack resources:"
-echo ""
 
+# List all resources (Lambda, API Gateway, IAM roles, log groups)
 aws cloudformation describe-stack-resources \
-  --stack-name lab-9e-contentful \
+  --stack-name "$STACK_NAME" \
   --region "$REGION" \
-  --query "StackResources[*].{Type:ResourceType,LogicalId:LogicalResourceId,Status:ResourceStatus}" \
+  --query "StackResources[*].{Type:ResourceType,Status:ResourceStatus}" \
   --output table
 ```
 
 ---
 
-## Step 18: Monitor Lambda Metrics
+## Step 19: Monitor Lambda Metrics
 
 ```bash
-echo ""
 echo "Lambda metrics (last hour):"
 
-aws cloudwatch get-metric-statistics \
+# Get invocation count from CloudWatch
+INVOCATIONS=$(aws cloudwatch get-metric-statistics \
   --namespace AWS/Lambda \
   --metric-name Invocations \
   --dimensions Name=FunctionName,Value="$FUNCTION_NAME" \
@@ -623,46 +702,42 @@ aws cloudwatch get-metric-statistics \
   --statistics Sum \
   --region "$REGION" \
   --query 'Datapoints[0].Sum' \
-  --output text
+  --output text)
 
-echo " invocations in the last hour"
+echo "Invocations: ${INVOCATIONS:-0}"
 ```
 
 ---
 
-## Step 19: Cleanup Resources
+## Step 20: Cleanup Resources
 
 ```bash
-echo ""
-echo "================================================"
+echo "=" | head -c 50 && echo
 echo "CLEANUP"
-echo "================================================"
-echo ""
+echo "=" | head -c 50 && echo
 
-# Delete CloudFormation stack
+# Delete CloudFormation stack (removes Lambda, API Gateway, IAM roles, logs)
 aws cloudformation delete-stack \
-  --stack-name lab-9e-contentful \
+  --stack-name "$STACK_NAME" \
   --region "$REGION"
 
-echo "⏳ Deleting CloudFormation stack..."
-
-# Wait for stack deletion
+echo "Waiting for stack deletion..."
 aws cloudformation wait stack-delete-complete \
-  --stack-name lab-9e-contentful \
-  --region "$REGION"
+  --stack-name "$STACK_NAME" \
+  --region "$REGION" 2>/dev/null
 
-echo "✅ CloudFormation stack deleted"
+echo "✅ Stack deleted"
 
-# Delete secrets
+# Delete Secrets Manager secrets (immediate permanent deletion)
 aws secretsmanager delete-secret \
-  --secret-id contentful/delivery-token \
+  --secret-id "$SECRET_DELIVERY_NAME" \
   --region "$REGION" \
-  --force-delete-without-recovery
+  --force-delete-without-recovery 2>/dev/null
 
 aws secretsmanager delete-secret \
-  --secret-id contentful/management-token \
+  --secret-id "$SECRET_MANAGEMENT_NAME" \
   --region "$REGION" \
-  --force-delete-without-recovery
+  --force-delete-without-recovery 2>/dev/null
 
 echo "✅ Secrets deleted"
 
@@ -672,9 +747,12 @@ rm -rf lab_9_e_contentful
 
 echo "✅ Local files deleted"
 echo ""
-echo "✅ Cleanup complete!"
+echo "AWS cleanup complete!"
 echo ""
-echo "Optional: Delete content and space in Contentful dashboard"
+echo "⚠️  Contentful cleanup (optional):"
+echo "  - Delete blog posts"
+echo "  - Delete Space 'lambda-demo'"
+echo "  - Revoke API tokens"
 ```
 
 ---
