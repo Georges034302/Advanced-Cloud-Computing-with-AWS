@@ -1,4 +1,5 @@
 # Lab 9.E: AWS Lambda + Contentful (API-Only CMS Integration)
+<img width="1536" height="1024" alt="AWS-contentful" src="https://github.com/user-attachments/assets/b7fcf7af-0fa7-4454-9148-849d01fb7739" />
 
 ## Objective
 Build a secure **Pattern 2** integration where AWS owns the API boundary and Contentful is used strictly as an **API-only CMS**.
