@@ -101,13 +101,18 @@ read -p "Enter Contentful Space ID: " CONTENTFUL_SPACE_ID
 read -s -p "Enter Content Delivery API token: " CONTENTFUL_DELIVERY_TOKEN
 echo
 
-# Create secret for Delivery token (read-only access to published content)
+# Store or update Delivery token (idempotent - safe to rerun)
 aws secretsmanager create-secret \
   --region "$REGION" \
   --name "$SECRET_DELIVERY_NAME" \
   --secret-string "$CONTENTFUL_DELIVERY_TOKEN" \
   --description "Contentful Delivery API token (read-only)" \
-  --tags Key=Project,Value="$PROJECT_NAME" Key=Environment,Value=Lab
+  --tags Key=Project,Value="$PROJECT_NAME" Key=Environment,Value=Lab \
+  2>/dev/null || \
+aws secretsmanager put-secret-value \
+  --region "$REGION" \
+  --secret-id "$SECRET_DELIVERY_NAME" \
+  --secret-string "$CONTENTFUL_DELIVERY_TOKEN"
 
 echo "✅ Delivery token stored in Secrets Manager"
 
@@ -118,13 +123,18 @@ unset CONTENTFUL_DELIVERY_TOKEN
 read -s -p "Enter Content Management API token: " CONTENTFUL_MANAGEMENT_TOKEN
 echo
 
-# Create secret for Management token (full CRUD access to content)
+# Store or update Management token (idempotent - safe to rerun)
 aws secretsmanager create-secret \
   --region "$REGION" \
   --name "$SECRET_MANAGEMENT_NAME" \
   --secret-string "$CONTENTFUL_MANAGEMENT_TOKEN" \
   --description "Contentful Management API token (admin)" \
-  --tags Key=Project,Value="$PROJECT_NAME" Key=Environment,Value=Lab
+  --tags Key=Project,Value="$PROJECT_NAME" Key=Environment,Value=Lab \
+  2>/dev/null || \
+aws secretsmanager put-secret-value \
+  --region "$REGION" \
+  --secret-id "$SECRET_MANAGEMENT_NAME" \
+  --secret-string "$CONTENTFUL_MANAGEMENT_TOKEN"
 
 echo "✅ Management token stored in Secrets Manager"
 
@@ -240,7 +250,7 @@ Resources:
 Outputs:
   ApiEndpoint:
     Description: "HTTP API endpoint URL"
-    Value: !Sub "https://${ContentfulApi}.execute-api.${AWS::Region}.amazonaws.com"
+    Value: !GetAtt ContentfulApi.ApiEndpoint
     Export:
       Name: !Sub "${AWS::StackName}-ApiEndpoint"
   FunctionName:
@@ -265,7 +275,7 @@ echo "✅ SAM template created: template.yaml"
 ```bash
 # Validate SAM template for syntax errors and CloudFormation compatibility
 echo "Validating SAM template..."
-sam validate --lint
+sam validate
 
 if [ $? -eq 0 ]; then
     echo "✅ Template validation passed"
@@ -411,11 +421,10 @@ def rest_create_post(data):
 
 def lambda_handler(event, context):
     """Main Lambda handler"""
-    print(f"Event: {json.dumps(event)}")
-    
     try:
         method = event["requestContext"]["http"]["method"]
         path = event["requestContext"]["http"]["path"]
+        print(f"{method} {path}")
         
         # Route: GET /posts - Fetch posts using GraphQL
         if method == "GET" and path == "/posts":
@@ -518,6 +527,7 @@ sam deploy \
   --region "$REGION" \
   --capabilities CAPABILITY_IAM \
   --parameter-overrides ContentfulSpaceId="$CONTENTFUL_SPACE_ID" \
+  --resolve-s3 \
   --no-confirm-changeset \
   --no-fail-on-empty-changeset
 
@@ -728,7 +738,11 @@ aws cloudformation wait stack-delete-complete \
 
 echo "✅ Stack deleted"
 
-# Delete Secrets Manager secrets (immediate permanent deletion)
+echo ""
+echo "⚠️  WARNING: The following deletes secrets PERMANENTLY (no recovery possible)"
+read -p "Press Enter to continue or Ctrl+C to abort..."
+
+# Delete Secrets Manager secrets (IRREVERSIBLE - no recovery period)
 aws secretsmanager delete-secret \
   --secret-id "$SECRET_DELIVERY_NAME" \
   --region "$REGION" \
@@ -739,7 +753,7 @@ aws secretsmanager delete-secret \
   --region "$REGION" \
   --force-delete-without-recovery 2>/dev/null
 
-echo "✅ Secrets deleted"
+echo "✅ Secrets permanently deleted"
 
 # Delete local files
 cd ..
