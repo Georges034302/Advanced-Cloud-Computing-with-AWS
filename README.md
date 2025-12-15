@@ -163,6 +163,8 @@ This comprehensive lab series provides hands-on experience with Amazon Web Servi
     *Deploy serverless API using AWS CDK with Python. Define Lambda functions, DynamoDB table, and API Gateway using CDK constructs instead of YAML/JSON. Experience CDK workflow: synth (generate CloudFormation), diff (preview changes), deploy, and destroy. Compare CDK advantages over raw CloudFormation. 
   - [lab_9_d_terraform-vpc.md](session09/lab_9_d_terraform-vpc.md):  
     *Learn Terraform basics with VPC deployment in ap-southeast-2. Write HCL configuration (providers, resources, variables, outputs), configure remote state in S3 with DynamoDB locking, use terraform plan/apply/destroy workflow, and import existing resources. Alternative IaC tool for multi-cloud environments. 
+  - [lab_9_e_aws_lambda_contentful.md](session09/lab_9_e_aws_lambda_contentful.md):  
+    *Build secure serverless Contentful CMS integration with AWS Lambda and API Gateway. Store API tokens in AWS Secrets Manager (encrypted with KMS), deploy Lambda function with Python to interact with Contentful GraphQL (read) and REST Management API (write). Use AWS SAM for infrastructure as code deployment. Pattern 2 architecture: AWS owns API boundary, Contentful provides headless CMS backend. 
 
 </details>
 
