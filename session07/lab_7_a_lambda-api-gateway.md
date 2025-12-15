@@ -265,7 +265,7 @@ EOF
 # Invoke Lambda function
 aws lambda invoke \
   --function-name "$FUNCTION_NAME" \
-  --payload file://test-event-get-joke.json \
+  --payload fileb://test-event-get-joke.json \
   --region "$REGION" \
   response.json
 
