@@ -297,6 +297,5 @@ This comprehensive lab series provides hands-on experience with Amazon Web Servi
 
 ---
 
-#### 🧑‍🏫 Author: Georges Bou Ghantous
-<sub><i>This repository delivers practical AWS training through 16 structured lab sessions covering compute, networking, storage, databases, IAM, containers, serverless, monitoring, IaC, CI/CD, AI/ML, hybrid networking, security, disaster recovery, migration, and cost optimization.</i></sub>
+<sub><i><span style="color:#B0B0B0">👤 Author: Dr. Georges Bou Ghantous</span></i></sub>
 
